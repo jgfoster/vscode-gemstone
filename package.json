@@ -1,14 +1,21 @@
 {
 	"name": "gemstone",
-	"displayName": "GemStone",
-	"description": "GemStone/S 64 Bit tools for Visual Studio Code",
-	"version": "0.0.1",
+	"displayName": "GemStone IDE",
+	"description": "GemStone/S 64 Bit Extension for Visual Studio Code",
+	"version": "0.1.0",
 	"publisher": "jgfoster.net",
 	"engines": {
 		"vscode": "^1.34.0"
 	},
 	"categories": [
-		"Other"
+		"Debuggers",
+		"Programming Languages"
+	],
+	"keywords": [
+		"GemStone",
+		"Smalltalk",
+		"Database",
+		"Object Database"
 	],
 	"activationEvents": [
 		"onCommand:extension.helloWorld"
@@ -25,6 +32,71 @@
 				"title": "Add"
 			}
 		],
+		"configuration": {
+			"type": "object",
+			"title": "GemStone",
+			"properties": {
+				"gemstone.logins": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"title": "Login Parameters",
+						"properties": {
+							"name": {
+								"type": "string",
+								"description": "Your name for this login"
+							},
+							"library": {
+								"type": "string",
+								"description": "Path to libgcits"
+							},
+							"gem_host": {
+								"type": "string",
+								"description": "Hostname or IP address of gem server (NetLDI)"
+							},
+							"stone": {
+								"type": "string",
+								"description": "Stone name"
+							},
+							"gs_user": {
+								"type": "string",
+								"description": "GemStone user name"
+							},
+							"gs_password": {
+								"type": "string",
+								"description": "GemStone password"
+							},
+							"netldi": {
+								"type": "string",
+								"description": "Service name or port number"
+							},
+							"host_user": {
+								"type": "string",
+								"description": "Host OS user name (if NetLDI not in guest mode)"
+							},
+							"host_password": {
+								"type": "string",
+								"description": "Host OS password (if NetLDI not in guest mode)"
+							}
+						}
+					},
+					"default": [
+						{
+							"name": "Default",
+							"library": "/Users/jfoster/lib/libgcits-3.5.0-64.dylib",
+							"gem_host": "localhost",
+							"stone": "gs64stone",
+							"gs_user": "DataCurator",
+							"gs_password": "swordfish",
+							"netldi": "gs64ldi",
+							"host_user": "",
+							"host_password": ""
+						}
+					],
+					"description": "GemStone/S 64 Bit login parameters"
+				}
+			}
+		},
 		"menus": {
 			"view/title": [
 				{
