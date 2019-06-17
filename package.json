@@ -2,7 +2,7 @@
 	"name": "gemstone",
 	"displayName": "GemStone IDE",
 	"description": "GemStone/S 64 Bit Extension for Visual Studio Code",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"publisher": "jgfoster.net",
 	"engines": {
 		"vscode": "^1.34.0"
@@ -18,18 +18,18 @@
 		"Object Database"
 	],
 	"activationEvents": [
-		"onCommand:extension.helloWorld"
+		"onView:gemstone-logins"
 	],
 	"main": "./out/extension.js",
 	"contributes": {
 		"commands": [
 			{
-				"command": "extension.helloWorld",
-				"title": "Hello World"
+				"command": "gemstone.login",
+				"title": "Login"
 			},
 			{
-				"command": "gemstone.addLogin",
-				"title": "Add"
+				"command": "gemstone.logout",
+				"title": "Logout"
 			}
 		],
 		"configuration": {
@@ -42,9 +42,9 @@
 						"type": "object",
 						"title": "Login Parameters",
 						"properties": {
-							"name": {
+							"label": {
 								"type": "string",
-								"description": "Your name for this login"
+								"description": "A label for this login"
 							},
 							"library": {
 								"type": "string",
@@ -82,7 +82,7 @@
 					},
 					"default": [
 						{
-							"name": "Default",
+							"label": "Default",
 							"library": "/Users/jfoster/lib/libgcits-3.5.0-64.dylib",
 							"gem_host": "localhost",
 							"stone": "gs64stone",
@@ -98,10 +98,16 @@
 			}
 		},
 		"menus": {
-			"view/title": [
+			"view/item/context": [
 				{
-					"command": "gemstone.addLogin",
-					"when": "view == gemstone-login"
+					"command": "gemstone.login",
+					"when": "view == gemstone-logins",
+					"group": "inline"
+				},
+				{
+					"command": "gemstone.logout",
+					"when": "view == gemstone-sessions",
+					"group": "inline"
 				}
 			]
 		},
@@ -110,14 +116,14 @@
 				{
 					"id": "gemstone",
 					"title": "GemStone/S Tools",
-					"icon": "media/sparkle32.png"
+					"icon": "resources/sparkle32.png"
 				}
 			]
 		},
 		"views": {
 			"gemstone": [
 				{
-					"id": "gemstone-login",
+					"id": "gemstone-logins",
 					"name": "Logins"
 				},
 				{

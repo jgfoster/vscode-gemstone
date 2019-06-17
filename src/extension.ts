@@ -1,34 +1,38 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
+/*
+ *  gemstone: GemStone/S 64 Bit IDE
+ */
+
 import * as vscode from 'vscode';
+import { LoginsProvider } from './LoginProvider';
+import { Login } from './Login';
+import { SessionsProvider } from './SessionProvider';
+import { Session } from './Session';
 const { GciSession } = require('gci-js');
+
 const config = vscode.workspace.getConfiguration('gemstone');
+var sessions: Session[] = [];
 
-// this method is called when your extension is activated
-// your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
+	const loginsProvider = new LoginsProvider();
+	vscode.window.registerTreeDataProvider('gemstone-logins', loginsProvider);
+	const sessionsProvider = new SessionsProvider(sessions);
+	vscode.window.registerTreeDataProvider('gemstone-sessions', sessionsProvider);
 
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log(config.logins[0].library);
-
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	let disposable = vscode.commands.registerCommand('extension.helloWorld', () => {
-		// The code you place here will be executed every time your command is executed
-
-		const login = config.logins[0];
-		const session = new GciSession(login);
-		const version = session.version();
-		session.logout();
-
-
-		// Display a message box to the user
-		vscode.window.showInformationMessage(version);
+	const loginCommand = vscode.commands.registerCommand('gemstone.login', (login: Login) => {
+		const gciSession = new GciSession(login);
+		const session = new Session(login, gciSession);
+		sessions.push(session);
+		sessionsProvider.refresh();
 	});
+	context.subscriptions.push(loginCommand);
 
-	context.subscriptions.push(disposable);
+	const sessionCommand = vscode.commands.registerCommand('gemstone.logout', (session: Session) => {
+		session.logout();
+		const index = sessions.indexOf(session);
+		sessions.splice(index, 1);
+		sessionsProvider.refresh();
+	});
+	context.subscriptions.push(sessionCommand);
 }
 
 // this method is called when your extension is deactivated
