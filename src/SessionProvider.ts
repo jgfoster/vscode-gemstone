@@ -1,7 +1,5 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { Session } from './Session';
-import { listenerCount } from 'cluster';
 
 export class SessionsProvider implements vscode.TreeDataProvider<Session> {
 	private sessions: Session[];
@@ -24,6 +22,6 @@ export class SessionsProvider implements vscode.TreeDataProvider<Session> {
 		if (element) {	// a Session does not have children
 			return Promise.resolve([]);
 		}
-		return Promise.resolve(this.sessions);
+		return Promise.resolve(this.sessions.filter(each => each.isLoggedIn()));
 	}
 }
