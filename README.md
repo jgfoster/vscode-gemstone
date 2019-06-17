@@ -5,6 +5,7 @@ The `gemstone` Visual Studio Code extension allows you to interact with GemStone
 ## Features
 
 * Log in to GemStone.
+* Execute code in a workspace
 
 ## Requirements
 
@@ -30,7 +31,7 @@ To use GemStone you need to provide a path to a GemStone C Interface (GCI) dynam
 
 ## Release Notes
 
-### 0.1.0
+### 0.1.2
 
-Hook into Visual Studio Code extension framework and log in to a GemStone database.
+Hook into Visual Studio Code extension framework, log in to a GemStone database, execute code.
 
