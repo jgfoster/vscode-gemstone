@@ -22,6 +22,12 @@ export class Session extends vscode.TreeItem {
 		};
 	}
 
+	stringFromExecuteString(input: string): string {
+		const myString = '| x | x := [' + input + '] value printString. ' + 
+			'x size > 1020 ifTrue: [x := (x copyFrom: 1 to: 1020) , \'...\']. x';
+		return this.gciSession.executeFetchBytes(myString, 1024);
+	}
+
 	get tooltip(): string {
 		return this.description;
 	}

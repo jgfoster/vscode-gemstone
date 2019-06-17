@@ -24,6 +24,10 @@
 	"contributes": {
 		"commands": [
 			{
+				"command": "gemstone.displayIt",
+				"title": "Display It"
+			},
+			{
 				"command": "gemstone.login",
 				"title": "Login"
 			},
@@ -97,6 +101,14 @@
 				}
 			}
 		},
+		"keybindings": [
+			{
+				"command": "gemstone.displayIt",
+				"key": "ctrl+d",
+				"mac": "cmd+d",
+				"when": "editorTextFocus"
+			}
+		],
 		"menus": {
 			"view/item/context": [
 				{
