@@ -14,7 +14,21 @@ const sessions: Session[] = [];
 var sessionsProvider: SessionsProvider;
 var statusBarItem: vscode.StatusBarItem;
 
-// DisplayIt command handlerr
+export function activate(context: vscode.ExtensionContext) {
+	// console.log(context.globalStoragePath);
+	createOutputChannel();
+	createViewForLoginList();
+	createViewForSessionList();
+	createStatusBarItem(context);
+	createLoginCommandHandler(context);
+	createLogoutCommandHandler(context);
+	createDisplayItCommandHandler(context);
+}
+
+// this method is called when your extension is deactivated
+export function deactivate() {}
+
+// DisplayIt command handler
 const createDisplayItCommandHandler = (context: vscode.ExtensionContext) => {
 	const displayIt = (textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit, args: any[]) => {
 		if (sessionId === 0) {
@@ -116,16 +130,3 @@ const createViewForSessionList = () => {
 		statusBarItem.text = `GemStone session: ${sessionId}`;
 	});
 };
-
-export function activate(context: vscode.ExtensionContext) {
-	createOutputChannel();
-	createViewForLoginList();
-	createViewForSessionList();
-	createStatusBarItem(context);
-	createLoginCommandHandler(context);
-	createLogoutCommandHandler(context);
-	createDisplayItCommandHandler(context);
-}
-
-// this method is called when your extension is deactivated
-export function deactivate() {}
