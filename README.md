@@ -1,6 +1,6 @@
-# GemStone/S 64 Bit IDE Extension for Visual Studio Code
+# GemStone/S 64 Bit IDE
 
-The `gemstone` Visual Studio Code extension allows you to interact with GemStone with Code.
+The `gemstone` Visual Studio Code extension allows you to interact with [GemStone/S](https://gemtalksystems.com/products/gs64/), a Smalltalk object application server and database.
 
 ## Features
 
@@ -12,14 +12,14 @@ The `gemstone` Visual Studio Code extension allows you to interact with GemStone
 You need to [download](https://gemtalksystems.com/products/gs64/) appropriate libraries and let us know where you put them using the extension settings.
 
 * macOS (`~/lib`)
-* * 3.4.x 
-* * * libgcits-3.4.3-64.dylib
-* * * libfloss-3.4.3-64.dylib
-* * 3.5.x
-* * * libgcits-3.5.0-64.dylib
-* * * libkrb5-3.5.0-64.dylib
-* * * libldap-3.5.0-64.dylib
-* * * libssl-3.5.0-64.dylib
+  * 3.4.x 
+    * libgcits-3.4.3-64.dylib
+    * libfloss-3.4.3-64.dylib
+  * 3.5.x
+    * libgcits-3.5.0-64.dylib
+    * libkrb5-3.5.0-64.dylib
+    * libldap-3.5.0-64.dylib
+    * libssl-3.5.0-64.dylib
 
 ## Extension Settings
 

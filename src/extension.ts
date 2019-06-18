@@ -7,6 +7,7 @@ import { LoginsProvider } from './LoginProvider';
 import { Login } from './Login';
 import { SessionsProvider } from './SessionProvider';
 import { Session } from './Session';
+import { GemStoneFS } from './fileSystemProvider';
 
 var outputChannel: vscode.OutputChannel;
 var sessionId: number = 0;
@@ -16,6 +17,7 @@ var statusBarItem: vscode.StatusBarItem;
 
 export function activate(context: vscode.ExtensionContext) {
 	// console.log(context.globalStoragePath);
+	if (!isValidSetup()) { return; }
 	createOutputChannel();
 	createViewForLoginList();
 	createViewForSessionList();
@@ -26,7 +28,9 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 // this method is called when your extension is deactivated
-export function deactivate() {}
+export function deactivate() {
+	console.log('deactivate');
+}
 
 // DisplayIt command handler
 const createDisplayItCommandHandler = (context: vscode.ExtensionContext) => {
@@ -71,7 +75,7 @@ const createLoginCommandHandler = (context: vscode.ExtensionContext) => {
 		try {
 			session = new Session(login, sessions.length + 1);
 		} catch(error) {
-			vscode.window.showErrorMessage(typeof error);
+			vscode.window.showErrorMessage(error.message);
 			console.error(error);
 			return;
 		}
@@ -80,6 +84,32 @@ const createLoginCommandHandler = (context: vscode.ExtensionContext) => {
 		outputChannel.appendLine('Login ' + session.description);
 		sessionId = session.sessionId;
 		statusBarItem.text = `GemStone session: ${sessionId}`;
+
+		// Create filesystem for this session
+		const scheme = 'gs' + sessionId.toString() + ':/';
+		const gsFileSystem = new GemStoneFS(session);
+		context.subscriptions.push(
+			vscode.workspace.registerFileSystemProvider(
+				scheme.slice(0, -2), 
+				gsFileSystem, 
+				{ isCaseSensitive: true, isReadonly: false }
+			)
+		);
+
+		// Add folder to workspace
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+        const flag = vscode.workspace.updateWorkspaceFolders(
+			workspaceFolders ? workspaceFolders.length : 0,
+			0, 
+			{ 
+				uri: vscode.Uri.parse(scheme), 
+				name: session.description
+			}
+		);
+		if (!flag) {
+			vscode.window.showErrorMessage('Unable to create new workspace folder!');
+			return;
+		}
 	});
 	context.subscriptions.push(disposable);
 };
@@ -93,6 +123,16 @@ const createLogoutCommandHandler = (context: vscode.ExtensionContext) => {
 		if (sessionId === session.sessionId) {
 			sessionId = 0;
 			statusBarItem.text = 'GemStone session: none';
+		}
+
+		// remove folder from workspace
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+		if (workspaceFolders) {
+			const i = workspaceFolders.findIndex(each => 
+				each.uri.toString() === 'gs' + session.sessionId.toString() + ':/');
+			if (i > 0) {
+				vscode.workspace.updateWorkspaceFolders(i, 1);
+			}
 		}
 	});
 	context.subscriptions.push(disposable);
@@ -129,4 +169,22 @@ const createViewForSessionList = () => {
 		sessionId = session.sessionId;
 		statusBarItem.text = `GemStone session: ${sessionId}`;
 	});
+};
+
+const isValidSetup = (): boolean => {
+	const workspaceFolders = vscode.workspace.workspaceFolders;
+	if (!workspaceFolders) {
+		vscode.window.showErrorMessage("GemStone extension requires a workspace!");
+		return false;
+	}
+	for (var i = workspaceFolders.length - 1; i >= 0; i--) {
+		if (workspaceFolders[i].uri.toString().match(/^gs[0-9]+\:\//g)) {
+			vscode.workspace.updateWorkspaceFolders(i, 1);
+		}
+	}
+	if (workspaceFolders.length === 0) {
+		vscode.window.showErrorMessage("GemStone extension requires at least one folder in the workspace!");
+		return false;
+	}
+	return true;
 };
