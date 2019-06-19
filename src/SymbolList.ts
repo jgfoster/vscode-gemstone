@@ -3,12 +3,11 @@ import * as vscode from 'vscode';
 import { Directory } from './Directory';
 import { Session } from './Session';
 import { SymbolDictionary } from './SymbolDictionary';
-import { setFlagsFromString } from 'v8';
 
 export class SymbolList extends Directory {
 
     constructor(session: Session, name: string, data: any) {
-        super(session, name, data);
+        super(session, name);
     }
 
     getChildren(uri: vscode.Uri): [string, vscode.FileType][] {

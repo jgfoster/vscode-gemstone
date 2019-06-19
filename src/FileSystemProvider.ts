@@ -18,9 +18,8 @@ export class GemStoneFS implements vscode.FileSystemProvider {
     root: Directory;
     constructor(session: Session) {
         const sessionId = session.sessionId.toString();
-        console.log('GemStoneFS.constructor(session ' + sessionId + ')');
         this.session = session;
-        this.root = new Directory(this.session, '', null);
+        this.root = new Directory(this.session, this.session.description, null);
         this.createMyDirectory(SymbolDictionary, null, vscode.Uri.parse('gs' + sessionId + ':/Smalltalk'));
         this.createMyDirectory(SymbolList, null, vscode.Uri.parse('gs' + sessionId + ':/SymbolList'));
     }
@@ -64,7 +63,7 @@ export class GemStoneFS implements vscode.FileSystemProvider {
             throw vscode.FileSystemError.FileExists(uri);
         }
         if (!entry) {
-            entry = new File(basename);
+            entry = new File(this.session, basename);
             parent.addEntry(basename, entry);
             this._fireSoon({ type: vscode.FileChangeType.Created, uri });
         }

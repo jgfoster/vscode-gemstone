@@ -2,11 +2,12 @@
 import * as vscode from 'vscode';
 import { Directory } from './Directory';
 import { Session } from './Session';
+import { Class } from './Class';
 
 export class SymbolDictionary extends Directory {
     oop: number | null;
     constructor(session: Session, name: string, data: any) {
-        super(session, name, data);
+        super(session, name);
         if (data) {
             this.oop = data.oop;
             this.size = data.size;
@@ -16,7 +17,6 @@ export class SymbolDictionary extends Directory {
     }
 
     getChildren(uri: vscode.Uri): [string, vscode.FileType][] {
-        console.log('SymbolDictionary.getChildren() - ' + this.name);
         let result: [string, vscode.FileType][] = [];
         try {
             if (!this.entries && this.oop !== null) {
@@ -44,9 +44,9 @@ dict keysAndValuesDo: [:eachKey :eachValue |
 ].
 stream nextPutAll: ']}'; contents.
 `;
-                myString = this.session.stringFromExecuteString(myString, 10240);
+                myString = this.session.stringFromExecuteString(myString, 65535);
                 for (let each of JSON.parse(myString).list) {
-                    let dict = new SymbolDictionary(
+                    let dict = new Class(
                         this.session,
                         each.key, 
                         each);

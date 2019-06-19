@@ -14,7 +14,7 @@ export class Directory implements vscode.FileStat {
     entries: Map<string, File | Directory> | null;
     session: Session;
 
-    constructor(session: Session, name: string, data: any) {
+    constructor(session: Session, name: string, data: any = null) {
         this.type = vscode.FileType.Directory;
         this.ctime = Date.now();
         this.mtime = Date.now();
@@ -32,7 +32,6 @@ export class Directory implements vscode.FileStat {
     }
 
     getChildren(uri: vscode.Uri): [string, vscode.FileType][] {
-        console.log('Directory.getChildren(' + uri.toString() + ')');
         let result: [string, vscode.FileType][] = [];
         if (this.entries) {
             for (const [name, child] of this.entries) {

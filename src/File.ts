@@ -12,8 +12,7 @@ export class File implements vscode.FileStat {
     name: string;
     data?: Uint8Array;
 
-    constructor(name: string) {
-        console.log('File.constructor(' + name + ')');
+    constructor(session: Session, name: string, data: any = null) {
         this.type = vscode.FileType.File;
         this.ctime = Date.now();
         this.mtime = Date.now();
