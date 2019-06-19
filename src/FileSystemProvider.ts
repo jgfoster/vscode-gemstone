@@ -6,47 +6,10 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Session } from './Session';
-
-export class File implements vscode.FileStat {
-
-    type: vscode.FileType;
-    ctime: number;
-    mtime: number;
-    size: number;
-
-    name: string;
-    data?: Uint8Array;
-
-    constructor(name: string) {
-        console.log('File.constructor(' + name + ')');
-        this.type = vscode.FileType.File;
-        this.ctime = Date.now();
-        this.mtime = Date.now();
-        this.size = 0;
-        this.name = name;
-    }
-}
-
-export class Directory implements vscode.FileStat {
-
-    type: vscode.FileType;
-    ctime: number;
-    mtime: number;
-    size: number;
-
-    name: string;
-    entries: Map<string, File | Directory>;
-
-    constructor(name: string) {
-        console.log('Directory.constructor(' + name + ')');
-        this.type = vscode.FileType.Directory;
-        this.ctime = Date.now();
-        this.mtime = Date.now();
-        this.size = 0;
-        this.name = name;
-        this.entries = new Map();
-    }
-}
+import { Directory } from './Directory';
+import { SymbolDictionary } from './SymbolDictionary';
+import { SymbolList } from './SymbolList';
+import { File } from './File';
 
 export type Entry = File | Directory;
 
@@ -57,10 +20,9 @@ export class GemStoneFS implements vscode.FileSystemProvider {
         const sessionId = session.sessionId.toString();
         console.log('GemStoneFS.constructor(session ' + sessionId + ')');
         this.session = session;
-        this.root = new Directory('');
-        this.createDirectory(vscode.Uri.parse('gs' + sessionId + ':/Smalltalk'));
-        this.createDirectory(vscode.Uri.parse('gs' + sessionId + ':/SymbolList'));
-        this.createDirectory(vscode.Uri.parse('gs' + sessionId + ':/Users'));
+        this.root = new Directory(this.session, '', null);
+        this.createMyDirectory(SymbolDictionary, null, vscode.Uri.parse('gs' + sessionId + ':/Smalltalk'));
+        this.createMyDirectory(SymbolList, null, vscode.Uri.parse('gs' + sessionId + ':/SymbolList'));
     }
 
     // --- manage file metadata
@@ -70,13 +32,7 @@ export class GemStoneFS implements vscode.FileSystemProvider {
     }
 
     readDirectory(uri: vscode.Uri): [string, vscode.FileType][] {
-        console.log('GemStoneFS.readDirectory(' + uri.toString() + ')');
-        const entry = this._lookupAsDirectory(uri, false);
-        let result: [string, vscode.FileType][] = [];
-        for (const [name, child] of entry.entries) {
-            result.push([name, child.type]);
-        }
-        return result;
+        return this._lookupAsDirectory(uri, false).getChildren(uri);
     }
 
     // --- manage file contents
@@ -94,7 +50,10 @@ export class GemStoneFS implements vscode.FileSystemProvider {
         console.log('GemStoneFS.writeFile(' + uri.toString() + ')');
         let basename = path.posix.basename(uri.path);
         let parent = this._lookupParentDirectory(uri);
-        let entry = parent.entries.get(basename);
+        let entry;
+        if (parent.entries) {
+            entry = parent.entries.get(basename);
+        }
         if (entry instanceof Directory) {
             throw vscode.FileSystemError.FileIsADirectory(uri);
         }
@@ -106,7 +65,7 @@ export class GemStoneFS implements vscode.FileSystemProvider {
         }
         if (!entry) {
             entry = new File(basename);
-            parent.entries.set(basename, entry);
+            parent.addEntry(basename, entry);
             this._fireSoon({ type: vscode.FileChangeType.Created, uri });
         }
         entry.mtime = Date.now();
@@ -130,10 +89,11 @@ export class GemStoneFS implements vscode.FileSystemProvider {
 
         let newParent = this._lookupParentDirectory(newUri);
         let newName = path.posix.basename(newUri.path);
-
-        oldParent.entries.delete(entry.name);
+        if (oldParent.entries) {
+            oldParent.entries.delete(entry.name);
+        }
         entry.name = newName;
-        newParent.entries.set(newName, entry);
+        newParent.addEntry(newName, entry);
 
         this._fireSoon(
             { type: vscode.FileChangeType.Deleted, uri: oldUri },
@@ -146,7 +106,7 @@ export class GemStoneFS implements vscode.FileSystemProvider {
         let dirname = uri.with({ path: path.posix.dirname(uri.path) });
         let basename = path.posix.basename(uri.path);
         let parent = this._lookupAsDirectory(dirname, false);
-        if (!parent.entries.has(basename)) {
+        if (!parent.entries || !parent.entries.has(basename)) {
             throw vscode.FileSystemError.FileNotFound(uri);
         }
         parent.entries.delete(basename);
@@ -156,16 +116,22 @@ export class GemStoneFS implements vscode.FileSystemProvider {
     }
 
     createDirectory(uri: vscode.Uri): void {
-        console.log('GemStoneFS.createDirectory(' + uri.toString() + ')');
+        this.createMyDirectory(Directory, null, uri);
+    }
+
+    createMyDirectory(classRef: typeof Directory, data: any, uri: vscode.Uri): void {
         let basename = path.posix.basename(uri.path);
         let dirname = uri.with({ path: path.posix.dirname(uri.path) });
         let parent = this._lookupAsDirectory(dirname, false);
 
-        let entry = new Directory(basename);
-        parent.entries.set(entry.name, entry);
+        let entry = new classRef(this.session, basename, data);
+        parent.addEntry(entry.name, entry);
         parent.mtime = Date.now();
         parent.size += 1;
-        this._fireSoon({ type: vscode.FileChangeType.Changed, uri: dirname }, { type: vscode.FileChangeType.Created, uri });
+        this._fireSoon(
+            { type: vscode.FileChangeType.Changed, uri: dirname }, 
+            { type: vscode.FileChangeType.Created, uri }
+        );
     }
 
     // --- lookup
@@ -180,7 +146,7 @@ export class GemStoneFS implements vscode.FileSystemProvider {
                 continue;
             }
             let child: Entry | undefined;
-            if (entry instanceof Directory) {
+            if (entry instanceof Directory && entry.entries) {
                 child = entry.entries.get(part);
             }
             if (!child) {

@@ -9,11 +9,11 @@ import { SessionsProvider } from './SessionProvider';
 import { Session } from './Session';
 import { GemStoneFS } from './fileSystemProvider';
 
-var outputChannel: vscode.OutputChannel;
-var sessionId: number = 0;
+let outputChannel: vscode.OutputChannel;
+let sessionId: number = 0;
 const sessions: Session[] = [];
-var sessionsProvider: SessionsProvider;
-var statusBarItem: vscode.StatusBarItem;
+let sessionsProvider: SessionsProvider;
+let statusBarItem: vscode.StatusBarItem;
 
 export function activate(context: vscode.ExtensionContext) {
 	// console.log(context.globalStoragePath);
@@ -39,7 +39,7 @@ const createDisplayItCommandHandler = (context: vscode.ExtensionContext) => {
 			vscode.window.showErrorMessage('No GemStone session!');
 			return;
 		}
-		var selection: vscode.Selection = textEditor.selection;
+		let selection: vscode.Selection = textEditor.selection;
 		if (selection.isEmpty) {
 			vscode.window.showInformationMessage('Nothing selected! Use <Ctrl>+<L> (<Cmd>+<L> on Mac) to select line.');
 			return;
@@ -51,7 +51,7 @@ const createDisplayItCommandHandler = (context: vscode.ExtensionContext) => {
 			return;
 		}
 		try {
-			const result = ' ' + sessions[sessionId - 1].stringFromExecuteString(text);
+			const result = ' ' + sessions[sessionId - 1].stringFromExecuteString('[' + text + '] value printString');
 			textEditor.edit((editBuilder: vscode.TextEditorEdit) => {
 				editBuilder.insert(selection.end, result);
 			}).then(success => {
@@ -71,7 +71,7 @@ const createDisplayItCommandHandler = (context: vscode.ExtensionContext) => {
 // Login command handler
 const createLoginCommandHandler = (context: vscode.ExtensionContext) => {
 	const disposable = vscode.commands.registerCommand('gemstone.login', (login: Login) => {
-		var session;
+		let session;
 		try {
 			session = new Session(login, sessions.length + 1);
 		} catch(error) {
@@ -92,7 +92,7 @@ const createLoginCommandHandler = (context: vscode.ExtensionContext) => {
 			vscode.workspace.registerFileSystemProvider(
 				scheme.slice(0, -2), 
 				gsFileSystem, 
-				{ isCaseSensitive: true, isReadonly: false }
+				{ isCaseSensitive: true, isReadonly: true }
 			)
 		);
 
@@ -177,7 +177,7 @@ const isValidSetup = (): boolean => {
 		vscode.window.showErrorMessage("GemStone extension requires a workspace!");
 		return false;
 	}
-	for (var i = workspaceFolders.length - 1; i >= 0; i--) {
+	for (let i = workspaceFolders.length - 1; i >= 0; i--) {
 		if (workspaceFolders[i].uri.toString().match(/^gs[0-9]+\:\//g)) {
 			vscode.workspace.updateWorkspaceFolders(i, 1);
 		}
