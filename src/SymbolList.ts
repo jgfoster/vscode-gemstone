@@ -35,7 +35,7 @@ System myUserProfile symbolList do: [:each |
 ].
 stream nextPutAll: ']}'; contents.
 `;
-                myString = this.session.stringFromExecuteString(myString, 1024);
+                myString = this.session.stringFromExecute(myString, 1024);
                 let i = 1;
                 for (let each of JSON.parse(myString).list) {
                     let dict = new SymbolDictionary(

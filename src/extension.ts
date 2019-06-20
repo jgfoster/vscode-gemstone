@@ -84,7 +84,7 @@ const displayIt = (textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit, a
 		return;
 	}
 	try {
-		const result = ' ' + sessions[sessionId - 1].stringFromExecuteString('[' + text + '] value printString');
+		const result = ' ' + sessions[sessionId - 1].stringFromExecute('[' + text + '] value printString');
 		textEditor.edit((editBuilder: vscode.TextEditorEdit) => {
 			editBuilder.insert(selection.end, result);
 		}).then(success => {
@@ -136,6 +136,9 @@ const isValidSetup = (): boolean => {
 const loginHandler = (login: Login) => {
 	let session;
 	try {
+		// give each session an incrementing 1-based identifier
+		// we need the ID to be stable with other sessions logging out
+		// we could consider re-using numbers
 		session = new Session(login, sessions.length + 1);
 	} catch(error) {
 		vscode.window.showErrorMessage(error.message);
@@ -145,64 +148,16 @@ const loginHandler = (login: Login) => {
 	sessions.push(session);
 	sessionsProvider.refresh();
 	outputChannel.appendLine('Login ' + session.description);
-	sessionId = session.sessionId;
-	statusBarItem.text = `GemStone session: ${sessionId}`;
+	statusBarItem.text = `GemStone session: ${session.sessionId}`;
 
 	// Create filesystem for this session
-	const scheme = 'gs' + sessionId.toString();
-	const gsFileSystem = new GemStoneFS(session);
 	context.subscriptions.push(
 		vscode.workspace.registerFileSystemProvider(
-			scheme, 
-			gsFileSystem, 
+			'gs' + session.sessionId.toString(), 
+			new GemStoneFS(session), 
 			{ isCaseSensitive: true, isReadonly: true }
 		)
 	);
-
-	// obtain list of SymbolDictionary instances
-	try {
-		let myString = `
-| comma stream |
-stream := WriteStream on: String new.
-stream nextPutAll: '{"list":['.
-comma := ''.
-System myUserProfile symbolList do: [:each | 
-stream 
-	nextPutAll: comma;
-	nextPutAll: '{"oop":';
-	print: each asOop;
-	nextPutAll: ',"name":"';
-	nextPutAll: each name;
-	nextPutAll: '","size":';
-	print: each size;
-	nextPutAll: '}';
-	yourself.
-comma := ','.
-].
-stream nextPutAll: ']}'; contents.
-`;
-		myString = session.stringFromExecuteString(myString, 1024);
-		const list = JSON.parse(myString).list.map(function(each: any) {
-			return {
-				'uri': vscode.Uri.parse(scheme + ':/' + each.name), 
-				'name': each.name
-			};
-		});
-
-		const workspaceFolders = vscode.workspace.workspaceFolders;
-		const flag = vscode.workspace.updateWorkspaceFolders(
-			workspaceFolders ? workspaceFolders.length : 0,
-			0, 
-			...list
-		);
-		if (!flag) {
-			console.error('Unable to create workspace folder!');
-			vscode.window.showErrorMessage('Unable to create workspace folder!');
-			return;
-		}
-	} catch(e) {
-		console.error(e.message);
-	}
 };
 
 const logoutHandler = (session: Session) => {
@@ -212,27 +167,5 @@ const logoutHandler = (session: Session) => {
 	if (sessionId === session.sessionId) {
 		sessionId = 0;
 		statusBarItem.text = 'GemStone session: none';
-	}
-
-	// remove this session's SymbolDictionaries (folders) from the workspace
-	const prefix = 'gs' + session.sessionId.toString() + ':/';
-	const workspaceFolders = vscode.workspace.workspaceFolders || [];
-	let start, end;
-	for (let i = 0; i < workspaceFolders.length; i++) {
-		if (workspaceFolders[i].uri.toString().startsWith(prefix)) {
-			if (!start) {
-				start = i;
-				end = i;
-			} else {
-				end = i;
-			}
-		}
-	}
-	if (start && end) {
-		const flag = vscode.workspace.updateWorkspaceFolders(start, end - start + 1);
-		if (!flag) {
-			console.log('Unable to remove workspace folders!');
-			vscode.window.showErrorMessage('Unable to remove workspace folders!');
-		}
 	}
 };

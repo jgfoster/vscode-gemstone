@@ -44,7 +44,7 @@ dict keysAndValuesDo: [:eachKey :eachValue |
 ].
 stream nextPutAll: ']}'; contents.
 `;
-                myString = this.session.stringFromExecuteString(myString, 65535);
+                myString = this.session.stringFromExecute(myString, 65535);
                 for (let each of JSON.parse(myString).list) {
                     let dict = new Class(
                         this.session,

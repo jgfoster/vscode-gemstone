@@ -22,11 +22,19 @@ export class Session extends vscode.TreeItem {
 		};
 	}
 
-	stringFromExecuteString(input: string, size: number = 1024): string {
+	oopFromExecuteString(input: string): number {
+		return this.gciSession.execute(input);
+	}
+
+	stringFromExecute(input: string, size: number = 1024): string {
 		const myString = '| x | x := [' + input + '] value. ' + 
 			'x size > ' + (size - 4).toString() + 
 			' ifTrue: [x := (x copyFrom: 1 to: ' + (size - 4).toString() + ') , \'...\']. x';
 		return this.gciSession.executeFetchBytes(myString, size);
+	}
+
+	stringFromPerform(receiver: number, selector: string, oopArray: number[], expectedSize: number): string {
+		return this.gciSession.performFetchBytes(receiver, selector, oopArray, expectedSize);
 	}
 
 	get tooltip(): string {
@@ -43,6 +51,27 @@ export class Session extends vscode.TreeItem {
 
 	logout() {
 		this.gciSession.logout();
+		// remove this session's SymbolDictionaries (folders) from the workspace
+		const prefix = 'gs' + this.sessionId.toString() + ':/';
+		const workspaceFolders = vscode.workspace.workspaceFolders || [];
+		let start, end;
+		for (let i = 0; i < workspaceFolders.length; i++) {
+			if (workspaceFolders[i].uri.toString().startsWith(prefix)) {
+				if (!start) {
+					start = i;
+					end = i;
+				} else {
+					end = i;
+				}
+			}
+		}
+		if (start && end) {
+			const flag = vscode.workspace.updateWorkspaceFolders(start, end - start + 1);
+			if (!flag) {
+				console.log('Unable to remove workspace folders!');
+				vscode.window.showErrorMessage('Unable to remove workspace folders!');
+			}
+		}
 	}
 
 	iconPath = {
