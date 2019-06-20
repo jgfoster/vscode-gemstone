@@ -25,6 +25,29 @@ const methods = [
     ].
     stream nextPutAll: ']}'.
     ^stream contents.`
+,
+`getDictionary: aSymbolDictionary
+| comma dict stream |
+stream := WriteStream on: String new.
+stream nextPutAll: '{"list":['.
+comma := ''.
+aSymbolDictionary keysAndValuesDo: [:eachKey :eachValue | 
+    stream 
+        nextPutAll: comma;
+        nextPutAll: '{"key":"';
+        nextPutAll: eachKey asString;
+        nextPutAll: '","oop":';
+        print: eachValue asOop;
+        nextPutAll: ',"class":"';
+        nextPutAll: eachValue class name asString;
+        nextPutAll: '","classOop":';
+        print: eachValue class asOop;
+        nextPutAll: '}';
+        yourself.
+    comma := ','.
+].
+stream nextPutAll: ']}'.
+^stream contents.`
 ];
 
 let code = `

@@ -16,19 +16,25 @@ export type Entry = File | Directory;
 
 export class GemStoneFS implements vscode.FileSystemProvider {
     session: Session;
+    jadeServer: number;
+    map: Map<any, any>;
     constructor(session: Session) {
         this.session = session;
+        this.jadeServer = 1;    // OOP_ILLEGAL
+        this.map = new Map();
         // obtain list of SymbolDictionary instances
         try {
-            const jadeServer = session.oopFromExecuteString(JadeServer);
-            const myString = session.stringFromPerform(jadeServer, 'getSymbolList', [], 1024);
-		    const list = JSON.parse(myString).list.map(function(each: any) {
+            this.jadeServer = session.oopFromExecuteString(JadeServer);
+            const myString = session.stringFromPerform(this.jadeServer, 'getSymbolList', [], 1024);
+		    const list = JSON.parse(myString).list.map((each: any) => {
+                const uri = vscode.Uri.parse('gs' + session.sessionId.toString() + ':/' + each.name);
+                const dict = new Directory(session, each.name, each);
+                this.map.set(uri.toString(), dict);
                 return {
-                    'uri': vscode.Uri.parse('gs' + session.sessionId.toString() + ':/' + each.name), 
+                    'uri': uri, 
                     'name': each.name
                 };
             });
-
             const workspaceFolders = vscode.workspace.workspaceFolders;
             const flag = vscode.workspace.updateWorkspaceFolders(
                 workspaceFolders ? workspaceFolders.length : 0,
@@ -51,13 +57,34 @@ export class GemStoneFS implements vscode.FileSystemProvider {
         if (uri.toString().includes('.vscode')) {
             throw vscode.FileSystemError.FileNotFound(uri);
         }
-        console.log('stat', uri.toString());
-        throw vscode.FileSystemError.FileNotFound(uri);
+        const entry = this.map.get(uri.toString());
+        if (!entry) {
+            console.error('entry not found!');
+            throw vscode.FileSystemError.FileNotFound(uri);
+        }
+        return entry;
     }
 
     readDirectory(uri: vscode.Uri): [string, vscode.FileType][] {
-        console.log('readDirectory', uri.toString());
-        throw vscode.FileSystemError.FileNotFound(uri);
+        const result: [string, vscode.FileType][] = new Array;
+        try {
+            const dict = this.map.get(uri.toString());
+            const myString = this.session.stringFromPerform(
+                this.jadeServer, 
+                'getDictionary:', 
+                [dict.oop], 
+                65525
+            );
+            JSON.parse(myString).list.forEach((element: any) => {
+                const uri = vscode.Uri.parse(
+                    'gs' + this.session.sessionId.toString() + ':/' + element.key);
+                const global = new File(this.session, element.key, element);
+                result.push([element.key, vscode.FileType.File]);
+            });
+        } catch(e) {
+            console.error(e.message);
+        }
+        return result;
     }
 
     // --- manage file contents
