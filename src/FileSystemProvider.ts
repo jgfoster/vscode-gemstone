@@ -27,16 +27,24 @@ export class GemStoneFS implements vscode.FileSystemProvider {
     // --- manage file metadata
 
     stat(uri: vscode.Uri): vscode.FileStat {
+        if (uri.toString().includes('.vscode')) {
+            throw vscode.FileSystemError.FileNotFound(uri);
+        }
+        console.log('stat', uri.toString());
         return this._lookup(uri, false);
     }
 
     readDirectory(uri: vscode.Uri): [string, vscode.FileType][] {
+        console.log('readDirectory', uri.toString());
         return this._lookupAsDirectory(uri, false).getChildren(uri);
     }
 
     // --- manage file contents
 
     readFile(uri: vscode.Uri): Uint8Array {
+        if (uri.toString().includes('.vscode')) {
+            throw vscode.FileSystemError.FileNotFound(uri);
+        }
         console.log('GemStoneFS.readFile(' + uri.toString() + ')');
         const data = this._lookupAsFile(uri, false).data;
         if (data) {
