@@ -11,6 +11,9 @@ export class File implements vscode.FileStat {
 
     name: string;
     data?: Uint8Array;
+    session: Session;
+    oop: number | null;
+    gsClass: string;
 
     constructor(session: Session, name: string, data: any = null) {
         this.type = vscode.FileType.File;
@@ -18,5 +21,8 @@ export class File implements vscode.FileStat {
         this.mtime = Date.now();
         this.size = 0;
         this.name = name;
+        this.session = session;
+        this.oop = data.oop;
+        this.gsClass = data.class;
     }
 }

@@ -2,17 +2,22 @@
  *  based on https://github.com/microsoft/vscode-extension-samples/blob/master/fsprovider-sample/src/fileSystemProvider.ts
  *--------------------------------------------------------------------------------------------*/
 
-
-import * as path from 'path';
 import * as vscode from 'vscode';
 import { Session } from './Session';
 import { Directory } from './Directory';
-import { SymbolDictionary } from './SymbolDictionary';
-import { SymbolList } from './SymbolList';
 import { File } from './File';
 import JadeServer from './JadeServer';
 
 export type Entry = File | Directory;
+
+function str2ab(str: string): Uint8Array {
+    var buf = new ArrayBuffer(str.length);
+    var bufView = new Uint8Array(buf);
+    for (var i = 0, strLen = str.length; i < strLen; i++) {
+        bufView[i] = str.charCodeAt(i);
+    }
+    return bufView;
+}
 
 export class GemStoneFS implements vscode.FileSystemProvider {
     session: Session;
@@ -53,13 +58,14 @@ export class GemStoneFS implements vscode.FileSystemProvider {
 
     // --- manage file metadata
 
+    // return a FileStat-type (ctime: number, mtime: number, size: number, type: FileType)
     stat(uri: vscode.Uri): vscode.FileStat {
         if (uri.toString().includes('.vscode')) {
             throw vscode.FileSystemError.FileNotFound(uri);
         }
         const entry = this.map.get(uri.toString());
         if (!entry) {
-            console.error('entry not found!');
+            console.error('stat(\'' + uri.toString() + '\') entry not found!');
             throw vscode.FileSystemError.FileNotFound(uri);
         }
         return entry;
@@ -76,9 +82,9 @@ export class GemStoneFS implements vscode.FileSystemProvider {
                 65525
             );
             JSON.parse(myString).list.forEach((element: any) => {
-                const uri = vscode.Uri.parse(
-                    'gs' + this.session.sessionId.toString() + ':/' + element.key);
+                const newUri = vscode.Uri.parse(uri.toString() + '/' + element.key);
                 const global = new File(this.session, element.key, element);
+                this.map.set(newUri.toString(), global);
                 result.push([element.key, vscode.FileType.File]);
             });
         } catch(e) {
@@ -93,8 +99,19 @@ export class GemStoneFS implements vscode.FileSystemProvider {
         if (uri.toString().includes('.vscode')) {
             throw vscode.FileSystemError.FileNotFound(uri);
         }
-        console.log('GemStoneFS.readFile(' + uri.toString() + ')');
-        throw vscode.FileSystemError.FileNotFound();
+        const entry = this.map.get(uri.toString());
+        if (!entry) {
+            console.error('stat(\'' + uri.toString() + '\') entry not found!');
+            throw vscode.FileSystemError.FileNotFound(uri);
+        }
+        let result: Uint8Array;
+        if (entry.gsClass.endsWith(' class')) {
+            const bytes: string = this.session.stringFromPerform(entry.oop, 'fileOutClass', [], 65525);
+            result = str2ab(bytes);
+        } else {
+            result = str2ab('We do not yet support \'' + entry.gsClass + '\' instances!');
+        } 
+        return result;
     }
 
     writeFile(uri: vscode.Uri, content: Uint8Array, options: { create: boolean, overwrite: boolean }): void {
