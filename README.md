@@ -8,29 +8,43 @@ The `gemstone` Visual Studio Code extension allows you to interact with [GemSton
 * Execute code in a workspace
 * View class in Topaz format
 
-## Requirements
+## Instructions
 
-You need to [download](https://gemtalksystems.com/products/gs64/) appropriate libraries and let us know where you put them using the extension settings.
+### Workspace
 
-* macOS (`~/lib`)
-  * 3.4.x 
-    * libgcits-3.4.3-64.dylib
-    * libfloss-3.4.3-64.dylib
-  * 3.5.x
-    * libgcits-3.5.0-64.dylib
-    * libkrb5-3.5.0-64.dylib
-    * libldap-3.5.0-64.dylib
-    * libssl-3.5.0-64.dylib
+To use this extension you need to have a Workspace with at least one open folder. In Code,
+* Select the `New Window` menu
+* Select the `Add Folder to Workspace...` menu and select a convenient folder
+  * While it could be anywhere, consider a place where you could save Smalltalk scripts or have related source code
+* Select the `Save the Workspace as...` menu
 
-## Extension Settings
+### Install Extension
 
-To use GemStone you need to provide a path to a GemStone C Interface (GCI) dynamic library and related login information. Open the user or workspace settings and add one or more entries for `gemstone.logins`.
+* Navigate to the Extensions view 
+  * `<Ctrl>+<Shift>+<P>` then `install extensions`
+* Enter `gemstone`
+* Select and install the GemStone IDE
+
+### Login
+
+You should define at least one login defined. 
+* Open the user settings (with the `Open User Settings` command) or the workspace settings (`Open Workspace Settings`). 
+* Select Extensions from the list on the left, click on GemStone, and click the `Edit in settings.js` link. 
+* At the end of the JSON list, add a new entry for `gemstone.logins`. 
+* This should give you a default set of settings that you can modify or add to. 
+These items should appear in the Logins List when you select the GemStone icon on the left.
 
 ## Known Issues
 
 This extension is primarily a proof-of-concept to show that we can interact with a GemStone server from VSCode. Other than a way to explore the possibilities, it doesn't provide much functionality [yet](https://www.jstor.org/stable/986790). 
 
+Initial development has been with VSCode 1.35.1 on macOS 10.14.5 with Node 12.4.0 and login to GemStone/S 64 Bit 3.5.0 running locally. 
+
 ## Release Notes
+
+### 0.1.5
+
+Download required libraries as needed.
 
 ### 0.1.4
 

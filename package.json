@@ -49,9 +49,9 @@
 								"type": "string",
 								"description": "A label for this login"
 							},
-							"library": {
+							"version": {
 								"type": "string",
-								"description": "Path to libgcits"
+								"description": "GemStone/S 64 Bit version"
 							},
 							"gem_host": {
 								"type": "string",
@@ -86,7 +86,7 @@
 					"default": [
 						{
 							"label": "Default",
-							"library": "/Users/jfoster/lib/libgcits-3.5.0-64.dylib",
+							"version": "3.5.0",
 							"gem_host": "localhost",
 							"stone": "gs64stone",
 							"gs_user": "DataCurator",
@@ -157,7 +157,13 @@
 		"onFileSystem:gs9"
 	],
 	"dependencies": {
-		"gci-js": "^1.0.2"
+		"@types/request": "^2.48.1",
+		"@types/tar": "^4.0.1",
+		"fast-xml-parser": "^3.12.16",
+		"fs": "0.0.1-security",
+		"gci-js": "^1.0.2",
+		"request": "^2.88.0",
+		"tar": "^4.4.10"
 	},
 	"devDependencies": {
 		"typescript": "^3.3.1",

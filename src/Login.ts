@@ -6,9 +6,9 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 
 export class Login extends vscode.TreeItem {
+	library: string | null;
 	constructor(
 		public readonly label: any,
-		public readonly library: string,
 		public readonly version: string,
 		public readonly gem_host: string,
 		public readonly stone: string,
@@ -19,6 +19,7 @@ export class Login extends vscode.TreeItem {
 		public readonly host_password: string
 	) {
 		super(label, vscode.TreeItemCollapsibleState.None);
+		this.library = null;
 	}
 
 	get tooltip(): string {

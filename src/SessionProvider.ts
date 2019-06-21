@@ -18,7 +18,7 @@ export class SessionsProvider implements vscode.TreeDataProvider<Session> {
 		return element;
 	}
 
-	getChildren(element?: Session): Thenable<Session[]> {
+	async getChildren(element?: Session): Promise<Session[]> {
 		if (element) {	// a Session does not have children
 			return Promise.resolve([]);
 		}

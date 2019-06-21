@@ -8,6 +8,10 @@ import { Login } from './Login';
 import { SessionsProvider } from './SessionProvider';
 import { Session } from './Session';
 import { GemStoneFS } from './fileSystemProvider';
+import request = require('request');
+import tar = require('tar');
+import fs = require('fs');
+import parser = require('fast-xml-parser');
 
 let outputChannel: vscode.OutputChannel;
 let sessionId: number = 0;
@@ -28,19 +32,16 @@ export function activate(aContext: vscode.ExtensionContext) {
 	aContext.subscriptions.push(vscode.commands.registerTextEditorCommand('gemstone.displayIt', displayIt));
 }
 
-// this method is called when your extension is deactivated
 export function deactivate() {
 	console.log('deactivate');
 }
 
-// Output Channel to show information
-const createOutputChannel = () => {
+async function createOutputChannel(): Promise<void> {
 	outputChannel = vscode.window.createOutputChannel('GemStone');
 	outputChannel.appendLine('Activated GemStone extension');
-};
+}
 
-// Status bar item
-const createStatusBarItem = (aContext: vscode.ExtensionContext) => {
+async function createStatusBarItem(aContext: vscode.ExtensionContext): Promise<void> {
 	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 	statusBarItem.text = 'GemStone session: none';
 	statusBarItem.command = 'gemstone.showSessionId';
@@ -48,26 +49,24 @@ const createStatusBarItem = (aContext: vscode.ExtensionContext) => {
 	aContext.subscriptions.push(vscode.commands.registerCommand('gemstone.showSessionId', () => {
 		vscode.window.showInformationMessage(`GemStone session: ${sessionId ? sessionId : 'none'}`);
 	}));
-};
+}
 
-// View for Login list
-const createViewForLoginList = () => {
+async function createViewForLoginList(): Promise<void> {
 	const loginsProvider = new LoginsProvider();
 	vscode.window.registerTreeDataProvider('gemstone-logins', loginsProvider);
-};
+}
 
-// View for Session list
-const createViewForSessionList = () => {
+async function createViewForSessionList(): Promise<void> {
 	sessionsProvider = new SessionsProvider(sessions);
 	vscode.window.registerTreeDataProvider('gemstone-sessions', sessionsProvider);
     vscode.commands.registerCommand("gemstone-sessions.selectSession", (session:Session) => {
 		sessionId = session.sessionId;
 		statusBarItem.text = `GemStone session: ${sessionId}`;
 	});
-};
+}
 
 // evaluate a Smalltalk expression found in a TextEditor and insert the value as a string
-const displayIt = (textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit, args: any[]) => {
+function displayIt(textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit, args: any[]) {
 	if (sessionId === 0) {
 		vscode.window.showErrorMessage('No GemStone session!');
 		return;
@@ -93,13 +92,38 @@ const displayIt = (textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit, a
 				textEditor.selection = selection;
 			});
 	} catch(e) {
-		vscode.window.showErrorMessage(e.message);
 		console.error(e.message);
+		vscode.window.showErrorMessage(e.message);
 	}
-};
+}
+
+async function getLibraryURL(name: string, progress: any): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const url = 'http://seaside.gemtalksystems.com/downloads/lib/';
+		progress.report({ message: 'request list of libraries' });
+		request(url, (error, response, body) => {
+			if (error) { reject(error); }
+			const parseResult = parser.validate(body);
+			if( parseResult !== true) {
+				reject(parseResult.err.code + ': ' + parseResult.err.msg);
+			}
+			if (response.statusCode !== 200) {
+				reject(parser.parse(body).html.head.title);
+			}
+			let list = parser.parse(body).html.body.div[0].table.tbody.tr;
+			list = list.map( (each: any) => { return each.td[0].a; } );
+			list.shift();
+			if (list.includes(name)) {
+				resolve(url + name);
+			} else {
+				reject(url + name + ' not found!');
+			}
+		});
+	});
+}
 
 // on activation check to see if we have a workspace and a folder
-const isValidSetup = (): boolean => {
+function isValidSetup(): boolean {
 	const workspaceFolders = vscode.workspace.workspaceFolders;
 	if (!workspaceFolders) {
 		vscode.window.showErrorMessage("GemStone extension requires a workspace!");
@@ -122,7 +146,7 @@ const isValidSetup = (): boolean => {
 		// https://code.visualstudio.com/api/references/vscode-api#workspace
 		const flag = vscode.workspace.updateWorkspaceFolders(start, end - start + 1);
 		if (!flag) {
-			console.log('Unable to remove workspace folders!');
+			console.error('Unable to remove workspace folders!');
 			vscode.window.showErrorMessage('Unable to remove workspace folders!');
 		}
 	}
@@ -131,18 +155,59 @@ const isValidSetup = (): boolean => {
 		return false;
 	}
 	return true;
-};
+}
 
-const loginHandler = (login: Login) => {
+async function pathToLibrary(version: string, progress: any): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const storagePath = context.globalStoragePath;
+		if (!fs.existsSync(storagePath)) { 
+			progress.report({ message: 'Create library directory' });
+			fs.mkdirSync(storagePath);
+		}
+		const libName: string = 'libgcits-' + version + '-64.';
+		let libPath = storagePath + '/' + libName;
+		switch (process.platform) {
+			case 'darwin':
+				libPath = libPath + 'dylib';
+				break;
+			case 'linux':
+				libPath = libPath + 'so';
+				break;
+			case 'win32':
+				libPath = libPath + 'dll';
+				break;
+			default:
+				return Promise.reject('Unrecognized platform: ' + process.platform);
+		} 
+		if (fs.existsSync(libPath)) { 
+			return resolve(libPath); 
+		}
+		getLibraryURL(version + '-' + process.platform + '.tgz', progress).then(
+			(url: string) => { 
+				const writeable = tar.extract({ cwd: storagePath });
+				writeable.on('finish', () => {
+					if (fs.existsSync(libPath)) { resolve(libPath); }
+					reject(libPath + ' not found!');
+				});
+				progress.report({ message: 'Download library' });
+				request(url).pipe(writeable);
+			},
+			(why: string) => { reject(why); }
+		);
+	});
+}
+
+function doLogin(login: Login, progress: any): void {
 	let session;
 	try {
 		// give each session an incrementing 1-based identifier
 		// we need the ID to be stable with other sessions logging out
 		// we could consider re-using numbers
+		progress.report({ message: 'Call library to initiate login' });
 		session = new Session(login, sessions.length + 1);
 	} catch(error) {
-		vscode.window.showErrorMessage(error.message);
 		console.error(error);
+		vscode.window.showErrorMessage(error.message);
 		return;
 	}
 	sessions.push(session);
@@ -151,6 +216,7 @@ const loginHandler = (login: Login) => {
 	statusBarItem.text = `GemStone session: ${session.sessionId}`;
 
 	// Create filesystem for this session
+	progress.report({ message: 'Add SymbolDictionaries to Explorer' });
 	context.subscriptions.push(
 		vscode.workspace.registerFileSystemProvider(
 			'gs' + session.sessionId.toString(), 
@@ -158,9 +224,34 @@ const loginHandler = (login: Login) => {
 			{ isCaseSensitive: true, isReadonly: true }
 		)
 	);
-};
+}
 
-const logoutHandler = (session: Session) => {
+async function loginHandler(login: Login): Promise<void> {
+	vscode.window.withProgress(
+		{ 
+			location: vscode.ProgressLocation.Notification,
+			title: 'Starting login...',
+			cancellable: false
+		 }, 
+		(progress, token) => {
+			return new Promise((resolve, reject) => {
+				pathToLibrary(login.version, progress).then(
+					(path: string) => { 
+						login.library = path; 
+						doLogin(login, progress);
+						resolve();
+					},
+					(why: string) => {
+						vscode.window.showErrorMessage(why);
+						reject();
+					}
+				);
+			}
+		);
+	});
+}
+
+async function logoutHandler(session: Session): Promise<void> {
 	outputChannel.appendLine('Logout ' + session.description);
 	session.logout();
 	sessionsProvider.refresh();
@@ -168,4 +259,4 @@ const logoutHandler = (session: Session) => {
 		sessionId = 0;
 		statusBarItem.text = 'GemStone session: none';
 	}
-};
+}
