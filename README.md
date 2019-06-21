@@ -42,7 +42,7 @@ Initial development has been with VSCode 1.35.1 on macOS 10.14.5 with Node 12.4.
 
 ## Release Notes
 
-### 0.1.5
+### 0.2.0
 
 Download required libraries as needed.
 

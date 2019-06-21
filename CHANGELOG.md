@@ -1,5 +1,9 @@
 # Change Log
 
+### 0.2.0
+
+Download required libraries as needed.
+
 ### 0.1.4
 
 View class in Topaz format.
