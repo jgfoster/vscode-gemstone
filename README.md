@@ -39,17 +39,3 @@ These items should appear in the Logins List when you select the GemStone icon o
 This extension is primarily a proof-of-concept to show that we can interact with a GemStone server from VSCode. Other than a way to explore the possibilities, it doesn't provide much functionality [yet](https://www.jstor.org/stable/986790). 
 
 Initial development has been with VSCode 1.35.1 on macOS 10.14.5 with Node 12.4.0 and login to GemStone/S 64 Bit 3.5.0 running locally. 
-
-## Release Notes
-
-### 0.2.0
-
-Download required libraries as needed.
-
-### 0.1.4
-
-View class in Topaz format.
-
-### 0.1.3
-
-Hook into Visual Studio Code extension framework, log in to a GemStone database, execute code.

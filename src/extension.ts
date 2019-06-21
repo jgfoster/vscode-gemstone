@@ -92,7 +92,6 @@ function displayIt(textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit, a
 				textEditor.selection = selection;
 			});
 	} catch(e) {
-		console.error(e.message);
 		vscode.window.showErrorMessage(e.message);
 	}
 }
@@ -146,7 +145,6 @@ function isValidSetup(): boolean {
 		// https://code.visualstudio.com/api/references/vscode-api#workspace
 		const flag = vscode.workspace.updateWorkspaceFolders(start, end - start + 1);
 		if (!flag) {
-			console.error('Unable to remove workspace folders!');
 			vscode.window.showErrorMessage('Unable to remove workspace folders!');
 		}
 	}
@@ -206,14 +204,14 @@ function doLogin(login: Login, progress: any): void {
 		progress.report({ message: 'Call library to initiate login' });
 		session = new Session(login, sessions.length + 1);
 	} catch(error) {
-		console.error(error);
 		vscode.window.showErrorMessage(error.message);
 		return;
 	}
 	sessions.push(session);
 	sessionsProvider.refresh();
 	outputChannel.appendLine('Login ' + session.description);
-	statusBarItem.text = `GemStone session: ${session.sessionId}`;
+	sessionId = session.sessionId;
+	statusBarItem.text = `GemStone session: ${sessionId}`;
 
 	// Create filesystem for this session
 	progress.report({ message: 'Add SymbolDictionaries to Explorer' });
@@ -238,8 +236,24 @@ async function loginHandler(login: Login): Promise<void> {
 				pathToLibrary(login.version, progress).then(
 					(path: string) => { 
 						login.library = path; 
-						doLogin(login, progress);
-						resolve();
+						if (login.gs_password) {
+							doLogin(login, progress);
+							resolve();
+						} else {
+							vscode.window.showInputBox({
+								ignoreFocusOut: true,
+								password: true,
+								placeHolder: 'swordfish',
+								prompt: 'Enter the GemStone password for ' + login.gs_user,
+								value: 'swordfish'
+							}).then(
+								(value) => {
+									doLogin({...login, 'gs_password': value}, progress);
+									resolve();
+								},
+								(why) => { reject(why) }
+							);
+						}
 					},
 					(why: string) => {
 						vscode.window.showErrorMessage(why);
