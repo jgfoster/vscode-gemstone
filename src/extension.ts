@@ -195,7 +195,7 @@ async function pathToLibrary(version: string, progress: any): Promise<string> {
 	});
 }
 
-function doLogin(login: Login, progress: any): void {
+function doLogin(login: any, progress: any): void {
 	let session;
 	try {
 		// give each session an incrementing 1-based identifier
@@ -251,7 +251,7 @@ async function loginHandler(login: Login): Promise<void> {
 									doLogin({...login, 'gs_password': value}, progress);
 									resolve();
 								},
-								(why) => { reject(why) }
+								(why) => { reject(why); }
 							);
 						}
 					},
