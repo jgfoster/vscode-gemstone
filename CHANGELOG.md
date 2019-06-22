@@ -1,5 +1,7 @@
 # Change Log
 
+### 0.2.2
+* Use webpack to reduce distribution size from 4.8 MB to 300 KB
 ### 0.2.1
 * Fix problem with code execution
 * Prompt for password if not included in settings
