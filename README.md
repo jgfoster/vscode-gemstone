@@ -1,6 +1,6 @@
 # GemStone/S 64 Bit IDE
 
-The `gemstone` Visual Studio Code extension allows you to interact with [GemStone/S](https://gemtalksystems.com/products/gs64/), a Smalltalk object application server and database.
+The `gemstone` Visual Studio Code extension allows you to interact with [GemStone/S](https://gemtalksystems.com/products/gs64/), a Smalltalk object application server and database. See this two-minute [video](https://www.youtube.com/watch?v=gO1t3_a4dKE) showing its operation.
 
 ## Features
 
