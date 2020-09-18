@@ -1,15 +1,17 @@
 {
-	"rules": {
-		"no-string-throw": true,
-		"no-unused-expression": true,
-		"no-duplicate-variable": true,
-		"curly": true,
-		"class-name": true,
-		"semicolon": [
-			true,
-			"always"
+	"compilerOptions": {
+		"module": "commonjs",
+		"target": "es6",
+		"outDir": "out",
+		"lib": [
+			"es6"
 		],
-		"triple-equals": true
+		"sourceMap": true,
+		"rootDir": "src",
+		"strict": true
 	},
-	"defaultSeverity": "warning"
+	"exclude": [
+		"node_modules",
+		".vscode-test"
+	]
 }
