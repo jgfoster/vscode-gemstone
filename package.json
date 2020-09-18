@@ -1,9 +1,9 @@
 {
 	"name": "gemstone",
-	"version": "0.2.2",
+	"version": "0.2.3",
 	"publisher": "jgfoster",
 	"engines": {
-		"vscode": "^1.35.0"
+		"vscode": "^1.49.0"
 	},
 	"license": "MIT",
 	"displayName": "GemStone IDE",
@@ -16,7 +16,8 @@
 		"GemStone",
 		"Smalltalk",
 		"Database",
-		"Object Database"
+		"Object Database",
+		"IDE"
 	],
 	"preview": true,
 	"main": "./dist/extension.js",
@@ -168,21 +169,19 @@
 	"devDependencies": {
 		"@types/mocha": "^2.2.42",
 		"@types/node": "^10.12.21",
-		"ts-loader": "^6.0.4",
+		"@types/vscode": "^1.49.0",
+		"ts-loader": "^6.2.2",
 		"ts-webpack": "^1.0.0",
 		"tslint": "^5.12.1",
 		"typescript": "^3.3.1",
-		"vscode": "^1.1.28",
-		"webpack": "^4.35.0",
-		"webpack-cli": "^3.3.4"
+		"vscode-test": "^1.4.0",
+		"webpack": "^4.44.2",
+		"webpack-cli": "^3.3.12"
 	},
 	"scripts": {
 		"vscode:prepublish": "webpack --mode production",
-		"compile": "webpack --mode none",
-		"watch": "webpack --mode none --watch",
-		"postinstall": "node ./node_modules/vscode/bin/install",
-		"test": "npm run compile && node ./node_modules/vscode/bin/test",
-		"test-compile": "tsc -p ./"
+		"webpack": "webpack --mode development",
+		"webpack-dev": "webpack --mode development --watch"
 	},
 	"icon": "resources/sparkle128.png",
 	"homepage": "https://github.com/jgfoster/vscode-gemstone",

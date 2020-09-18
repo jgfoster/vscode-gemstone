@@ -12,6 +12,8 @@ The `gemstone` Visual Studio Code extension allows you to interact with [GemSton
 
 ### Workspace
 
+Note: To use this extension you do not need to fork, clone, or download the GitHub project. The GitHub repository is needed only for development. The usage is integrated with VS Code and the needed parts are downloaded from the proper places (not GitHub) using the instructions below.
+
 To use this extension you need to have a Workspace with at least one open folder. In Code,
 * Select the `New Window` menu
 * Select the `Add Folder to Workspace...` menu and select a convenient folder
@@ -39,3 +41,22 @@ These items should appear in the Logins List when you select the GemStone icon o
 This extension is primarily a proof-of-concept to show that we can interact with a GemStone server from VSCode. Other than a way to explore the possibilities, it doesn't provide much functionality [yet](https://www.jstor.org/stable/986790). 
 
 Initial development has been with VSCode 1.35.1 on macOS 10.14.5 with Node 12.4.0 and login to GemStone/S 64 Bit 3.5.0 running locally. 
+
+# Development
+
+This is a Visual Studio Code [extension](https://code.visualstudio.com/api) written in TypeScript and running in a Node.js environment.
+
+After a fork/clone/download, execute `npm install` to build your local `./node_modules` directory. The following is [recommended](https://code.visualstudio.com/api/get-started/extension-anatomy) to help with IntelliSense:
+
+```
+export npm_package_engines_vscode="^1.19.0" 
+node ./node_modules/vscode/bin/install
+``` 
+
+We use webpack to [bundle](https://code.visualstudio.com/api/working-with-extensions/bundling-extension) the extension:
+
+```
+npm i --save-dev webpack webpack-cli ts-loader
+```
+
+We use [vsce](https://code.visualstudio.com/api/working-with-extensions/publishing-extension) to manage packaging and publishing: `npm install -g vsce`.

@@ -10,7 +10,7 @@ export class LoginsProvider implements vscode.TreeDataProvider<Login> {
 	}
 
 	refresh(): void {
-		this._onDidChangeTreeData.fire();
+		this._onDidChangeTreeData.fire(undefined);
 	}
 
 	getTreeItem(element: Login): vscode.TreeItem {

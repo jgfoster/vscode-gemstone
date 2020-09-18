@@ -11,7 +11,7 @@ export class SessionsProvider implements vscode.TreeDataProvider<Session> {
 	}
 
 	refresh(): void {
-		this._onDidChangeTreeData.fire();
+		this._onDidChangeTreeData.fire(undefined);
 	}
 
 	getTreeItem(element: Session): vscode.TreeItem {

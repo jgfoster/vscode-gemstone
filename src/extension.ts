@@ -2,7 +2,10 @@
  *  gemstone: GemStone/S 64 Bit IDE for Visual Studio Code
  */
 
+// The module 'vscode' contains the VS Code extensibility API
+// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+
 import { LoginsProvider } from './LoginProvider';
 import { Login } from './Login';
 import { SessionsProvider } from './SessionProvider';
@@ -20,13 +23,27 @@ let sessionsProvider: SessionsProvider;
 let statusBarItem: vscode.StatusBarItem;
 let context: vscode.ExtensionContext;
 
+// this method is called when your extension is activated
+// your extension is activated the very first time the command is executed
 export function activate(aContext: vscode.ExtensionContext) {
+	// Use the console to output diagnostic information (console.log) and errors (console.error)
+	// This line of code will only be executed once when your extension is activated
+	console.log('Congratulations, your extension "gemstone" is now active!');
+
 	context = aContext;
+
+	// GemStone needs a workspace and a folder (I don't recall why!)
 	if (!isValidSetup()) { return; }
+
+	// create various UI components used by this extension
 	createOutputChannel();
 	createViewForLoginList();
 	createViewForSessionList();
 	createStatusBarItem(aContext);
+
+	// The commands have been defined in the package.json file ("contributes"/"commands")
+	// Now provide the implementations of the commands with registerCommand
+	// The commandId parameter must match the command field in package.json
 	aContext.subscriptions.push(vscode.commands.registerCommand('gemstone.login', loginHandler));
 	aContext.subscriptions.push(vscode.commands.registerCommand('gemstone.logout', logoutHandler));
 	aContext.subscriptions.push(vscode.commands.registerTextEditorCommand('gemstone.displayIt', displayIt));
@@ -36,6 +53,7 @@ export function deactivate() {
 	console.log('deactivate');
 }
 
+// https://code.visualstudio.com/api/references/vscode-api#OutputChannel
 async function createOutputChannel(): Promise<void> {
 	outputChannel = vscode.window.createOutputChannel('GemStone');
 	outputChannel.appendLine('Activated GemStone extension');
