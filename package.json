@@ -162,7 +162,7 @@
 		"@types/tar": "^4.0.1",
 		"fast-xml-parser": "^3.12.16",
 		"fs": "0.0.1-security",
-		"gci-js": "^1.0.2",
+		"gci": "^1.1.1",
 		"request": "^2.88.0",
 		"tar": "^4.4.10"
 	},
@@ -178,7 +178,6 @@
 		"mocha": "^8.1.3",
 		"typescript": "^4.0.2",
 		"vscode-test": "^1.4.0",
-
 		"ts-loader": "^6.2.2",
 		"ts-webpack": "^1.0.0",
 		"tslint": "^5.12.1",

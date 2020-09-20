@@ -5,7 +5,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { Login } from './Login';
-const { GciSession } = require('gci-js');
+const { GciSession } = require('gci');
 
 export class Session extends vscode.TreeItem {
 	gciSession: any;
