@@ -237,7 +237,7 @@ function doLogin(login: any, progress: any): void {
 		vscode.workspace.registerFileSystemProvider(
 			'gs' + session.sessionId.toString(), 
 			new GemStoneFS(session), 
-			{ isCaseSensitive: true, isReadonly: true }
+			{ isCaseSensitive: true, isReadonly: false }
 		)
 	);
 }
@@ -251,6 +251,7 @@ async function loginHandler(login: Login): Promise<void> {
 		 }, 
 		(progress, token) => {
 			return new Promise((resolve, reject) => {
+				// bypass download call if libraries are already installed
 				pathToLibrary(login.version, progress).then(
 					(path: string) => { 
 						login.library = path; 

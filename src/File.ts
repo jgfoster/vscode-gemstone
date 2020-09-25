@@ -12,8 +12,9 @@ export class File implements vscode.FileStat {
     name: string;
     data?: Uint8Array;
     session: Session;
-    oop: number | null;
+    oop: number;
     gsClass: string;
+    gsClassOop: number;
 
     constructor(session: Session, name: string, data: any = null) {
         this.type = vscode.FileType.File;
@@ -24,5 +25,6 @@ export class File implements vscode.FileStat {
         this.session = session;
         this.oop = data.oop;
         this.gsClass = data.class;
+        this.gsClassOop = data.classOop;
     }
 }

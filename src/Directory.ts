@@ -14,8 +14,9 @@ export class Directory implements vscode.FileStat {
     entries: Map<string, File | Directory> | null;
     session: Session;
     oop: number | null;
+    isClass: boolean;
 
-    constructor(session: Session, name: string, data: any = null) {
+    constructor(session: Session, name: string, data: any = null, isClass: boolean = false) {
         this.type = vscode.FileType.Directory;
         this.ctime = Date.now();
         this.mtime = Date.now();
@@ -24,6 +25,7 @@ export class Directory implements vscode.FileStat {
         this.entries = null;
         this.session = session;
         this.oop = data.oop || 1;
+        this.isClass = isClass;
     }
 
     addEntry(key: string, value: Directory | File) {

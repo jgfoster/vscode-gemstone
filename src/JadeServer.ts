@@ -28,6 +28,53 @@
  stream nextPutAll: ']}'.
  ^stream contents.`;
 };
+const getSymbolListWithSelectorsCount = (): string => {return `getSymbolListWithSelectorsCount: aSymbolDictionary
+| comma stream |
+stream := WriteStream on: String new.
+stream nextPutAll: '{"list":['.
+comma := ''.
+aSymbolDictionary values collect: [ :each |
+	(each class asString endsWith: ' class') ifTrue: [
+		stream 
+			nextPutAll: comma;
+			nextPutAll: '{"oop":';
+			print: each asOop;
+			nextPutAll: ',"key":"';
+			nextPutAll: each name;
+			nextPutAll: '","size":';
+			print: each selectors size;
+			nextPutAll: '}';
+			yourself.
+		comma := ','.
+	]
+].
+stream nextPutAll: ']}'.
+^stream contents.`;
+};
+const getSelectors = (): string => { return `
+getSelectors: aClass
+| comma stream |
+stream := WriteStream on: String new.
+stream nextPutAll: '{"list":['.
+comma := ''.
+aClass selectors collect: [ :each |
+	stream 
+		nextPutAll: comma;
+		nextPutAll: '{"oop":';
+		print: each asOop;
+		nextPutAll: ',"key":"';
+		nextPutAll: each asSymbol;
+		nextPutAll: '","class":"';
+		nextPutAll: aClass name;
+		nextPutAll: '","classOop":';
+		print: aClass asOop;
+		nextPutAll: '}';
+		yourself.
+	comma := ','.
+].
+stream nextPutAll: ']}'.
+^stream contents.
+`}
  const getSymbolList = (): string => {return `getSymbolList 
  | comma stream |
  stream := WriteStream on: String new.
@@ -53,6 +100,8 @@
 // list the methods
 const methods = [
     getDictionary(),
+    getSymbolListWithSelectorsCount(),
+    getSelectors(),
     getSymbolList()
 ];
 
