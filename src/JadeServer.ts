@@ -75,34 +75,42 @@ aClass selectors collect: [ :each |
 stream nextPutAll: ']}'.
 ^stream contents.
 `}
- const getSymbolList = (): string => {return `getSymbolList 
- | comma stream |
- stream := WriteStream on: String new.
- stream nextPutAll: '{"list":['.
- comma := ''.
- System myUserProfile symbolList do: [:each | 
- stream 
-     nextPutAll: comma;
-     nextPutAll: '{"oop":';
-     print: each asOop;
-     nextPutAll: ',"name":"';
-     nextPutAll: each name;
-     nextPutAll: '","size":';
-     print: each size;
-     nextPutAll: '}';
-     yourself.
- comma := ','.
- ].
- stream nextPutAll: ']}'.
- ^stream contents.`;
+const getSymbolList = (): string => {return `getSymbolList 
+| comma stream |
+stream := WriteStream on: String new.
+stream nextPutAll: '{"list":['.
+comma := ''.
+System myUserProfile symbolList do: [:each | 
+stream 
+    nextPutAll: comma;
+    nextPutAll: '{"oop":';
+    print: each asOop;
+    nextPutAll: ',"name":"';
+    nextPutAll: each name;
+    nextPutAll: '","size":';
+    print: each size;
+    nextPutAll: '}';
+    yourself.
+comma := ','.
+].
+stream nextPutAll: ']}'.
+^stream contents.`;
 };
+const getAncestor = (): string => { return `
+getAncestor: aClass
+| stream |
+stream := WriteStream on: String new.
+stream nextPutAll: aClass superClass asString.
+^stream contents.
+`}
 
 // list the methods
 const methods = [
     getDictionary(),
     getSymbolListWithSelectorsCount(),
     getSelectors(),
-    getSymbolList()
+    getSymbolList(),
+    getAncestor()
 ];
 
 // this puts it all together

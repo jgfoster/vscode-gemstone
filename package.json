@@ -32,6 +32,18 @@
 				"title": "Login"
 			},
 			{
+				"command": "gemstone.selectNamespace",
+				"title": "Select Namespace"
+			},
+			{
+				"command": "gemstone.fetchMethods",
+				"title": "Fetch Methods"
+			},
+			{
+				"command": "gemstone.openDocument",
+				"title": "Open Document"
+			},
+			{
 				"command": "gemstone.logout",
 				"title": "Logout"
 			}
@@ -121,6 +133,13 @@
 					"when": "view == gemstone-sessions",
 					"group": "inline"
 				}
+			],
+			"view/title": [
+				{
+					"command": "gemstone.selectNamespace",
+					"when": "view == gemstone-classes",
+					"group": "navigation"
+				}
 			]
 		},
 		"viewsContainers": {
@@ -141,6 +160,14 @@
 				{
 					"id": "gemstone-sessions",
 					"name": "Sessions"
+				},
+				{
+					"id": "gemstone-classes",
+					"name": "Classes"
+				},
+				{
+					"id": "gemstone-methods",
+					"name": "Methods"
 				}
 			]
 		}
