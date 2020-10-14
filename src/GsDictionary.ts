@@ -2,8 +2,9 @@
 import * as vscode from 'vscode';
 import { File } from './File';
 import { Session } from './Session';
+import { GsClass } from './GsClass';
 
-export class Directory implements vscode.FileStat {
+export class GsDictionary implements vscode.FileStat {
 
     type: vscode.FileType;
     ctime: number;
@@ -11,12 +12,11 @@ export class Directory implements vscode.FileStat {
     size: number;
 
     name: string;
-    entries: Map<string, File | Directory> | null;
+    entries: Map<string, File | GsClass> | null;
     session: Session;
     oop: number | null;
-    isClass: boolean;
 
-    constructor(session: Session, name: string, data: any = null, isClass: boolean = false) {
+    constructor(session: Session, name: string, data: any = null) {
         this.type = vscode.FileType.Directory;
         this.ctime = Date.now();
         this.mtime = Date.now();
@@ -25,14 +25,10 @@ export class Directory implements vscode.FileStat {
         this.entries = null;
         this.session = session;
         this.oop = data.oop || 1;
-        this.isClass = isClass;
     }
 
-    addEntry(key: string, value: Directory | File) {
-        if (!this.entries) {
-            this.entries = new Map();
-        }
-        this.entries.set(key, value);
+    addEntry(session: Session, key: any, element: any) {
+        return new GsClass(this.session, element.key, element);
     }
 
     getChildren(uri: vscode.Uri): [string, vscode.FileType][] {
@@ -43,5 +39,9 @@ export class Directory implements vscode.FileStat {
             }
         }
         return result;
+    }
+
+    getExpansionString(): string {
+        return 'getSymbolListWithSelectorsCount:';
     }
 }

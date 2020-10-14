@@ -4,11 +4,12 @@
 
 import * as vscode from 'vscode';
 import { Session } from './Session';
-import { Directory } from './Directory';
+import { GsDictionary } from './GsDictionary';
+import { GsClass } from './GsClass';
 import { File } from './File';
 import JadeServer from './JadeServer';
 
-export type Entry = File | Directory;
+export type Entry = File | GsDictionary | GsClass;
 
 function str2ab(str: string): Uint8Array {
     var buf = new ArrayBuffer(str.length);
@@ -33,7 +34,7 @@ export class GemStoneFS implements vscode.FileSystemProvider {
             const myString = session.stringFromPerform(this.jadeServer, 'getSymbolList', [], 1024);
 		    const list = JSON.parse(myString).list.map((each: any) => {
                 const uri = vscode.Uri.parse('gs' + session.sessionId.toString() + ':/' + each.name);
-                const dict = new Directory(session, each.name, each);
+                const dict = new GsDictionary(session, each.name, each);
                 this.map.set(uri.toString(), dict);
                 return {
                     'uri': uri, 
@@ -77,15 +78,13 @@ export class GemStoneFS implements vscode.FileSystemProvider {
             const dict = this.map.get(uri.toString());
             const myString = this.session.stringFromPerform(
                 this.jadeServer, 
-                dict.isClass ? 'getSelectors:' : 'getSymbolListWithSelectorsCount:', 
+                dict.getExpansionString(),
                 [dict.oop], 
                 65525
             );
             JSON.parse(myString).list.forEach((element: any) => {
                 const newUri = vscode.Uri.parse(uri.toString() + '/' + element.key);
-                const newEntry = dict.isClass ?
-                    new File(this.session, element.key, element) :
-                    new Directory(this.session, element.key, element, true);
+                const newEntry = dict.addEntry(this.session, element.key, element);
                 this.map.set(newUri.toString(), newEntry);
                 result.push([element.key, newEntry.type]);
             });
