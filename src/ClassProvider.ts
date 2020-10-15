@@ -91,19 +91,30 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 		return element;
 	}
 
+	hasChildren(name: string): boolean {
+		return Object.keys(this.classSuperPairs).indexOf(name) > -1
+	}
+
 	async getChildren(element?: GsClass): Promise<GsClass[]> {
 		if (!this.session) {
 			return Promise.resolve([]);
 		}
 		if (element) {
-			if (Object.keys(this.classSuperPairs).indexOf(element.label) > -1) {
+			if (this.hasChildren(element.label)) {
 				return Promise.resolve(
-					this.classSuperPairs[element.label]
-						.map((obj: any) => new GsClass(obj.key, vscode.TreeItemCollapsibleState.Collapsed, {
-							command: "gemstone.fetchMethods",
-							title: "doc",
-							arguments: [obj]
-						}))
+					this.classSuperPairs[element.label].map((obj: any): GsClass => {
+						return new GsClass(
+							obj.key, 
+							this.hasChildren(obj.key) ?
+								vscode.TreeItemCollapsibleState.Collapsed :
+								vscode.TreeItemCollapsibleState.None, 
+							{
+								command: "gemstone.fetchMethods",
+								title: "doc",
+								arguments: [obj]
+							}
+						)
+					})
 				);
 			} else {
 				return Promise.resolve([]);
