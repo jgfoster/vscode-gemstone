@@ -2,8 +2,9 @@
 import * as vscode from 'vscode';
 import { File } from './File';
 import { Session } from './Session';
+import { GsClassFile } from './GsClassFile';
 
-export class GsClass implements vscode.FileStat { // TODO: rename to Dictionary and make sibling class Class
+export class GsDictionaryFile implements vscode.FileStat {
 
     type: vscode.FileType;
     ctime: number;
@@ -11,7 +12,7 @@ export class GsClass implements vscode.FileStat { // TODO: rename to Dictionary 
     size: number;
 
     name: string;
-    entries: Map<string, File | GsClass> | null;
+    entries: Map<string, File | GsClassFile> | null;
     session: Session;
     oop: number | null;
 
@@ -25,9 +26,9 @@ export class GsClass implements vscode.FileStat { // TODO: rename to Dictionary 
         this.session = session;
         this.oop = data.oop || 1;
     }
-    
+
     addEntry(session: Session, key: any, element: any) {
-        return new File(this.session, element.key, element);
+        return new GsClassFile(this.session, element.key, element);
     }
 
     getChildren(uri: vscode.Uri): [string, vscode.FileType][] {
@@ -41,6 +42,6 @@ export class GsClass implements vscode.FileStat { // TODO: rename to Dictionary 
     }
 
     getExpansionString(): string {
-        return 'getSelectors:';
+        return 'getSymbolListWithSelectorsCount:';
     }
 }

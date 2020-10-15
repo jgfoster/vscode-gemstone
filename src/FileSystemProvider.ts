@@ -4,12 +4,12 @@
 
 import * as vscode from 'vscode';
 import { Session } from './Session';
-import { GsDictionary } from './GsDictionary';
-import { GsClass } from './GsClass';
+import { GsDictionaryFile } from './GsDictionaryFile';
+import { GsClassFile } from './GsClassFile';
 import { File } from './File';
 import JadeServer from './JadeServer';
 
-export type Entry = File | GsDictionary | GsClass;
+export type Entry = File | GsDictionaryFile | GsClassFile;
 
 function str2ab(str: string): Uint8Array {
     var buf = new ArrayBuffer(str.length);
@@ -34,7 +34,7 @@ export class GemStoneFS implements vscode.FileSystemProvider {
             const myString = session.stringFromPerform(this.jadeServer, 'getSymbolList', [], 1024);
 		    const list = JSON.parse(myString).list.map((each: any) => {
                 const uri = vscode.Uri.parse('gs' + session.sessionId.toString() + ':/' + each.name);
-                const dict = new GsDictionary(session, each.name, each);
+                const dict = new GsDictionaryFile(session, each.name, each);
                 this.map.set(uri.toString(), dict);
                 return {
                     'uri': uri, 
