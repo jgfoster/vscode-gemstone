@@ -11,6 +11,7 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 	activeDictionary: {oop: number, name: string, size: number};
 	classHierarchy: any;
 	classSuperPairs: any;
+	allClasses: string[];
 
 	constructor() {
 		this.jadeServer = 1;    // OOP_ILLEGAL
@@ -18,6 +19,7 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 		this.activeDictionary = {};
 		this.classHierarchy = {};
 		this.classSuperPairs = {};
+		this.allClasses = [];
 	}
 
 	refresh(): void {
@@ -120,7 +122,20 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 				return Promise.resolve([]);
 			}
 		}
-		return Promise.resolve([new GsClass("Object", vscode.TreeItemCollapsibleState.Collapsed)]); // TODO: FETCH METHODS FOR OBJECT
+		return Promise.resolve([new GsClass("Object", vscode.TreeItemCollapsibleState.Expanded)]); // TODO: FETCH METHODS FOR OBJECT
+	}
+
+	displayClassFinder() {
+		if (!this.session) {
+			console.log("NO SESSION ACTIVE");
+			return;
+		}
+		if (this.allClasses.length == 0) {
+			var allClassesString = this.session.stringFromPerform(this.jadeServer, 'getAllClasses', [], 65525);
+			this.allClasses = JSON.parse(allClassesString);
+		}
+		vscode.window.showQuickPick(this.allClasses)
+			.then(console.log)
 	}
 }
 

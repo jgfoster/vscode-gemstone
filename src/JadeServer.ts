@@ -103,6 +103,37 @@ stream := WriteStream on: String new.
 stream nextPutAll: aClass superClass asString.
 ^stream contents.
 `}
+const getAllSubclasses = (): string => { return `
+getAllSubclasses: aClass
+
+	| classes |
+	classes := Array new.
+	classes add: aClass name asSymbol.
+	aClass subclasses do: [ :subclass |
+		(self getAllSubclasses: subclass) do: [ :child | classes add: child ].
+	].
+	^ classes
+`}
+const getAllClasses = (): string => { return `
+getAllClasses
+
+	| classes stream comma |
+	classes := self getAllSubclasses: Object.
+	stream := WriteStream on: String new.
+	comma := ''.
+	stream nextPutAll: '['.
+	classes do: [ :class |
+		stream 
+            nextPutAll: comma;
+            nextPutAll: '"';
+			nextPutAll: class asString;
+            nextPutAll: '"';
+			yourself.
+		comma := ','.
+	].
+	stream nextPutAll: ']'.
+	^ stream contents
+`}
 
 // list the methods
 const methods = [
@@ -110,7 +141,9 @@ const methods = [
     getSymbolListWithSelectorsCount(),
     getSelectors(),
     getSymbolList(),
-    getAncestor()
+    getAncestor(),
+    getAllSubclasses(),
+    getAllClasses(),
 ];
 
 // this puts it all together

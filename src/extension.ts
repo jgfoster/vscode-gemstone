@@ -54,6 +54,7 @@ export function activate(aContext: vscode.ExtensionContext) {
 	aContext.subscriptions.push(vscode.commands.registerCommand('gemstone.logout', logoutHandler));
 	aContext.subscriptions.push(vscode.commands.registerCommand('gemstone.selectNamespace', selectNamespaceHandler));
 	aContext.subscriptions.push(vscode.commands.registerTextEditorCommand('gemstone.displayIt', displayIt));
+	aContext.subscriptions.push(vscode.commands.registerCommand('gemstone.displayClassFinder', () => classesProvider.displayClassFinder()));
 	aContext.subscriptions.push(vscode.commands.registerCommand(
 		'gemstone.fetchMethods', 
 		(classObj: any) => {

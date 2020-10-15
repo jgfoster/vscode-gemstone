@@ -119,6 +119,10 @@
 				"key": "ctrl+d",
 				"mac": "cmd+d",
 				"when": "editorTextFocus"
+			},
+			{
+				"command": "gemstone.displayClassFinder",
+				"key": "ctrl+shift+f"
 			}
 		],
 		"menus": {
