@@ -33,42 +33,57 @@ export class MethodsProvider implements vscode.TreeDataProvider<GsMethod> {
 
 	getMethodsFor(obj: any) {
 		this.methodList = [];
-		var classString: string = this.session.stringFromPerform(obj.oop, 'fileOutClass', [], 65525);
-        var classMethodStrings: string = classString.split(`! ------------------- Class methods for ${obj.key}`)[1];
+		this.extractMethods(
+			`! ------------------- Class methods for ${obj.key}`,
+			`classmethod: ${obj.key}`,
+			"classmethod: .*$\n^(.*)",
+			"class",
+			obj.oop
+		)
+		this.extractMethods(
+			`! ------------------- Instance methods for ${obj.key}`,
+			`method: ${obj.key}`,
+			"method: .*$\n^(.*)",
+			"instance",
+			obj.oop
+		)
+	}
+
+	extractMethods(majorSplitter: string, minorSplitter: string, regexString: string, type: string, oop: number) {
+		var classString: string = this.session.stringFromPerform(oop, 'fileOutClass', [], 65525);
+		var classMethodStrings: string = classString.split(majorSplitter)[1];
         var methodStrings: Array<string> = classMethodStrings.split("%");
         for (var i = 0; i < methodStrings.length; i++) {
 			var methodString = methodStrings[i];
-            var re = /classmethod: .*$\n^(.*)/gm;
-            var match = re.exec(methodString); // TODO: fix matches for comparison methods (such as =>) and keyword methods
+			var re = new RegExp(regexString, "gm");
+            var match = re.exec(methodString);
             if (match) {
-				var text = methodString.split(`classmethod: ${obj.key}`)[1].trim();
-				var name = text.split("\n")[0];
-				var method = new GsMethod(name, "class", vscode.TreeItemCollapsibleState.None, {
-					command: "gemstone.openDocument",
-					title: "OPEN",
-					arguments: [text]
-				});
-				this.methodList.push(method);
+				this.extractMethod(methodString, type, minorSplitter);
             }
         }
-		var classString: string = this.session.stringFromPerform(obj.oop, 'fileOutClass', [], 65525);
-        var instanceMethodsString: string = classString.split(`! ------------------- Instance methods for ${obj.key}`)[1];
-        var methodStrings: Array<string> = instanceMethodsString.split("%");
-        for (var i = 0; i < methodStrings.length; i++) {
-			var methodString = methodStrings[i];
-            var re = /method: .*$\n^(.*)/gm;
-            var match = re.exec(methodString); // TODO: fix matches for comparison methods (such as =>) and keyword methods
-            if (match) {
-				var text = methodString.split(`method: ${obj.key}`)[1].trim();
-				var name = text.split("\n")[0];
-				var method = new GsMethod(name, "instance", vscode.TreeItemCollapsibleState.None, {
-					command: "gemstone.openDocument",
-					title: "OPEN",
-					arguments: [text]
-				});
-				this.methodList.push(method);
-            }
-        }
+	}
+
+	extractMethod(methodString: string, type: string, splitter: string) {
+		var text = methodString.split(splitter)[1].trim();
+		var name = text.split("\n")[0];
+		if (name.includes(":")) { // deal with keyword method case
+			var isEven = true;
+			name = name.split(" ").reduce((acc: string, cur: string) => {
+				if (isEven) {
+					acc = acc.concat(cur);
+				}
+				isEven = !isEven;
+				return acc;
+			}, "")
+		} else if ((/[+|-|*|/|&|=|>|||<|~|@]/gm).exec(name)) { // deal with binary method case
+			name = name.split(" ")[0];
+		}
+		var method = new GsMethod(name, type, vscode.TreeItemCollapsibleState.None, {
+			command: "gemstone.openDocument",
+			title: "OPEN",
+			arguments: [text]
+		});
+		this.methodList.push(method);
 	}
 
 	getTreeItem(element: GsMethod): vscode.TreeItem {
