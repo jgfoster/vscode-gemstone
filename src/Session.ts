@@ -22,6 +22,10 @@ export class Session extends vscode.TreeItem {
 		};
 	}
 
+	commit() {
+		this.gciSession.commit();
+	}
+
 	oopFromExecuteString(input: string): number {
 		return this.gciSession.execute(input);
 	}

@@ -4,11 +4,12 @@
 
 import * as vscode from 'vscode';
 import { Session } from './Session';
-import { Directory } from './Directory';
+import { GsDictionaryFile } from './GsDictionaryFile';
+import { GsClassFile } from './GsClassFile';
 import { File } from './File';
 import JadeServer from './JadeServer';
 
-export type Entry = File | Directory;
+export type Entry = File | GsDictionaryFile | GsClassFile;
 
 function str2ab(str: string): Uint8Array {
     var buf = new ArrayBuffer(str.length);
@@ -33,7 +34,7 @@ export class GemStoneFS implements vscode.FileSystemProvider {
             const myString = session.stringFromPerform(this.jadeServer, 'getSymbolList', [], 1024);
 		    const list = JSON.parse(myString).list.map((each: any) => {
                 const uri = vscode.Uri.parse('gs' + session.sessionId.toString() + ':/' + each.name);
-                const dict = new Directory(session, each.name, each);
+                const dict = new GsDictionaryFile(session, each.name, each);
                 this.map.set(uri.toString(), dict);
                 return {
                     'uri': uri, 
@@ -77,15 +78,15 @@ export class GemStoneFS implements vscode.FileSystemProvider {
             const dict = this.map.get(uri.toString());
             const myString = this.session.stringFromPerform(
                 this.jadeServer, 
-                'getDictionary:', 
+                dict.getExpansionString(),
                 [dict.oop], 
                 65525
             );
             JSON.parse(myString).list.forEach((element: any) => {
                 const newUri = vscode.Uri.parse(uri.toString() + '/' + element.key);
-                const global = new File(this.session, element.key, element);
-                this.map.set(newUri.toString(), global);
-                result.push([element.key, vscode.FileType.File]);
+                const newEntry = dict.addEntry(this.session, element.key, element);
+                this.map.set(newUri.toString(), newEntry);
+                result.push([element.key, newEntry.type]);
             });
         } catch(e) {
             console.error(e.message);
@@ -95,28 +96,50 @@ export class GemStoneFS implements vscode.FileSystemProvider {
 
     // --- manage file contents
 
+    getMethodString(entry: File): Uint8Array {
+        const classString: string = this.session.stringFromPerform(entry.gsClassOop, 'fileOutClass', [], 65525);
+        const instanceMethodsString: string = classString.split(`! ------------------- Instance methods for ${entry.gsClass}`)[1];
+        const methodStrings: Array<string> = instanceMethodsString.split("%");
+        for (var methodString of methodStrings) {
+            var re = /method: .*$\n^(.*)/gm;
+            var match = re.exec(methodString); // TODO: fix matches for comparison methods (such as =>) and keyword methods
+            if (match && match[1] == entry.name) {
+                return str2ab(methodString.split(`method: ${entry.gsClass}`)[1].trim());
+            }
+        }
+        return str2ab('We do not yet support \'' + entry.gsClass + '\' instances!');
+    }
+
     readFile(uri: vscode.Uri): Uint8Array {
         if (uri.toString().includes('.vscode')) {
             throw vscode.FileSystemError.FileNotFound(uri);
         }
-        const entry = this.map.get(uri.toString());
+        const entry: File = this.map.get(uri.toString());
         if (!entry) {
             console.error('stat(\'' + uri.toString() + '\') entry not found!');
             throw vscode.FileSystemError.FileNotFound(uri);
         }
-        let result: Uint8Array;
-        if (entry.gsClass.endsWith(' class')) {
-            const bytes: string = this.session.stringFromPerform(entry.oop, 'fileOutClass', [], 65525);
-            result = str2ab(bytes);
-        } else {
-            result = str2ab('We do not yet support \'' + entry.gsClass + '\' instances!');
-        } 
-        return result;
+        return this.getMethodString(entry);
+    }
+
+    uint8ArrayToExecutableString(array: Uint8Array) {
+        var string = String.fromCharCode.apply(null, (array as any));
+        var executableString = string.replace(RegExp(`'`, 'g'), `''`);
+        return executableString;
     }
 
     writeFile(uri: vscode.Uri, content: Uint8Array, options: { create: boolean, overwrite: boolean }): void {
-        console.log('GemStoneFS.writeFile(' + uri.toString() + ')');
-
+        const entry: File = this.map.get(uri.toString());
+        try {
+            var executeString: string = `${entry.gsClass} compileMethod: '${this.uint8ArrayToExecutableString(content)}'`;
+            console.log('GemStoneFS.writeFile(' + uri.toString() + ')');
+            console.log('content: ', executeString);
+            this.session.oopFromExecuteString(executeString);
+            this.session.commit();
+        }
+        catch (e) {
+            console.log("ERROR", e);
+        }
     }
 
     // --- manage files/folders

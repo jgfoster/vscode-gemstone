@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { File } from './File';
 import { Session } from './Session';
 
-export class Directory implements vscode.FileStat {
+export class GsClassFile implements vscode.FileStat {
 
     type: vscode.FileType;
     ctime: number;
@@ -11,7 +11,7 @@ export class Directory implements vscode.FileStat {
     size: number;
 
     name: string;
-    entries: Map<string, File | Directory> | null;
+    entries: Map<string, File | GsClassFile> | null;
     session: Session;
     oop: number | null;
 
@@ -25,12 +25,9 @@ export class Directory implements vscode.FileStat {
         this.session = session;
         this.oop = data.oop || 1;
     }
-
-    addEntry(key: string, value: Directory | File) {
-        if (!this.entries) {
-            this.entries = new Map();
-        }
-        this.entries.set(key, value);
+    
+    addEntry(session: Session, key: any, element: any) {
+        return new File(this.session, element.key, element);
     }
 
     getChildren(uri: vscode.Uri): [string, vscode.FileType][] {
@@ -41,5 +38,9 @@ export class Directory implements vscode.FileStat {
             }
         }
         return result;
+    }
+
+    getExpansionString(): string {
+        return 'getSelectors:';
     }
 }
