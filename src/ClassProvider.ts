@@ -7,8 +7,8 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 	private _onDidChangeTreeData: vscode.EventEmitter<GsClass | undefined> = new vscode.EventEmitter<GsClass | undefined>();
 	readonly onDidChangeTreeData: vscode.Event<GsClass | undefined> = this._onDidChangeTreeData.event;
 	jadeServer: number;
-	symbolDictionaries: {[key: string]: {oop: number, name: string, size: number}};
-	activeDictionary: {oop: number, name: string, size: number};
+	symbolDictionaries: { [key: string]: { oop: number, name: string, size: number } };
+	activeDictionary: { oop: number, name: string, size: number } | null;
 	classHierarchy: any;
 	classSuperPairs: any;
 	allClasses: string[];
@@ -16,7 +16,7 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 	constructor() {
 		this.jadeServer = 1;    // OOP_ILLEGAL
 		this.symbolDictionaries = {};
-		this.activeDictionary = {};
+		this.activeDictionary = { oop: 1, name: '', size: 0 };
 		this.classHierarchy = {};
 		this.classSuperPairs = {};
 		this.allClasses = [];
@@ -28,59 +28,65 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 
 	setSession(session: Session): void {
 		this.session = session;
-        // obtain list of SymbolDictionary instances
-        try {
-            this.jadeServer = session.oopFromExecuteString(JadeServer);
+		// obtain list of SymbolDictionary instances
+		try {
+			this.jadeServer = session.oopFromExecuteString(JadeServer);
 			const myString = session.stringFromPerform(this.jadeServer, 'getSymbolList', [], 1024);
-			JSON.parse(myString).list.forEach((element: {oop: number, name: string, size: number}) => {
+			JSON.parse(myString).list.forEach((element: { oop: number, name: string, size: number }) => {
 				this.symbolDictionaries[element.name] = element;
 			});
-		} catch(e) {
+		} catch (e: any) {
 			console.error("ERROR INSIDE SET SESSION: ", e.message);
 		}
 	}
 
 	setSymbolDictionary(selection: string | undefined): void {
-		this.activeDictionary = this.symbolDictionaries[selection];
-		const myString = this.session.stringFromPerform(
-			this.jadeServer, 
-			'getSymbolListWithSelectorsCount:',
-			[this.activeDictionary.oop], 
-			65525
-		);
-		JSON.parse(myString).list.forEach((element: any) => {
-			var superClass = this.session.stringFromPerform(
+		if (selection && this.session) {
+			this.activeDictionary = this.symbolDictionaries[selection];
+			const myString = this.session.stringFromPerform(
 				this.jadeServer,
-				'getAncestor:',
-				[element.oop],
+				'getSymbolListWithSelectorsCount:',
+				[this.activeDictionary.oop],
 				65525
 			);
-			if (this.classSuperPairs[superClass]) {
-				this.classSuperPairs[superClass].push(element);
-			} else {
-				this.classSuperPairs[superClass] = [element];
-			}
-		});
-		this.classHierarchy = this.getHierarchyFromPairs(this.classSuperPairs);
+			JSON.parse(myString).list.forEach((element: any) => {
+				if (this.session) {
+					var superClass = this.session.stringFromPerform(
+						this.jadeServer,
+						'getAncestor:',
+						[element.oop],
+						65525
+					);
+					if (this.classSuperPairs[superClass]) {
+						this.classSuperPairs[superClass].push(element);
+					} else {
+						this.classSuperPairs[superClass] = [element];
+					}
+				}
+			});
+			this.classHierarchy = this.getHierarchyFromPairs(this.classSuperPairs);
+		} else {
+			this.activeDictionary = null;
+		}
 	}
 
-	getHierarchyFromPairs(pairs, key="Object") {
-		var hierarchy = {};
+	getHierarchyFromPairs(pairs: { [x: string]: any[]; }, key = "Object") {
+		var hierarchy: {[k: string]: any}  = {};
 		if (key in Object.keys(pairs)) {
 			for (var i = 0; i < pairs[key].length; i++) {
 				var tempObj = pairs[key][i];
 				pairs[key].splice(i, 1);
-				if (!hierarchy[key]) {
+				if (!(key in hierarchy)) {
 					hierarchy[key] = [];
 				}
 				hierarchy[key].push(this.getHierarchyFromPairs(pairs, tempObj.key));
 				pairs[key].splice(i, 0, tempObj);
-			}			
+			}
 			return hierarchy;
 		}
-		return {[key]: []};
+		return { [key]: [] };
 	}
-	
+
 	getSession(): Session | undefined {
 		return this.session;
 	}
@@ -106,10 +112,10 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 				return Promise.resolve(
 					this.classSuperPairs[element.label].map((obj: any): GsClass => {
 						return new GsClass(
-							obj.key, 
+							obj.key,
 							this.hasChildren(obj.key) ?
 								vscode.TreeItemCollapsibleState.Collapsed :
-								vscode.TreeItemCollapsibleState.None, 
+								vscode.TreeItemCollapsibleState.None,
 							{
 								command: "gemstone.fetchMethods",
 								title: "doc",

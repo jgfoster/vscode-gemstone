@@ -13,10 +13,10 @@ import { Session } from './Session';
 import { ClassesProvider } from './ClassProvider';
 import { MethodsProvider } from './MethodProvider';
 import { GemStoneFS } from './fileSystemProvider';
-import request = require('request');
-import tar = require('tar');
-import fs = require('fs');
-import parser = require('fast-xml-parser');
+// import request = require('request');
+// import tar = require('tar');
+// import fs = require('fs');
+// import parser = require('fast-xml-parser');
 
 let outputChannel: vscode.OutputChannel;
 let sessionId: number = 0;
@@ -28,7 +28,7 @@ let statusBarItem: vscode.StatusBarItem;
 let context: vscode.ExtensionContext;
 
 // this method is called when your extension is activated
-// your extension is activated the very first time the command is executed
+// your extension is activated when the user selects the extension
 export function activate(aContext: vscode.ExtensionContext) {
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	// This line of code will only be executed once when your extension is activated
@@ -56,14 +56,14 @@ export function activate(aContext: vscode.ExtensionContext) {
 	aContext.subscriptions.push(vscode.commands.registerTextEditorCommand('gemstone.displayIt', displayIt));
 	aContext.subscriptions.push(vscode.commands.registerCommand('gemstone.displayClassFinder', () => classesProvider.displayClassFinder()));
 	aContext.subscriptions.push(vscode.commands.registerCommand(
-		'gemstone.fetchMethods', 
+		'gemstone.fetchMethods',
 		(classObj: any) => {
 			methodsProvider.getMethodsFor(classObj);
 			methodsProvider.refresh();
 		}
 	));
 	aContext.subscriptions.push(vscode.commands.registerCommand(
-		'gemstone.openDocument', 
+		'gemstone.openDocument',
 		(content: string) => {
 			vscode.workspace.openTextDocument({ content })
 		}
@@ -98,7 +98,7 @@ async function createViewForLoginList(): Promise<void> {
 async function createViewForSessionList(): Promise<void> {
 	sessionsProvider = new SessionsProvider(sessions);
 	vscode.window.registerTreeDataProvider('gemstone-sessions', sessionsProvider);
-    vscode.commands.registerCommand("gemstone-sessions.selectSession", (session:Session) => {
+	vscode.commands.registerCommand("gemstone-sessions.selectSession", (session: Session) => {
 		sessionId = session.sessionId;
 		statusBarItem.text = `GemStone session: ${sessionId}`;
 	});
@@ -136,38 +136,13 @@ function displayIt(textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit, a
 		textEditor.edit((editBuilder: vscode.TextEditorEdit) => {
 			editBuilder.insert(selection.end, result);
 		}).then(success => {
-			selection = new vscode.Selection(selection.end.line, selection.end.character, 
+			selection = new vscode.Selection(selection.end.line, selection.end.character,
 				selection.end.line, selection.end.character + result.length);
-				textEditor.selection = selection;
-			});
-	} catch(e) {
+			textEditor.selection = selection;
+		});
+	} catch (e: any) {
 		vscode.window.showErrorMessage(e.message);
 	}
-}
-
-async function getLibraryURL(name: string, progress: any): Promise<string> {
-	return new Promise((resolve, reject) => {
-		const url = 'http://seaside.gemtalksystems.com/downloads/lib/';
-		progress.report({ message: 'request list of libraries' });
-		request(url, (error, response, body) => {
-			if (error) { reject(error); }
-			const parseResult = parser.validate(body);
-			if( parseResult !== true) {
-				reject(parseResult.err.code + ': ' + parseResult.err.msg);
-			}
-			if (response.statusCode !== 200) {
-				reject(parser.parse(body).html.head.title);
-			}
-			let list = parser.parse(body).html.body.div[0].table.tbody.tr;
-			list = list.map( (each: any) => { return each.td[0].a; } );
-			list.shift();
-			if (list.includes(name)) {
-				resolve(url + name);
-			} else {
-				reject(url + name + ' not found!');
-			}
-		});
-	});
 }
 
 // on activation check to see if we have a workspace and a folder
@@ -204,55 +179,15 @@ function isValidSetup(): boolean {
 	return true;
 }
 
-async function pathToLibrary(version: string, progress: any): Promise<string> {
-	return new Promise((resolve, reject) => {
-		const storagePath = context.globalStoragePath;
-		if (!fs.existsSync(storagePath)) { 
-			progress.report({ message: 'Create library directory' });
-			fs.mkdirSync(storagePath);
-		}
-		const libName: string = 'libgcits-' + version + '-64.';
-		let libPath = storagePath + '/' + libName;
-		switch (process.platform) {
-			case 'darwin':
-				libPath = libPath + 'dylib';
-				break;
-			case 'linux':
-				libPath = libPath + 'so';
-				break;
-			case 'win32':
-				libPath = libPath + 'dll';
-				break;
-			default:
-				return Promise.reject('Unrecognized platform: ' + process.platform);
-		} 
-		if (fs.existsSync(libPath)) { 
-			return resolve(libPath); 
-		}
-		getLibraryURL(version + '-' + process.platform + '.tgz', progress).then(
-			(url: string) => { 
-				const writeable = tar.extract({ cwd: storagePath });
-				writeable.on('finish', () => {
-					if (fs.existsSync(libPath)) { resolve(libPath); }
-					reject(libPath + ' not found!');
-				});
-				progress.report({ message: 'Download library' });
-				request(url).pipe(writeable);
-			},
-			(why: string) => { reject(why); }
-		);
-	});
-}
-
 function doLogin(login: any, progress: any): void {
 	let session;
 	try {
 		// give each session an incrementing 1-based identifier
-		// we need the ID to be stable with other sessions logging out
-		// we could consider re-using numbers
+		// we need the ID to be stable
+		// with other sessions logging out we could consider re-using numbers
 		progress.report({ message: 'Call library to initiate login' });
 		session = new Session(login, sessions.length + 1);
-	} catch(error) {
+	} catch (error: any) {
 		vscode.window.showErrorMessage(error.message);
 		return;
 	}
@@ -266,55 +201,45 @@ function doLogin(login: any, progress: any): void {
 
 	// Create filesystem for this session
 	progress.report({ message: 'Add SymbolDictionaries to Explorer' });
-	context.subscriptions.push(
-		vscode.workspace.registerFileSystemProvider(
-			'gs' + session.sessionId.toString(), 
-			new GemStoneFS(session), 
-			{ isCaseSensitive: true, isReadonly: false }
-		)
+	context.subscriptions.push(vscode.workspace.registerFileSystemProvider(
+		'gs' + session.sessionId.toString(),
+		new GemStoneFS(session),
+		{ isCaseSensitive: true, isReadonly: false }
+	)
 	);
 }
 
 async function loginHandler(login: Login): Promise<void> {
 	vscode.window.withProgress(
-		{ 
+		{
 			location: vscode.ProgressLocation.Notification,
 			title: 'Starting login...',
 			cancellable: false
-		 }, 
-		(progress, token) => {
-			return new Promise((resolve, reject) => {
-				// bypass download call if libraries are already installed
-				pathToLibrary(login.version, progress).then(
-					(path: string) => { 
-						login.library = path; 
-						if (login.gs_password) {
-							doLogin(login, progress);
+		},
+		(progress, _) => {
+			return new Promise<void>((resolve, reject) => {
+				if (login.gs_password) {
+					doLogin(login, progress);
+					resolve();
+				} else {
+					vscode.window.showInputBox({
+						ignoreFocusOut: true,
+						password: true,
+						placeHolder: 'swordfish',
+						prompt: 'Enter the GemStone password for ' + login.gs_user,
+						value: 'swordfish'
+					}).then(
+						(value) => {
+							doLogin({ ...login, 'gs_password': value }, progress);
 							resolve();
-						} else {
-							vscode.window.showInputBox({
-								ignoreFocusOut: true,
-								password: true,
-								placeHolder: 'swordfish',
-								prompt: 'Enter the GemStone password for ' + login.gs_user,
-								value: 'swordfish'
-							}).then(
-								(value) => {
-									doLogin({...login, 'gs_password': value}, progress);
-									resolve();
-								},
-								(why) => { reject(why); }
-							);
-						}
-					},
-					(why: string) => {
-						vscode.window.showErrorMessage(why);
-						reject();
-					}
-				);
+						},
+						(why) => { reject(why); }
+					);
+				}
 			}
-		);
-	});
+			);
+		}
+	);
 }
 
 async function logoutHandler(session: Session): Promise<void> {

@@ -3,12 +3,12 @@ import { Session } from './Session';
 import JadeServer from './JadeServer';
 
 function str2ab(str: string): Uint8Array { // TODO: CONDENSE REPEAT CODE
-    var buf = new ArrayBuffer(str.length);
-    var bufView = new Uint8Array(buf);
-    for (var i = 0, strLen = str.length; i < strLen; i++) {
-        bufView[i] = str.charCodeAt(i);
-    }
-    return bufView;
+	var buf = new ArrayBuffer(str.length);
+	var bufView = new Uint8Array(buf);
+	for (var i = 0, strLen = str.length; i < strLen; i++) {
+		bufView[i] = str.charCodeAt(i);
+	}
+	return bufView;
 }
 
 export class MethodsProvider implements vscode.TreeDataProvider<GsMethod> {
@@ -50,17 +50,19 @@ export class MethodsProvider implements vscode.TreeDataProvider<GsMethod> {
 	}
 
 	extractMethods(majorSplitter: string, minorSplitter: string, regexString: string, type: string, oop: number) {
-		var classString: string = this.session.stringFromPerform(oop, 'fileOutClass', [], 65525);
-		var classMethodStrings: string = classString.split(majorSplitter)[1];
-        var methodStrings: Array<string> = classMethodStrings.split("%");
-        for (var i = 0; i < methodStrings.length; i++) {
-			var methodString = methodStrings[i];
-			var re = new RegExp(regexString, "gm");
-            var match = re.exec(methodString);
-            if (match) {
-				this.extractMethod(methodString, type, minorSplitter);
-            }
-        }
+		if (this.session) {
+			var classString: string = this.session.stringFromPerform(oop, 'fileOutClass', [], 65525);
+			var classMethodStrings: string = classString.split(majorSplitter)[1];
+			var methodStrings: Array<string> = classMethodStrings.split("%");
+			for (var i = 0; i < methodStrings.length; i++) {
+				var methodString = methodStrings[i];
+				var re = new RegExp(regexString, "gm");
+				var match = re.exec(methodString);
+				if (match) {
+					this.extractMethod(methodString, type, minorSplitter);
+				}
+			}
+		}
 	}
 
 	extractMethod(methodString: string, type: string, splitter: string) {

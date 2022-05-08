@@ -22,36 +22,30 @@ To use this extension you need to have a Workspace with at least one open folder
 
 ### Install Extension
 
-* Navigate to the Extensions view 
+* Navigate to the Extensions view
   * `<Ctrl>+<Shift>+<P>` then `install extensions`
 * Enter `gemstone`
 * Select and install the GemStone IDE
 
 ### Login
 
-You should define at least one login defined. 
-* Open the user settings (with the `Open User Settings` command) or the workspace settings (`Open Workspace Settings`). 
-* Select Extensions from the list on the left, click on GemStone, and click the `Edit in settings.js` link. 
-* At the end of the JSON list, add a new entry for `gemstone.logins`. 
-* This should give you a default set of settings that you can modify or add to. 
+You should define at least one login defined.
+* Open the user settings (with the `Open User Settings` command) or the workspace settings (`Open Workspace Settings`).
+* Select Extensions from the list on the left, click on GemStone, and click the `Edit in settings.js` link.
+* At the end of the JSON list, add a new entry for `gemstone.logins`.
+* This should give you a default set of settings that you can modify or add to.
 These items should appear in the Logins List when you select the GemStone icon on the left.
 
 ## Known Issues
 
-This extension is primarily a proof-of-concept to show that we can interact with a GemStone server from VSCode. Other than a way to explore the possibilities, it doesn't provide much functionality [yet](https://www.jstor.org/stable/986790). 
+This extension is primarily a proof-of-concept to show that we can interact with a GemStone server from VSCode. Other than a way to explore the possibilities, it doesn't provide much functionality [yet](https://www.jstor.org/stable/986790).
 
-Initial development has been with VSCode 1.35.1 on macOS 10.14.5 with Node 12.4.0 and login to GemStone/S 64 Bit 3.5.0 running locally. 
+Initial development has been with VSCode 1.35.1 on macOS 10.14.5 with Node 12.4.0 and login to GemStone/S 64 Bit 3.5.0 running locally.
 
 # Development
 
 This is a Visual Studio Code [extension](https://code.visualstudio.com/api) written in TypeScript and running in a Node.js environment.
 
-After a fork/clone/download, execute `npm install` to build your local `./node_modules` directory. The following is [recommended](https://code.visualstudio.com/api/get-started/extension-anatomy) to help with IntelliSense:
-
-```
-export npm_package_engines_vscode="^1.19.0" 
-node ./node_modules/vscode/bin/install
-``` 
 
 We use webpack to [bundle](https://code.visualstudio.com/api/working-with-extensions/bundling-extension) the extension:
 

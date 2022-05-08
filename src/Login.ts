@@ -6,29 +6,18 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 
 export class Login extends vscode.TreeItem {
-	library: string | null;
 	constructor(
 		public readonly label: any,
-		public readonly version: string,
 		public readonly gem_host: string,
-		public readonly stone: string,
+		public readonly gem_port: number,
 		public readonly gs_user: string,
 		public readonly gs_password: string,
-		public readonly netldi: string,
-		public readonly host_user: string,
-		public readonly host_password: string
 	) {
 		super(label, vscode.TreeItemCollapsibleState.None);
-		this.library = null;
+		this.tooltip = `${this.gs_user} on ${this.gem_host}:${this.gem_port}`;
+		this.description = this.tooltip;
 	}
-
-	get tooltip(): string {
-		return `${this.gs_user} in ${this.stone} (${this.version}) on ${this.gem_host}`;
-	}
-
-	get description(): string {
-		return this.tooltip;
-	}
+	return: any;
 
 	iconPath = {
 		light: path.join(__filename, '..', '..', 'resources', 'light', 'Login.svg'),

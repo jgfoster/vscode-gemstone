@@ -20,6 +20,8 @@ export class Session extends vscode.TreeItem {
 			title: 'Select session',
 			arguments: [this]
 		};
+		this.tooltip = `${this.sessionId}: ${this.login.tooltip}`;
+		this.description = this.tooltip;
 	}
 
 	commit() {
@@ -31,22 +33,14 @@ export class Session extends vscode.TreeItem {
 	}
 
 	stringFromExecute(input: string, size: number = 1024): string {
-		const myString = '| x | x := [' + input + '] value. ' + 
-			'x size > ' + (size - 4).toString() + 
+		const myString = '| x | x := [' + input + '] value. ' +
+			'x size > ' + (size - 4).toString() +
 			' ifTrue: [x := (x copyFrom: 1 to: ' + (size - 4).toString() + ') , \'...\']. x';
 		return this.gciSession.executeFetchBytes(myString, size);
 	}
 
 	stringFromPerform(receiver: number, selector: string, oopArray: number[], expectedSize: number): string {
 		return this.gciSession.performFetchBytes(receiver, selector, oopArray, expectedSize);
-	}
-
-	get tooltip(): string {
-		return this.description;
-	}
-
-	get description(): string {
-		return `${this.sessionId}: ${this.login.gs_user} in ${this.login.stone} (${this.login.version}) on ${this.login.gem_host}`;
 	}
 
 	isLoggedIn() {

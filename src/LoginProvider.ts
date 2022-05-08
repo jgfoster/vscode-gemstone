@@ -23,16 +23,12 @@ export class LoginsProvider implements vscode.TreeDataProvider<Login> {
 		}
 		const config = vscode.workspace.getConfiguration('gemstone');
 		const logins = config.logins.map((login: any) => {
-			return new Login( 
-				login.label, 
-				login.version, 
-				login.gem_host, 
-				login.stone, 
-				login.gs_user, 
-				login.gs_password, 
-				login.netldi, 
-				login.host_user, 
-				login.host_password
+			return new Login(
+				login.label,
+				login.gem_host,
+				login.gem_port,
+				login.stone,
+				login.gs_user
 			);
 		});
 		if (!config || !logins || logins.length === 0) {
