@@ -33,7 +33,6 @@ export function activate(aContext: vscode.ExtensionContext) {
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	// This line of code will only be executed once when your extension is activated
 	console.log('Congratulations, your extension "gemstone" is now active!');
-
 	context = aContext;
 
 	// GemStone needs a workspace and a folder (I don't recall why!)
@@ -191,22 +190,22 @@ function doLogin(login: any, progress: any): void {
 		vscode.window.showErrorMessage(error.message);
 		return;
 	}
-	sessions.push(session);
-	sessionsProvider.refresh();
-	classesProvider.setSession(session);
-	methodsProvider.setSession(session);
-	outputChannel.appendLine('Login ' + session.description);
-	sessionId = session.sessionId;
-	statusBarItem.text = `GemStone session: ${sessionId}`;
+	// sessions.push(session);
+	// sessionsProvider.refresh();
+	// classesProvider.setSession(session);
+	// methodsProvider.setSession(session);
+	// outputChannel.appendLine('Login ' + session.description);
+	// sessionId = session.sessionId;
+	// statusBarItem.text = `GemStone session: ${sessionId}`;
 
-	// Create filesystem for this session
-	progress.report({ message: 'Add SymbolDictionaries to Explorer' });
-	context.subscriptions.push(vscode.workspace.registerFileSystemProvider(
-		'gs' + session.sessionId.toString(),
-		new GemStoneFS(session),
-		{ isCaseSensitive: true, isReadonly: false }
-	)
-	);
+	// // Create filesystem for this session
+	// progress.report({ message: 'Add SymbolDictionaries to Explorer' });
+	// context.subscriptions.push(vscode.workspace.registerFileSystemProvider(
+	// 	'gs' + session.sessionId.toString(),
+	// 	new GemStoneFS(session),
+	// 	{ isCaseSensitive: true, isReadonly: false }
+	// )
+	// );
 }
 
 async function loginHandler(login: Login): Promise<void> {

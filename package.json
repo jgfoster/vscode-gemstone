@@ -2,12 +2,12 @@
 	"name": "gemstone",
 	"displayName": "GemStone IDE",
 	"description": "GemStone/S IDE for Visual Studio Code",
-	"version": "0.2.3",
+	"version": "0.3.0",
 	"preview": true,
 	"publisher": "jgfoster",
 	"license": "MIT",
 	"engines": {
-		"vscode": "^1.49.0"
+		"vscode": "^1.67.0"
 	},
 	"categories": [
 		"Debuggers",
@@ -62,17 +62,13 @@
 								"type": "string",
 								"description": "A label for this login"
 							},
-							"version": {
-								"type": "string",
-								"description": "GemStone/S 64 Bit version"
-							},
 							"gem_host": {
 								"type": "string",
-								"description": "Hostname or IP address of gem server (NetLDI)"
+								"description": "Hostname or IP address of gem server"
 							},
-							"stone": {
-								"type": "string",
-								"description": "Stone name"
+							"gem_port": {
+								"type": "number",
+								"description": "Gem server port"
 							},
 							"gs_user": {
 								"type": "string",
@@ -81,28 +77,18 @@
 							"gs_password": {
 								"type": "string",
 								"description": "GemStone password"
-							},
-							"netldi": {
-								"type": "string",
-								"description": "Service name or port number"
-							},
-							"host_user": {
-								"type": "string",
-								"description": "Host OS user name (if NetLDI not in guest mode)"
-							},
-							"host_password": {
-								"type": "string",
-								"description": "Host OS password (if NetLDI not in guest mode)"
 							}
 						}
 					},
-					"default": [{
+					"default": [
+						{
 							"label": "Default",
 							"gem_host": "localhost",
 							"gem_port": 50378,
 							"gs_user": "DataCurator",
 							"gs_password": "swordfish"
-						}],
+						}
+					],
 					"description": "GemStone/S 64 Bit login parameters"
 				}
 			}
@@ -189,13 +175,15 @@
 		"fs": "0.0.1-security",
 		"gci": "^1.1.1",
 		"request": "^2.88.0",
-		"tar": "^4.4.18"
+		"tar": "^4.4.18",
+		"ws": "^8.6.0"
 	},
 	"devDependencies": {
 		"@types/glob": "^7.1.3",
 		"@types/mocha": "^8.0.0",
 		"@types/node": "^14.0.27",
 		"@types/vscode": "^1.49.0",
+		"@types/ws": "^8.5.3",
 		"@typescript-eslint/eslint-plugin": "^4.1.1",
 		"@typescript-eslint/parser": "^4.1.1",
 		"eslint": "^7.9.0",

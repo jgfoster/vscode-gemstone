@@ -27,8 +27,8 @@ export class LoginsProvider implements vscode.TreeDataProvider<Login> {
 				login.label,
 				login.gem_host,
 				login.gem_port,
-				login.stone,
-				login.gs_user
+				login.gs_user,
+				login.gs_password
 			);
 		});
 		if (!config || !logins || logins.length === 0) {
