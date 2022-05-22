@@ -185,13 +185,17 @@ function doLogin(login: any, progress: any): void {
 		// we need the ID to be stable
 		// with other sessions logging out we could consider re-using numbers
 		progress.report({ message: 'Call library to initiate login' });
-		session = new Session(login, sessions.length + 1);
+		session = new Session(
+			login,
+			sessions.length + 1,
+			function (session: Session) { console.log("login", session); },
+			function (session: Session) { console.log("logout", session); });
 	} catch (error: any) {
 		vscode.window.showErrorMessage(error.message);
 		return;
 	}
-	// sessions.push(session);
-	// sessionsProvider.refresh();
+	sessions.push(session);
+	sessionsProvider.refresh();
 	// classesProvider.setSession(session);
 	// methodsProvider.setSession(session);
 	// outputChannel.appendLine('Login ' + session.description);
