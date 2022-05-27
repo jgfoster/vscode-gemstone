@@ -11,20 +11,17 @@ const WebSocket = require("ws");
 export class Session extends vscode.TreeItem {
 	session: String;
 	socket: typeof WebSocket;
-	_onLogin!: (session: Session) => void;
-	_onLogout!: (session: Session) => void;
+	version: String;
 	constructor(
 		public readonly login: Login,
 		public readonly sessionId: number,
-		_onLogin: (session: Session) => void,
-		_onLogout: (session: Session) => void
+		private _onLogin: Function = (_: Session) => { },
+		private _onLogout: Function = (_: Session) => { }
 	) {
 		super(login.label, vscode.TreeItemCollapsibleState.None);
 		this.session = '';
+		this.version = '';
 		this.getSocket();
-		console.log(this._onLogin, this._onLogout);
-		// this._onLogin(this);
-		// this._onLogout(this);
 		this.command = {
 			command: 'gemstone-sessions.selectSession',
 			title: 'Select session',
@@ -36,7 +33,7 @@ export class Session extends vscode.TreeItem {
 
 	getSocket() {
 		this.socket = new WebSocket(`ws://${this.login.gem_host}:${this.login.gem_port}/webSocket.gs`);
-		 this.socket.on('close', (event: any) => {
+		this.socket.on('close', (event: any) => {
 			console.log('close', event);
 		});
 		this.socket.on('error', (event: any) => {
@@ -44,14 +41,17 @@ export class Session extends vscode.TreeItem {
 		});
 		this.socket.on('message', (event: any) => {
 			let obj = JSON.parse(String.fromCharCode(...event));
-			console.log(obj);
+			// console.log(obj);
 			switch (obj._request) {
 				case "getGciVersion":
-					console.log("getGciVersion", obj.version.split(' ')[0]);
+					this.version = obj.version.split(' ')[0];
 					break;
 				case "login":
-					console.log("login", obj.result);
+					this.session = obj.result;
 					this._onLogin(this);
+					break;
+				case "logout":
+					this._onLogout(this);
 					break;
 				default:
 					console.log(obj);
@@ -70,7 +70,7 @@ export class Session extends vscode.TreeItem {
 					'"username": "' + this.login.gs_user + '", ' +
 					'"password": "' + this.login.gs_password + '"' +
 					'}';
-					this.socket.send(json, {}, (ex: any) => {
+				this.socket.send(json, {}, (ex: any) => {
 					if (typeof ex !== "undefined") {
 						console.log(ex);
 					}
