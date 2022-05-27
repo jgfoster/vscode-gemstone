@@ -32,7 +32,7 @@ let context: vscode.ExtensionContext;
 export function activate(aContext: vscode.ExtensionContext) {
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "gemstone" is now active!');
+	// console.log('Congratulations, your extension "gemstone" is now active!');
 	context = aContext;
 
 	// GemStone needs a workspace and a folder (I don't recall why!)
@@ -178,6 +178,14 @@ function isValidSetup(): boolean {
 	return true;
 }
 
+function onLogin(session: Session): void {
+	console.log("extension login callback", session);
+}
+
+function onLogout(session: Session): void {
+	console.log("extension logout callback", session);
+}
+
 function doLogin(login: any, progress: any): void {
 	let session;
 	try {
@@ -188,8 +196,9 @@ function doLogin(login: any, progress: any): void {
 		session = new Session(
 			login,
 			sessions.length + 1,
-			function (session: Session) { console.log("login", session); },
-			function (session: Session) { console.log("logout", session); });
+			onLogin,
+			onLogout
+		);
 	} catch (error: any) {
 		vscode.window.showErrorMessage(error.message);
 		return;
