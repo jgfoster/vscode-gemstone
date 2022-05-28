@@ -46,6 +46,9 @@ Initial development has been with VSCode 1.35.1 on macOS 10.14.5 with Node 12.4.
 
 This is a Visual Studio Code [extension](https://code.visualstudio.com/api) written in TypeScript and running in a Node.js environment.
 
+```
+npm install
+```
 
 We use webpack to [bundle](https://code.visualstudio.com/api/working-with-extensions/bundling-extension) the extension:
 
