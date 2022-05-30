@@ -23,11 +23,6 @@ export class Session extends vscode.TreeItem {
 	) {
 		super(_login.label, vscode.TreeItemCollapsibleState.None);
 		this.sessionId = ++sessionCounter;
-		this.command = {
-			command: 'gemstone-sessions.selectSession',
-			title: 'Select session',
-			arguments: [this]
-		};
 		this.tooltip = `${this.sessionId}: ${this._login.tooltip}`;
 		this.description = this.tooltip;
 	}
@@ -114,10 +109,16 @@ export class Session extends vscode.TreeItem {
 		}
 	}
 
-	async getVersion(): Promise<Map<string, any>> {
+	async getVersion(): Promise<void> {
 		const json = new Map;
 		json.set("request", "getGciVersion");
-		return this.send(json);
+		try {
+			const response = await this.send(json);
+			this.version = response.version.split(' ')[0];
+			Promise.resolve();
+		} catch (error) {
+			Promise.reject(error);
+		}
 	}
 
 	commit() {

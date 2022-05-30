@@ -26,6 +26,7 @@ let outputChannel: vscode.OutputChannel;
 const sessions: Session[] = [];
 const statusBarItem: vscode.StatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 const sessionsProvider = new SessionsProvider(sessions);
+let sessionsTreeView: vscode.TreeView<Session>;
 
 let context: vscode.ExtensionContext;
 
@@ -108,15 +109,11 @@ async function createViewForLoginList(): Promise<void> {
 }
 
 async function createViewForSessionList(): Promise<void> {
-	vscode.window.registerTreeDataProvider('gemstone-sessions', sessionsProvider);
-	vscode.commands.registerCommand("gemstone-sessions.selectSession", (session: Session) => {
-		currentSession = session;
-		statusBarItem.text = `GemStone session: ${currentSession.sessionId}`;
-	});
+	sessionsTreeView = vscode.window.createTreeView('gemstone-sessions', { treeDataProvider: sessionsProvider });
+	sessionsTreeView.onDidChangeSelection(onSessionSelected);
 	vscode.commands.registerCommand('gemstone-sessions.refreshEntry', () => {
 		sessionsProvider.refresh();
 	});
-
 }
 
 async function createViewForClassList(): Promise<void> {
@@ -193,11 +190,8 @@ function isValidSetup(): boolean {
 }
 
 function onLogin(session: Session, progress: any): void {
-	sessions.push(session);
-	sessionsProvider.refresh();
 	classesProvider.setSession(session);
 	methodsProvider.setSession(session);
-	outputChannel.appendLine('Login ' + session.description);
 	statusBarItem.text = `GemStone session: ${currentSession!.sessionId}`;
 
 	// Create filesystem for this session
@@ -237,15 +231,31 @@ function onLogout(session: Session): void {
 	}
 }
 
+function onSessionSelected(event: vscode.TreeViewSelectionChangeEvent<Session>): void {
+	const selections = event.selection;
+	if (selections.length === 0) {
+		currentSession = null;
+		statusBarItem.text = 'GemStone session: none';
+	} else {
+		currentSession = selections[0];
+		statusBarItem.text = `GemStone session: ${currentSession?.sessionId}`;
+	}
+	classesProvider.setSession(currentSession);
+}
+
 async function doLogin(login: any, progress: any): Promise<void> {
 	return new Promise(async (resolve, reject) => {
 		try {
 			const session = new Session(login);
 			await session.connect();
-			const version = await session.getVersion();
+			await session.getVersion();
 			await session.login();
 			await session.registerJadeServer();
-			onLogin(session, progress);
+			sessions.push(session);
+			sessionsProvider.refresh();
+			sessionsTreeView.reveal(session, { focus: true, select: true });
+			// onLogin(session, progress);
+			outputChannel.appendLine('Login ' + session.description);
 			resolve();
 		} catch (error: any) {
 			vscode.window.showErrorMessage(error.message);
