@@ -6,11 +6,13 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { Login } from './Login';
 const WebSocket = require("ws");
+import JadeServer from './JadeServer';
 
 let sessionCounter: number = 0;
 
 export class Session extends vscode.TreeItem {
-	isLoggedIn: Boolean = false;
+	isLoggedIn: boolean = false;
+	private jadeServer: number = 1;	// OOP_ILLEGAL
 	requestCounter: number = 0;
 	requests: Map<number, Array<Function>> = new Map;
 	sessionId: number;
@@ -137,10 +139,33 @@ export class Session extends vscode.TreeItem {
 		return this.send(json);
 	}
 
-	oopFromExecuteString(input: string): number {
-		console.log(`oopFromExecuteString()`);
-		// return this.gciSession.execute(input);
-		return 0;
+	async oopFromExecuteString(input: string): Promise<number> {
+		const myString = input.replace(/\"/g, '\\\"');
+		return new Promise(async (resolve, reject) => {
+			const json = new Map;
+			json.set("request", "execute");
+			json.set("string", myString);
+			try {
+				await this.send(json);
+				json.clear();
+				json.set("request", "nbResult");
+				const obj = await this.send(json);
+				resolve(Number(obj.oop));
+			} catch (error) {
+				reject(error);
+			}
+		});
+	}
+
+	async registerJadeServer(): Promise<void> {
+		return new Promise(async (resolve, reject) => {
+			try {
+				this.jadeServer = await this.oopFromExecuteString(JadeServer);
+				resolve();
+			} catch (error) {
+				reject(error);
+			}
+		});
 	}
 
 	stringFromExecute(input: string, size: number = 1024): string {

@@ -238,13 +238,13 @@ function onLogout(session: Session): void {
 }
 
 async function doLogin(login: any, progress: any): Promise<void> {
-	// progress.report({ message: 'Call library to initiate login' });
 	return new Promise(async (resolve, reject) => {
 		try {
 			const session = new Session(login);
 			await session.connect();
 			const version = await session.getVersion();
 			await session.login();
+			await session.registerJadeServer();
 			onLogin(session, progress);
 			resolve();
 		} catch (error: any) {
