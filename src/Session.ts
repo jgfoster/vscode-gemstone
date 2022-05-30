@@ -10,6 +10,7 @@ const WebSocket = require("ws");
 let sessionCounter: number = 0;
 
 export class Session extends vscode.TreeItem {
+	isLoggedIn: Boolean = false;
 	requestCounter: number = 0;
 	requests: Map<number, Array<Function>> = new Map;
 	sessionId: number;
@@ -75,6 +76,7 @@ export class Session extends vscode.TreeItem {
 	}
 
 	handleClose(_: any): void {
+		this.isLoggedIn = false;
 		this.requests.forEach(element => {
 			element[1]('Connection closed!');
 		});
@@ -82,6 +84,7 @@ export class Session extends vscode.TreeItem {
 	}
 
 	handleError(event: any): void {
+		this.isLoggedIn = false;
 		this.requests.forEach(element => {
 			element[1](event);
 		});
@@ -97,11 +100,19 @@ export class Session extends vscode.TreeItem {
 			functions![1](obj);
 		} else {
 			// console.log(`handleMessage(${event})`);
+			if (obj['request'] === 'login') {
+				this.isLoggedIn = true;
+			}
+			if (obj['request'] === 'logout') {
+				this.isLoggedIn = false;
+				this.socket.close();
+				this.socket = null;
+			}
 			functions![0](obj);
 		}
 	}
 
-	getVersion(): Promise<Map<string, any>> {
+	async getVersion(): Promise<Map<string, any>> {
 		const json = new Map;
 		json.set("request", "getGciVersion");
 		return this.send(json);
@@ -112,7 +123,7 @@ export class Session extends vscode.TreeItem {
 		// this.gciSession.commit();
 	}
 
-	login(): Promise<Map<string, any>> {
+	async login(): Promise<Map<string, any>> {
 		const json = new Map;
 		json.set("request", "login");
 		json.set("username", this._login.gs_user);
@@ -120,8 +131,14 @@ export class Session extends vscode.TreeItem {
 		return this.send(json);
 	}
 
+	async logout(): Promise<Map<string, any>> {
+		const json = new Map;
+		json.set("request", "logout");
+		return this.send(json);
+	}
+
 	oopFromExecuteString(input: string): number {
-		console.log(`oopFromExecuteString(input: ${input.substring(0, 20)})`);
+		console.log(`oopFromExecuteString()`);
 		// return this.gciSession.execute(input);
 		return 0;
 	}
@@ -139,12 +156,6 @@ export class Session extends vscode.TreeItem {
 		console.log('stringFromPerform()');
 		// return this.gciSession.performFetchBytes(receiver, selector, oopArray, expectedSize);
 		return 'nil';
-	}
-
-	logout(): Promise<Map<string, any>> {
-		const json = new Map;
-		json.set("request", "logout");
-		return this.send(json);
 	}
 
 	iconPath = {

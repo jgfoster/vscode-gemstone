@@ -285,7 +285,7 @@ async function loginHandler(login: Login): Promise<void> {
 
 async function logoutHandler(session: Session): Promise<void> {
 	outputChannel.appendLine('Logout ' + session.description);
-	session.logout();
+	await session.logout();
 	sessionsProvider.refresh();
 	// handle log out for classesProvider + methodsProvider
 	if (currentSession === session) {
