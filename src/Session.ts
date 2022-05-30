@@ -14,7 +14,7 @@ export class Session extends vscode.TreeItem {
 	requests: Map<number, Array<Function>> = new Map;
 	sessionId: number;
 	socket: typeof WebSocket;
-	version: String = '';
+	version: string = '';
 	constructor(
 		private _login: Login
 	) {
@@ -27,6 +27,35 @@ export class Session extends vscode.TreeItem {
 		};
 		this.tooltip = `${this.sessionId}: ${this._login.tooltip}`;
 		this.description = this.tooltip;
+	}
+
+	send(map: Map<string, any>): Promise<any> {
+		const requestId = ++this.requestCounter;
+		map.set('id', requestId);
+		let json = '{';
+		let comma = '';
+		map.forEach((value, key) => {
+			json = json + comma + '"' + key + '": ';
+			if (typeof value === 'number') {
+				json = json + value.toString();
+			} else {
+				json = json + '"' + value + '"';
+			}
+			comma = ', ';
+		});
+		json = json + '}';
+		return new Promise((resolve, reject) => {
+			this.requests.set(requestId, [resolve, reject]);
+			try {
+				this.socket.send(json.toString(), {}, (error: any) => {
+					if (typeof error !== "undefined") {
+						reject(error);
+					}
+				});
+			} catch (error) {
+				reject(error);
+			}
+		});
 	}
 
 	connect(): Promise<void> {
@@ -72,22 +101,10 @@ export class Session extends vscode.TreeItem {
 		}
 	}
 
-	getVersion(): Promise<String> {
-		const requestId = ++this.requestCounter;
-		const json = `{"request": "getGciVersion", "id": ${requestId}}`;
-
-		return new Promise((resolve, reject) => {
-			this.requests.set(requestId, [resolve, reject]);
-			try {
-				this.socket.send(json, {}, (error: any) => {
-					if (typeof error !== "undefined") {
-						reject(error);
-					}
-				});
-			} catch (error) {
-				reject(error);
-			}
-		});
+	getVersion(): Promise<Map<string, any>> {
+		const json = new Map;
+		json.set("request", "getGciVersion");
+		return this.send(json);
 	}
 
 	commit() {
@@ -95,21 +112,12 @@ export class Session extends vscode.TreeItem {
 		// this.gciSession.commit();
 	}
 
-	login(): Promise<void> {
-		const requestId = ++this.requestCounter;
-		const json = '{' +
-			'"request": "login", "id": ' + requestId.toString() +
-			', "username": "' + this._login.gs_user + '", ' +
-			'"password": "' + this._login.gs_password + '"' +
-			'}';
-		return new Promise((resolve, reject) => {
-			this.requests.set(requestId, [resolve, reject]);
-			this.socket.send(json, {}, (ex: any) => {
-				if (typeof ex !== "undefined") {
-					console.log(ex);
-				}
-			});
-		});
+	login(): Promise<Map<string, any>> {
+		const json = new Map;
+		json.set("request", "login");
+		json.set("username", this._login.gs_user);
+		json.set("password", this._login.gs_password);
+		return this.send(json);
 	}
 
 	oopFromExecuteString(input: string): number {
@@ -133,13 +141,10 @@ export class Session extends vscode.TreeItem {
 		return 'nil';
 	}
 
-	logout() {
-		let json = '{ "request": "logout", "id": 0 }';
-		this.socket.send(json, {}, (ex: any) => {
-			if (typeof ex !== "undefined") {
-				console.log(ex);
-			}
-		});
+	logout(): Promise<Map<string, any>> {
+		const json = new Map;
+		json.set("request", "logout");
+		return this.send(json);
 	}
 
 	iconPath = {
