@@ -5,81 +5,89 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { Login } from './Login';
-import internal = require('stream');
 const WebSocket = require("ws");
 
+let sessionCounter: number = 0;
+
 export class Session extends vscode.TreeItem {
-	session: String;
+	requestCounter: number = 0;
+	requests: Map<number, Array<Function>> = new Map;
+	sessionId: number;
 	socket: typeof WebSocket;
-	version: String;
+	version: String = '';
 	constructor(
-		public readonly login: Login,
-		public readonly sessionId: number,
-		private _onLogin: Function = (_: Session) => { },
-		private _onLogout: Function = (_: Session) => { }
+		private _login: Login
 	) {
-		super(login.label, vscode.TreeItemCollapsibleState.None);
-		this.session = '';
-		this.version = '';
-		this.getSocket();
+		super(_login.label, vscode.TreeItemCollapsibleState.None);
+		this.sessionId = ++sessionCounter;
 		this.command = {
 			command: 'gemstone-sessions.selectSession',
 			title: 'Select session',
 			arguments: [this]
 		};
-		this.tooltip = `${this.sessionId}: ${this.login.tooltip}`;
+		this.tooltip = `${this.sessionId}: ${this._login.tooltip}`;
 		this.description = this.tooltip;
 	}
 
-	getSocket() {
-		this.socket = new WebSocket(`ws://${this.login.gem_host}:${this.login.gem_port}/webSocket.gs`);
-		this.socket.on('close', (event: any) => {
-			console.log('close', event);
-		});
-		this.socket.on('error', (event: any) => {
-			console.log('error', event);
-		});
-		this.socket.on('message', (event: any) => {
-			let obj = JSON.parse(String.fromCharCode(...event));
-			// console.log(obj);
-			switch (obj._request) {
-				case "getGciVersion":
-					this.version = obj.version.split(' ')[0];
-					break;
-				case "login":
-					this.session = obj.result;
-					this._onLogin(this);
-					break;
-				case "logout":
-					this._onLogout(this);
-					break;
-				default:
-					console.log(obj);
-					break;
-			}
-		});
-		this.socket.on('open', () => {
+	connect(): Promise<void> {
+		return new Promise((resolve, reject) => {
+			this.requests.set(0, [resolve, reject]);
 			try {
-				this.socket.send('{"request": "getGciVersion", "id": 0}', {}, (ex: any) => {
-					if (typeof ex !== "undefined") {
-						console.log(ex);
-					}
-				});
-				let json = '{' +
-					'"request": "login", "id": 1, ' +
-					'"username": "' + this.login.gs_user + '", ' +
-					'"password": "' + this.login.gs_password + '"' +
-					'}';
-				this.socket.send(json, {}, (ex: any) => {
-					if (typeof ex !== "undefined") {
-						console.log(ex);
+				this.socket = new WebSocket(`ws://${this._login.gem_host}:${this._login.gem_port}/webSocket.gs`);
+			} catch (error) {
+				this.requests.clear();
+				reject(error);
+			}
+			this.socket.on('close', (event: any) => { this.handleClose(event); });
+			this.socket.on('error', (event: any) => { this.handleError(event); });
+			this.socket.on('message', (event: any) => { this.handleMessage(event); });
+			this.socket.on('open', (_: any) => { this.requests.delete(0); resolve(); });
+		});
+	}
+
+	handleClose(_: any): void {
+		this.requests.forEach(element => {
+			element[1]('Connection closed!');
+		});
+		this.requests.clear();
+	}
+
+	handleError(event: any): void {
+		this.requests.forEach(element => {
+			element[1](event);
+		});
+		this.requests.clear();
+	}
+
+	handleMessage(event: any): void {
+		const obj = JSON.parse(String.fromCharCode(...event));
+		const id = obj['_id'];
+		const functions = this.requests.get(id);
+		this.requests.delete(id);
+		if (obj['type'] === 'error') {
+			functions![1](obj);
+		} else {
+			// console.log(`handleMessage(${event})`);
+			functions![0](obj);
+		}
+	}
+
+	getVersion(): Promise<String> {
+		const requestId = ++this.requestCounter;
+		const json = `{"request": "getGciVersion", "id": ${requestId}}`;
+
+		return new Promise((resolve, reject) => {
+			this.requests.set(requestId, [resolve, reject]);
+			try {
+				this.socket.send(json, {}, (error: any) => {
+					if (typeof error !== "undefined") {
+						reject(error);
 					}
 				});
 			} catch (error) {
-				console.log(error);
+				reject(error);
 			}
 		});
-
 	}
 
 	commit() {
@@ -87,8 +95,25 @@ export class Session extends vscode.TreeItem {
 		// this.gciSession.commit();
 	}
 
+	login(): Promise<void> {
+		const requestId = ++this.requestCounter;
+		const json = '{' +
+			'"request": "login", "id": ' + requestId.toString() +
+			', "username": "' + this._login.gs_user + '", ' +
+			'"password": "' + this._login.gs_password + '"' +
+			'}';
+		return new Promise((resolve, reject) => {
+			this.requests.set(requestId, [resolve, reject]);
+			this.socket.send(json, {}, (ex: any) => {
+				if (typeof ex !== "undefined") {
+					console.log(ex);
+				}
+			});
+		});
+	}
+
 	oopFromExecuteString(input: string): number {
-		console.log('oopFromExecuteString(input: string)');
+		console.log(`oopFromExecuteString(input: ${input.substring(0, 20)})`);
 		// return this.gciSession.execute(input);
 		return 0;
 	}
@@ -108,35 +133,13 @@ export class Session extends vscode.TreeItem {
 		return 'nil';
 	}
 
-	isLoggedIn() {
-		console.log('isLoggedIn()', this.session);
-		return this.session !== "";
-	}
-
 	logout() {
-		console.log('logout()');
-		// this.gciSession.logout();
-		// // remove this session's SymbolDictionaries (folders) from the workspace
-		// const prefix = 'gs' + this.sessionId.toString() + ':/';
-		// const workspaceFolders = vscode.workspace.workspaceFolders || [];
-		// let start, end;
-		// for (let i = 0; i < workspaceFolders.length; i++) {
-		// 	if (workspaceFolders[i].uri.toString().startsWith(prefix)) {
-		// 		if (!start) {
-		// 			start = i;
-		// 			end = i;
-		// 		} else {
-		// 			end = i;
-		// 		}
-		// 	}
-		// }
-		// if (start && end) {
-		// 	const flag = vscode.workspace.updateWorkspaceFolders(start, end - start + 1);
-		// 	if (!flag) {
-		// 		console.log('Unable to remove workspace folders!');
-		// 		vscode.window.showErrorMessage('Unable to remove workspace folders!');
-		// 	}
-		// }
+		let json = '{ "request": "logout", "id": 0 }';
+		this.socket.send(json, {}, (ex: any) => {
+			if (typeof ex !== "undefined") {
+				console.log(ex);
+			}
+		});
 	}
 
 	iconPath = {

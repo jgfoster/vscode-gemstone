@@ -18,13 +18,15 @@ import { GemStoneFS } from './fileSystemProvider';
 // import fs = require('fs');
 // import parser = require('fast-xml-parser');
 
+const classesProvider = new ClassesProvider();
+let currentSession: Session | null = null;
+const loginsProvider = new LoginsProvider();
+const methodsProvider = new MethodsProvider();
 let outputChannel: vscode.OutputChannel;
-let sessionId: number = 0;
 const sessions: Session[] = [];
-let sessionsProvider: SessionsProvider;
-let classesProvider: ClassesProvider;
-let methodsProvider: MethodsProvider;
-let statusBarItem: vscode.StatusBarItem;
+const statusBarItem: vscode.StatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+const sessionsProvider = new SessionsProvider(sessions);
+
 let context: vscode.ExtensionContext;
 
 // this method is called when your extension is activated
@@ -49,11 +51,26 @@ export function activate(aContext: vscode.ExtensionContext) {
 	// The commands have been defined in the package.json file ("contributes"/"commands")
 	// Now provide the implementations of the commands with registerCommand
 	// The commandId parameter must match the command field in package.json
-	aContext.subscriptions.push(vscode.commands.registerCommand('gemstone.login', loginHandler));
-	aContext.subscriptions.push(vscode.commands.registerCommand('gemstone.logout', logoutHandler));
-	aContext.subscriptions.push(vscode.commands.registerCommand('gemstone.selectNamespace', selectNamespaceHandler));
-	aContext.subscriptions.push(vscode.commands.registerTextEditorCommand('gemstone.displayIt', displayIt));
-	aContext.subscriptions.push(vscode.commands.registerCommand('gemstone.displayClassFinder', () => classesProvider.displayClassFinder()));
+	aContext.subscriptions.push(vscode.commands.registerCommand(
+		'gemstone.login',
+		loginHandler
+	));
+	aContext.subscriptions.push(vscode.commands.registerCommand(
+		'gemstone.logout',
+		logoutHandler
+	));
+	aContext.subscriptions.push(vscode.commands.registerCommand(
+		'gemstone.selectNamespace',
+		selectNamespaceHandler
+	));
+	aContext.subscriptions.push(vscode.commands.registerTextEditorCommand(
+		'gemstone.displayIt',
+		displayIt
+	));
+	aContext.subscriptions.push(vscode.commands.registerCommand(
+		'gemstone.displayClassFinder',
+		() => classesProvider.displayClassFinder()
+	));
 	aContext.subscriptions.push(vscode.commands.registerCommand(
 		'gemstone.fetchMethods',
 		(classObj: any) => {
@@ -80,42 +97,37 @@ async function createOutputChannel(): Promise<void> {
 }
 
 async function createStatusBarItem(aContext: vscode.ExtensionContext): Promise<void> {
-	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 	statusBarItem.text = 'GemStone session: none';
 	statusBarItem.command = 'gemstone.showSessionId';
 	statusBarItem.show();
 	aContext.subscriptions.push(vscode.commands.registerCommand('gemstone.showSessionId', () => {
-		vscode.window.showInformationMessage(`GemStone session: ${sessionId ? sessionId : 'none'}`);
+		vscode.window.showInformationMessage(`GemStone session: ${currentSession ? currentSession.sessionId : 'none'}`);
 	}));
 }
 
 async function createViewForLoginList(): Promise<void> {
-	const loginsProvider = new LoginsProvider();
 	vscode.window.registerTreeDataProvider('gemstone-logins', loginsProvider);
 }
 
 async function createViewForSessionList(): Promise<void> {
-	sessionsProvider = new SessionsProvider(sessions);
 	vscode.window.registerTreeDataProvider('gemstone-sessions', sessionsProvider);
 	vscode.commands.registerCommand("gemstone-sessions.selectSession", (session: Session) => {
-		sessionId = session.sessionId;
-		statusBarItem.text = `GemStone session: ${sessionId}`;
+		currentSession = session;
+		statusBarItem.text = `GemStone session: ${currentSession.sessionId}`;
 	});
 }
 
 async function createViewForClassList(): Promise<void> {
-	classesProvider = new ClassesProvider();
 	vscode.window.registerTreeDataProvider('gemstone-classes', classesProvider);
 }
 
 async function createViewForMethodList(): Promise<void> {
-	methodsProvider = new MethodsProvider();
 	vscode.window.registerTreeDataProvider('gemstone-methods', methodsProvider);
 }
 
 // evaluate a Smalltalk expression found in a TextEditor and insert the value as a string
 function displayIt(textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit, args: any[]) {
-	if (sessionId === 0) {
+	if (!currentSession) {
 		vscode.window.showErrorMessage('No GemStone session!');
 		return;
 	}
@@ -131,7 +143,7 @@ function displayIt(textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit, a
 		return;
 	}
 	try {
-		const result = ' ' + sessions[sessionId - 1].stringFromExecute('[' + text + '] value printString');
+		const result = ' ' + currentSession.stringFromExecute('[' + text + '] value printString');
 		textEditor.edit((editBuilder: vscode.TextEditorEdit) => {
 			editBuilder.insert(selection.end, result);
 		}).then(success => {
@@ -178,47 +190,66 @@ function isValidSetup(): boolean {
 	return true;
 }
 
-function onLogin(session: Session): void {
-	console.log("extension login callback", session);
+function onLogin(session: Session, progress: any): void {
+	sessions.push(session);
+	sessionsProvider.refresh();
+	classesProvider.setSession(session);
+	methodsProvider.setSession(session);
+	outputChannel.appendLine('Login ' + session.description);
+	statusBarItem.text = `GemStone session: ${currentSession!.sessionId}`;
+
+	// Create filesystem for this session
+	progress.report({ message: 'Add SymbolDictionaries to Explorer' });
+	// context.subscriptions.push(
+	// 	vscode.workspace.registerFileSystemProvider(
+	// 		'gs' + currentSession!.sessionId.toString(),
+	// 		new GemStoneFS(session),
+	// 		{ isCaseSensitive: true, isReadonly: false }
+	// 	)
+	// );
 }
 
 function onLogout(session: Session): void {
-	console.log("extension logout callback", session);
+	console.log('onLogout()');
+	sessionsProvider.refresh();
+	// remove this session's SymbolDictionaries (folders) from the workspace
+	const prefix = 'gs' + currentSession!.sessionId.toString() + ':/';
+	const workspaceFolders = vscode.workspace.workspaceFolders || [];
+	let start, end;
+	for (let i = 0; i < workspaceFolders.length; i++) {
+		if (workspaceFolders[i].uri.toString().startsWith(prefix)) {
+			if (!start) {
+				start = i;
+				end = i;
+			} else {
+				end = i;
+			}
+		}
+	}
+	if (start && end) {
+		const flag = vscode.workspace.updateWorkspaceFolders(start, end - start + 1);
+		if (!flag) {
+			console.log('Unable to remove workspace folders!');
+			vscode.window.showErrorMessage('Unable to remove workspace folders!');
+		}
+	}
 }
 
-function doLogin(login: any, progress: any): void {
-	let session;
-	try {
-		// give each session an incrementing 1-based identifier
-		// we need the ID to be stable
-		// with other sessions logging out we could consider re-using numbers
-		progress.report({ message: 'Call library to initiate login' });
-		session = new Session(
-			login,
-			sessions.length + 1,
-			onLogin,
-			onLogout
-		);
-	} catch (error: any) {
-		vscode.window.showErrorMessage(error.message);
-		return;
-	}
-	sessions.push(session);
-	sessionsProvider.refresh();
-	// classesProvider.setSession(session);
-	// methodsProvider.setSession(session);
-	// outputChannel.appendLine('Login ' + session.description);
-	// sessionId = session.sessionId;
-	// statusBarItem.text = `GemStone session: ${sessionId}`;
-
-	// // Create filesystem for this session
-	// progress.report({ message: 'Add SymbolDictionaries to Explorer' });
-	// context.subscriptions.push(vscode.workspace.registerFileSystemProvider(
-	// 	'gs' + session.sessionId.toString(),
-	// 	new GemStoneFS(session),
-	// 	{ isCaseSensitive: true, isReadonly: false }
-	// )
-	// );
+async function doLogin(login: any, progress: any): Promise<void> {
+	// progress.report({ message: 'Call library to initiate login' });
+	return new Promise(async (resolve, reject) => {
+		try {
+			const session = new Session(login);
+			await session.connect();
+			const version = await session.getVersion();
+			await session.login();
+			onLogin(session, progress);
+			resolve();
+		} catch (error: any) {
+			vscode.window.showErrorMessage(error.message);
+			reject(error);
+		}
+	});
 }
 
 async function loginHandler(login: Login): Promise<void> {
@@ -228,30 +259,28 @@ async function loginHandler(login: Login): Promise<void> {
 			title: 'Starting login...',
 			cancellable: false
 		},
-		(progress, _) => {
-			return new Promise<void>((resolve, reject) => {
-				if (login.gs_password) {
-					doLogin(login, progress);
-					resolve();
-				} else {
-					vscode.window.showInputBox({
-						ignoreFocusOut: true,
-						password: true,
-						placeHolder: 'swordfish',
-						prompt: 'Enter the GemStone password for ' + login.gs_user,
-						value: 'swordfish'
-					}).then(
-						(value) => {
-							doLogin({ ...login, 'gs_password': value }, progress);
-							resolve();
-						},
-						(why) => { reject(why); }
-					);
-				}
+		async (progress, _) => {
+			let password: string | null | undefined = login.gs_password;
+			if (!password) {
+				await vscode.window.showInputBox({
+					ignoreFocusOut: true,
+					password: true,
+					placeHolder: 'swordfish',
+					prompt: 'Enter the GemStone password for ' + login.gs_user,
+					value: 'swordfish'
+				}).then(
+					(value) => {
+						password = value;
+					},
+					(_) => { }
+				);
 			}
-			);
-		}
-	);
+			if (password) {
+				try {
+					await doLogin({ ...login, 'gs_password': password }, progress);
+				} catch (_) { }
+			}
+		});
 }
 
 async function logoutHandler(session: Session): Promise<void> {
@@ -259,8 +288,8 @@ async function logoutHandler(session: Session): Promise<void> {
 	session.logout();
 	sessionsProvider.refresh();
 	// handle log out for classesProvider + methodsProvider
-	if (sessionId === session.sessionId) {
-		sessionId = 0;
+	if (currentSession === session) {
+		currentSession = null;
 		statusBarItem.text = 'GemStone session: none';
 	}
 }

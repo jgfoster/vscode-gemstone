@@ -32,19 +32,19 @@ export class GemStoneFS implements vscode.FileSystemProvider {
         try {
             this.jadeServer = session.oopFromExecuteString(JadeServer);
             const myString = session.stringFromPerform(this.jadeServer, 'getSymbolList', [], 1024);
-		    const list = JSON.parse(myString).list.map((each: any) => {
+            const list = JSON.parse(myString).list.map((each: any) => {
                 const uri = vscode.Uri.parse('gs' + session.sessionId.toString() + ':/' + each.name);
                 const dict = new GsDictionaryFile(session, each.name, each);
                 this.map.set(uri.toString(), dict);
                 return {
-                    'uri': uri, 
+                    'uri': uri,
                     'name': each.name
                 };
             });
             const workspaceFolders = vscode.workspace.workspaceFolders;
             const flag = vscode.workspace.updateWorkspaceFolders(
                 workspaceFolders ? workspaceFolders.length : 0,
-                0, 
+                0,
                 ...list
             );
             if (!flag) {
@@ -52,7 +52,7 @@ export class GemStoneFS implements vscode.FileSystemProvider {
                 vscode.window.showErrorMessage('Unable to create workspace folder!');
                 return;
             }
-        } catch(e) {
+        } catch (e: any) {
             console.error(e.message);
         }
     }
@@ -77,9 +77,9 @@ export class GemStoneFS implements vscode.FileSystemProvider {
         try {
             const dict = this.map.get(uri.toString());
             const myString = this.session.stringFromPerform(
-                this.jadeServer, 
+                this.jadeServer,
                 dict.getExpansionString(),
-                [dict.oop], 
+                [dict.oop],
                 65525
             );
             JSON.parse(myString).list.forEach((element: any) => {
@@ -88,7 +88,7 @@ export class GemStoneFS implements vscode.FileSystemProvider {
                 this.map.set(newUri.toString(), newEntry);
                 result.push([element.key, newEntry.type]);
             });
-        } catch(e) {
+        } catch (e: any) {
             console.error(e.message);
         }
         return result;
