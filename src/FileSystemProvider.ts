@@ -30,6 +30,7 @@ export class GemStoneFS implements vscode.FileSystemProvider {
         this.map = new Map();
         // obtain list of SymbolDictionary instances
         try {
+            // console.log('GemStoneFS class constructor');
             this.jadeServer = session.oopFromExecuteString(JadeServer);
             const myString = session.stringFromPerform(this.jadeServer, 'getSymbolList', [], 1024);
             const list = JSON.parse(myString).list.map((each: any) => {

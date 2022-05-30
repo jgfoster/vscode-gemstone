@@ -30,6 +30,7 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 		this.session = session;
 		// obtain list of SymbolDictionary instances
 		try {
+			// console.log('ClassProvider.setSession()');
 			this.jadeServer = session.oopFromExecuteString(JadeServer);
 			const myString = session.stringFromPerform(this.jadeServer, 'getSymbolList', [], 1024);
 			JSON.parse(myString).list.forEach((element: { oop: number, name: string, size: number }) => {
@@ -71,7 +72,7 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 	}
 
 	getHierarchyFromPairs(pairs: { [x: string]: any[]; }, key = "Object") {
-		var hierarchy: {[k: string]: any}  = {};
+		var hierarchy: { [k: string]: any } = {};
 		if (key in Object.keys(pairs)) {
 			for (var i = 0; i < pairs[key].length; i++) {
 				var tempObj = pairs[key][i];

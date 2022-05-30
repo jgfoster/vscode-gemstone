@@ -22,6 +22,7 @@ export class SessionsProvider implements vscode.TreeDataProvider<Session> {
 		if (element) {	// a Session does not have children
 			return Promise.resolve([]);
 		}
+		// return top-level elements (children of root)
 		return Promise.resolve(this.sessions.filter(each => each.isLoggedIn));
 	}
 }

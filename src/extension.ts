@@ -33,8 +33,6 @@ let context: vscode.ExtensionContext;
 // your extension is activated when the user selects the extension
 export function activate(aContext: vscode.ExtensionContext) {
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	// console.log('Congratulations, your extension "gemstone" is now active!');
 	context = aContext;
 
 	// GemStone needs a workspace and a folder (I don't recall why!)
@@ -115,6 +113,10 @@ async function createViewForSessionList(): Promise<void> {
 		currentSession = session;
 		statusBarItem.text = `GemStone session: ${currentSession.sessionId}`;
 	});
+	vscode.commands.registerCommand('gemstone-sessions.refreshEntry', () => {
+		sessionsProvider.refresh();
+	});
+
 }
 
 async function createViewForClassList(): Promise<void> {
