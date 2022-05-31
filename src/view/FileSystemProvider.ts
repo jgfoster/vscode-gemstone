@@ -20,39 +20,48 @@ function str2ab(str: string): Uint8Array {
 }
 
 export class GemStoneFS implements vscode.FileSystemProvider {
-	session: Session;
-	map: Map<any, any>;
-	constructor(session: Session) {
+	private session: Session;
+	public readonly map: Map<any, any>;
+	private constructor(session: Session) {
 		this.session = session;
 		this.map = new Map();
-		// obtain list of SymbolDictionary instances
-		try {
-			console.log('GemStoneFS class constructor');
-			// const myString = await session.stringFromPerform('getSymbolList', [], 1024);
-			const myString = '';
-			const list = JSON.parse(myString).list.map((each: any) => {
-				const uri = vscode.Uri.parse('gs' + session.sessionId.toString() + ':/' + each.name);
-				const dict = new GsDictionaryFile(session, each.name, each);
-				this.map.set(uri.toString(), dict);
-				return {
-					'uri': uri,
-					'name': each.name
-				};
-			});
-			const workspaceFolders = vscode.workspace.workspaceFolders;
-			const flag = vscode.workspace.updateWorkspaceFolders(
-				workspaceFolders ? workspaceFolders.length : 0,
-				0,
-				...list
-			);
-			if (!flag) {
-				console.error('Unable to create workspace folder!');
-				vscode.window.showErrorMessage('Unable to create workspace folder!');
-				return;
+	}
+
+	static async forSession(session: Session): Promise<GemStoneFS> {
+		return new Promise(async (resolve, reject) => {
+			const fs = new GemStoneFS(session);
+
+			// obtain list of SymbolDictionary instances
+			try {
+				const symbolList = await session.getSymbolList();
+				const list = symbolList.map((each: any) => {
+					const uri = vscode.Uri.parse('gs' + session.sessionId.toString() + ':/' + each.name);
+					const dict = new GsDictionaryFile(session, each.name, each);
+					fs.map.set(uri.toString(), dict);
+					return {
+						'uri': uri,
+						'name': each.name
+					};
+				});
+				console.log('GemStoneFS.forSession() - map = ', fs.map);
+				const workspaceFolders = vscode.workspace.workspaceFolders;
+				const flag = vscode.workspace.updateWorkspaceFolders(
+					workspaceFolders ? workspaceFolders.length : 0,
+					0,
+					...list
+				);
+				if (!flag) {
+					console.error('Unable to create workspace folder!');
+					vscode.window.showErrorMessage('Unable to create workspace folder!');
+					reject({ "message": "Unable to create workspace folder!" });
+					return;
+				}
+			} catch (ex: any) {
+				console.error(ex.message);
+				reject(ex);
 			}
-		} catch (e: any) {
-			console.error(e.message);
-		}
+			resolve(fs);
+		});
 	}
 
 	// --- manage file metadata
@@ -60,6 +69,9 @@ export class GemStoneFS implements vscode.FileSystemProvider {
 	// return a FileStat-type (ctime: number, mtime: number, size: number, type: FileType)
 	stat(uri: vscode.Uri): vscode.FileStat {
 		if (uri.toString().includes('.vscode')) {
+			throw vscode.FileSystemError.FileNotFound(uri);
+		}
+		if (uri.toString().includes('.git')) {
 			throw vscode.FileSystemError.FileNotFound(uri);
 		}
 		const entry = this.map.get(uri.toString());
@@ -71,6 +83,7 @@ export class GemStoneFS implements vscode.FileSystemProvider {
 	}
 
 	readDirectory(uri: vscode.Uri): [string, vscode.FileType][] {
+		console.log('GemStoneFS.readDirectory() - 1', uri.toString());
 		const result: [string, vscode.FileType][] = new Array;
 		try {
 			const dict = this.map.get(uri.toString());

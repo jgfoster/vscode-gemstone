@@ -8,6 +8,7 @@ import { Login } from './Login';
 const WebSocket = require("ws");
 import JadeServer from './JadeServer';
 import exp = require('constants');
+import { SymbolDictionary } from './SymbolDictionary';
 
 let sessionCounter: number = 0;
 
@@ -73,15 +74,14 @@ export class Session extends vscode.TreeItem {
 		});
 	}
 
-	async getSymbolList(): Promise<Array<any>> {
+	async getSymbolList(): Promise<Array<SymbolDictionary>> {
 		return new Promise(async (resolve, reject) => {
 			// obtain list of SymbolDictionary instances
 			try {
 				const myString = await this.stringFromPerform('getSymbolList', [], 1024);
-				console.log(myString);
 				const array = new Array;
 				JSON.parse(myString).list.forEach((element: { oop: number, name: string, size: number }) => {
-					array.push(element);
+					array.push(new SymbolDictionary(element.oop.toString(), element.name, element.size));
 				});
 				resolve(array);
 			} catch (ex: any) {

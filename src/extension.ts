@@ -173,19 +173,22 @@ async function doLogin(login: any, progress: any): Promise<void> {
 
 			// Create filesystem for this session
 			progress.report({ message: 'Add SymbolDictionaries to Explorer' });
-			context.subscriptions.push(
-				vscode.workspace.registerFileSystemProvider(
-					'gs' + session.sessionId.toString(),
-					new GemStoneFS(session),
-					{ isCaseSensitive: true, isReadonly: false }
-				)
+			const scheme = 'gs' + session.sessionId.toString();
+			const provider = await GemStoneFS.forSession(session);
+			const options = { isCaseSensitive: true, isReadonly: false };
+			const subscription = vscode.workspace.registerFileSystemProvider(
+				scheme,
+				provider,
+				options
 			);
+			context.subscriptions.push(subscription);
 
 			// methodsProvider.setSession(session);
 
 			outputChannel.appendLine('Login ' + session.description);
 			resolve();
 		} catch (error: any) {
+			console.log('doLogin() - 9');
 			vscode.window.showErrorMessage(error.message);
 			reject(error);
 		}
@@ -328,15 +331,16 @@ async function onSessionSelected(event: vscode.TreeViewSelectionChangeEvent<Sess
 }
 
 async function selectNamespaceHandler(): Promise<void> {
-	if (selectedSession) {
-		var symbolDictionariesList = classesProvider.getSymbolDictionaryNames();
-		vscode.window.showQuickPick(symbolDictionariesList)
-			.then((selection: string | undefined) => {
-				console.log(selection);
-				classesProvider.setSymbolDictionary(selection);
-				classesProvider.refresh();
-			});
-	} else {
-		vscode.window.showErrorMessage("No Session Active");
-	}
+	// if (selectedSession) {
+	// 	var symbolDictionariesList = classesProvider.getSymbolDictionaryNames();
+	// 	vscode.window.showQuickPick(symbolDictionariesList)
+	// 		.then((selection: string | undefined) => {
+	// 			console.log(selection);
+	// 			classesProvider.setSymbolDictionary(selection);
+	// 			classesProvider.refresh();
+	// 		});
+	// } else {
+	// 	vscode.window.showErrorMessage("No Session Active");
+	// }
+	return Promise.resolve();
 }

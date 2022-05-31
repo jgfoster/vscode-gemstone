@@ -1,12 +1,13 @@
 import * as vscode from 'vscode';
 import { GsClass } from '../model/GsClass';
 import { Session } from '../model/Session';
+import { SymbolDictionary } from '../model/SymbolDictionary';
 
 export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 	private session: Session | null = null;
 	private _onDidChangeTreeData: vscode.EventEmitter<GsClass | undefined> = new vscode.EventEmitter<GsClass | undefined>();
 	readonly onDidChangeTreeData: vscode.Event<GsClass | undefined> = this._onDidChangeTreeData.event;
-	private symbolDictionaries: Map<string, { oop: number, name: string, size: number }> = new Map;
+	private symbolList: Array<SymbolDictionary> = [];
 	activeDictionary: { oop: number, name: string, size: number } | null = null;
 	classHierarchy: any = {};
 	classSuperPairs: any = {};
@@ -74,7 +75,7 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 	}
 
 	getSymbolDictionaryNames() {
-		return Array.from(this.symbolDictionaries.keys());
+		return Array.from(this.symbolList.keys());
 	}
 
 	getTreeItem(element: GsClass): vscode.TreeItem {
@@ -98,12 +99,7 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 			}
 			// obtain list of SymbolDictionary instances
 			try {
-				const myString = await session.stringFromPerform('getSymbolList', [], 1024);
-				console.log(myString);
-				this.symbolDictionaries = new Map;
-				JSON.parse(myString).list.forEach((element: { oop: number, name: string, size: number }) => {
-					this.symbolDictionaries.set(element.name, element);
-				});
+				// this.symbolList = await this.session!.getSymbolList();
 				resolve();
 			} catch (ex: any) {
 				reject(ex);
