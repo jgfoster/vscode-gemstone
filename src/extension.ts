@@ -6,13 +6,14 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 
-import { LoginsProvider } from './LoginProvider';
-import { Login } from './Login';
-import { SessionsProvider } from './SessionProvider';
-import { Session } from './Session';
-import { ClassesProvider, GsClass } from './ClassProvider';
-import { MethodsProvider } from './MethodProvider';
-import { GemStoneFS } from './fileSystemProvider';
+import { LoginsProvider } from './view/LoginProvider';
+import { Login } from './model/Login';
+import { SessionsProvider } from './view/SessionProvider';
+import { Session } from './model/Session';
+import { ClassesProvider } from './view/ClassProvider';
+import { GsClass } from './model/GsClass';
+import { MethodsProvider } from './view/MethodProvider';
+import { GemStoneFS } from './view/FileSystemProvider';
 // import fs = require('fs');
 
 const classesProvider = new ClassesProvider();
@@ -169,6 +170,19 @@ async function doLogin(login: any, progress: any): Promise<void> {
 			sessions.push(session);
 			sessionsProvider.refresh(); // show new session
 			sessionsTreeView.reveal(session, { focus: true, select: true }); // select new session
+
+			// Create filesystem for this session
+			progress.report({ message: 'Add SymbolDictionaries to Explorer' });
+			context.subscriptions.push(
+				vscode.workspace.registerFileSystemProvider(
+					'gs' + session.sessionId.toString(),
+					new GemStoneFS(session),
+					{ isCaseSensitive: true, isReadonly: false }
+				)
+			);
+
+			// methodsProvider.setSession(session);
+
 			outputChannel.appendLine('Login ' + session.description);
 			resolve();
 		} catch (error: any) {
@@ -254,22 +268,6 @@ async function logoutHandler(session: Session): Promise<void> {
 			statusBarItem.text = 'GemStone session: none';
 		}
 	});
-}
-
-function onLogin(session: Session, progress: any): void {
-	classesProvider.setSession(session);
-	methodsProvider.setSession(session);
-	statusBarItem.text = `GemStone session: ${selectedSession!.sessionId}`;
-
-	// Create filesystem for this session
-	progress.report({ message: 'Add SymbolDictionaries to Explorer' });
-	// context.subscriptions.push(
-	// 	vscode.workspace.registerFileSystemProvider(
-	// 		'gs' + currentSession!.sessionId.toString(),
-	// 		new GemStoneFS(session),
-	// 		{ isCaseSensitive: true, isReadonly: false }
-	// 	)
-	// );
 }
 
 function onLogout(session: Session): void {

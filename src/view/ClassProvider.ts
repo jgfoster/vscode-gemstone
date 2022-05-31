@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { Session } from './Session';
+import { GsClass } from '../model/GsClass';
+import { Session } from '../model/Session';
 
 export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 	private session: Session | null = null;
@@ -138,17 +139,5 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 		} else {
 			this.activeDictionary = null;
 		}
-	}
-}
-
-export class GsClass extends vscode.TreeItem {
-	constructor(
-		public readonly label: string,
-		public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-		public readonly command?: vscode.Command
-	) {
-		super(label, collapsibleState);
-
-		this.tooltip = this.label;
 	}
 }

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { Session } from './Session';
+import { Session } from '../model/Session';
 
 export class SessionsProvider implements vscode.TreeDataProvider<Session> {
 	private sessions: Session[];

@@ -25,7 +25,7 @@ export class GsClassFile implements vscode.FileStat {
         this.session = session;
         this.oop = data.oop || 1;
     }
-    
+
     addEntry(session: Session, key: any, element: any) {
         return new File(this.session, element.key, element);
     }

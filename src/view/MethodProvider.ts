@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { Session } from './Session';
-import JadeServer from './JadeServer';
+import { Session } from '../model/Session';
+import JadeServer from '../model/JadeServer';
 
 function str2ab(str: string): Uint8Array { // TODO: CONDENSE REPEAT CODE
 	var buf = new ArrayBuffer(str.length);

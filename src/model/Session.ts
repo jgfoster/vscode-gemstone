@@ -73,6 +73,24 @@ export class Session extends vscode.TreeItem {
 		});
 	}
 
+	async getSymbolList(): Promise<Array<any>> {
+		return new Promise(async (resolve, reject) => {
+			// obtain list of SymbolDictionary instances
+			try {
+				const myString = await this.stringFromPerform('getSymbolList', [], 1024);
+				console.log(myString);
+				const array = new Array;
+				JSON.parse(myString).list.forEach((element: { oop: number, name: string, size: number }) => {
+					array.push(element);
+				});
+				resolve(array);
+			} catch (ex: any) {
+				reject(ex);
+			}
+		});
+	}
+
+
 	handleClose(_: any): void {
 		this.isLoggedIn = false;
 		this.requests.forEach(element => {

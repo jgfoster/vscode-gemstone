@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { Login } from './Login';
+import { Login } from '../model/Login';
 
 export class LoginsProvider implements vscode.TreeDataProvider<Login> {
 
