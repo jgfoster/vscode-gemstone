@@ -10,21 +10,20 @@ import { LoginsProvider } from './LoginProvider';
 import { Login } from './Login';
 import { SessionsProvider } from './SessionProvider';
 import { Session } from './Session';
-import { ClassesProvider } from './ClassProvider';
+import { ClassesProvider, GsClass } from './ClassProvider';
 import { MethodsProvider } from './MethodProvider';
 import { GemStoneFS } from './fileSystemProvider';
-// import request = require('request');
-// import tar = require('tar');
 // import fs = require('fs');
-// import parser = require('fast-xml-parser');
 
 const classesProvider = new ClassesProvider();
-let currentSession: Session | null = null;
+let classesTreeView: vscode.TreeView<GsClass>;
 const loginsProvider = new LoginsProvider();
 const methodsProvider = new MethodsProvider();
 let outputChannel: vscode.OutputChannel;
-const sessions: Session[] = [];
+let selectedClass: GsClass | null = null;
+let selectedSession: Session | null = null;
 const statusBarItem: vscode.StatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+const sessions: Session[] = [];
 const sessionsProvider = new SessionsProvider(sessions);
 let sessionsTreeView: vscode.TreeView<Session>;
 
@@ -100,8 +99,20 @@ async function createStatusBarItem(aContext: vscode.ExtensionContext): Promise<v
 	statusBarItem.command = 'gemstone.showSessionId';
 	statusBarItem.show();
 	aContext.subscriptions.push(vscode.commands.registerCommand('gemstone.showSessionId', () => {
-		vscode.window.showInformationMessage(`GemStone session: ${currentSession ? currentSession.sessionId : 'none'}`);
+		vscode.window.showInformationMessage(`GemStone session: ${selectedSession ? selectedSession.sessionId : 'none'}`);
 	}));
+}
+
+async function createViewForClassList(): Promise<void> {
+	classesTreeView = vscode.window.createTreeView('gemstone-classes', { treeDataProvider: classesProvider });
+	classesTreeView.onDidChangeSelection(onClassSelected);
+	vscode.commands.registerCommand('gemstone-classes.refreshEntry', () => {
+		classesProvider.refresh();
+	});
+}
+
+async function createViewForMethodList(): Promise<void> {
+	vscode.window.registerTreeDataProvider('gemstone-methods', methodsProvider);
 }
 
 async function createViewForLoginList(): Promise<void> {
@@ -116,17 +127,9 @@ async function createViewForSessionList(): Promise<void> {
 	});
 }
 
-async function createViewForClassList(): Promise<void> {
-	vscode.window.registerTreeDataProvider('gemstone-classes', classesProvider);
-}
-
-async function createViewForMethodList(): Promise<void> {
-	vscode.window.registerTreeDataProvider('gemstone-methods', methodsProvider);
-}
-
 // evaluate a Smalltalk expression found in a TextEditor and insert the value as a string
 function displayIt(textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit, args: any[]) {
-	if (!currentSession) {
+	if (!selectedSession) {
 		vscode.window.showErrorMessage('No GemStone session!');
 		return;
 	}
@@ -142,7 +145,7 @@ function displayIt(textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit, a
 		return;
 	}
 	try {
-		const result = ' ' + currentSession.stringFromExecute('[' + text + '] value printString');
+		const result = ' ' + selectedSession.stringFromExecute('[' + text + '] value printString');
 		textEditor.edit((editBuilder: vscode.TextEditorEdit) => {
 			editBuilder.insert(selection.end, result);
 		}).then(success => {
@@ -153,6 +156,26 @@ function displayIt(textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit, a
 	} catch (e: any) {
 		vscode.window.showErrorMessage(e.message);
 	}
+}
+
+async function doLogin(login: any, progress: any): Promise<void> {
+	return new Promise(async (resolve, reject) => {
+		try {
+			const session = new Session(login);
+			await session.connect();
+			await session.getVersion();
+			await session.login();
+			await session.registerJadeServer();
+			sessions.push(session);
+			sessionsProvider.refresh(); // show new session
+			sessionsTreeView.reveal(session, { focus: true, select: true }); // select new session
+			outputChannel.appendLine('Login ' + session.description);
+			resolve();
+		} catch (error: any) {
+			vscode.window.showErrorMessage(error.message);
+			reject(error);
+		}
+	});
 }
 
 // on activation check to see if we have a workspace and a folder
@@ -189,84 +212,6 @@ function isValidSetup(): boolean {
 	return true;
 }
 
-function onLogin(session: Session, progress: any): void {
-	classesProvider.setSession(session);
-	methodsProvider.setSession(session);
-	statusBarItem.text = `GemStone session: ${currentSession!.sessionId}`;
-
-	// Create filesystem for this session
-	progress.report({ message: 'Add SymbolDictionaries to Explorer' });
-	// context.subscriptions.push(
-	// 	vscode.workspace.registerFileSystemProvider(
-	// 		'gs' + currentSession!.sessionId.toString(),
-	// 		new GemStoneFS(session),
-	// 		{ isCaseSensitive: true, isReadonly: false }
-	// 	)
-	// );
-}
-
-function onLogout(session: Session): void {
-	console.log('onLogout()');
-	sessionsProvider.refresh();
-	// remove this session's SymbolDictionaries (folders) from the workspace
-	const prefix = 'gs' + currentSession!.sessionId.toString() + ':/';
-	const workspaceFolders = vscode.workspace.workspaceFolders || [];
-	let start, end;
-	for (let i = 0; i < workspaceFolders.length; i++) {
-		if (workspaceFolders[i].uri.toString().startsWith(prefix)) {
-			if (!start) {
-				start = i;
-				end = i;
-			} else {
-				end = i;
-			}
-		}
-	}
-	if (start && end) {
-		const flag = vscode.workspace.updateWorkspaceFolders(start, end - start + 1);
-		if (!flag) {
-			console.log('Unable to remove workspace folders!');
-			vscode.window.showErrorMessage('Unable to remove workspace folders!');
-		}
-	}
-}
-
-async function onSessionSelected(event: vscode.TreeViewSelectionChangeEvent<Session>): Promise<void> {
-	const selections = event.selection;
-	if (selections.length === 0) {
-		currentSession = null;
-		statusBarItem.text = 'GemStone session: none';
-	} else {
-		currentSession = selections[0];
-		statusBarItem.text = `GemStone session: ${currentSession?.sessionId}`;
-	}
-	try {
-		await classesProvider.setSession(currentSession);
-	} catch (error: any) {
-		vscode.window.showErrorMessage(error.message);
-	}
-}
-
-async function doLogin(login: any, progress: any): Promise<void> {
-	return new Promise(async (resolve, reject) => {
-		try {
-			const session = new Session(login);
-			await session.connect();
-			await session.getVersion();
-			await session.login();
-			await session.registerJadeServer();
-			sessions.push(session);
-			sessionsProvider.refresh(); // show new session
-			sessionsTreeView.reveal(session, { focus: true, select: true }); // select new session
-			outputChannel.appendLine('Login ' + session.description);
-			resolve();
-		} catch (error: any) {
-			vscode.window.showErrorMessage(error.message);
-			reject(error);
-		}
-	});
-}
-
 async function loginHandler(login: Login): Promise<void> {
 	vscode.window.withProgress(
 		{
@@ -299,20 +244,94 @@ async function loginHandler(login: Login): Promise<void> {
 }
 
 async function logoutHandler(session: Session): Promise<void> {
-	outputChannel.appendLine('Logout ' + session.description);
-	await session.logout();
+	return new Promise(async (resolve, reject) => {
+		outputChannel.appendLine('Logout ' + session.description);
+		await session.logout();
+		sessionsProvider.refresh();
+		// handle log out for classesProvider + methodsProvider
+		if (selectedSession === session) {
+			selectedSession = null;
+			statusBarItem.text = 'GemStone session: none';
+		}
+	});
+}
+
+function onLogin(session: Session, progress: any): void {
+	classesProvider.setSession(session);
+	methodsProvider.setSession(session);
+	statusBarItem.text = `GemStone session: ${selectedSession!.sessionId}`;
+
+	// Create filesystem for this session
+	progress.report({ message: 'Add SymbolDictionaries to Explorer' });
+	// context.subscriptions.push(
+	// 	vscode.workspace.registerFileSystemProvider(
+	// 		'gs' + currentSession!.sessionId.toString(),
+	// 		new GemStoneFS(session),
+	// 		{ isCaseSensitive: true, isReadonly: false }
+	// 	)
+	// );
+}
+
+function onLogout(session: Session): void {
+	console.log('onLogout()');
 	sessionsProvider.refresh();
-	// handle log out for classesProvider + methodsProvider
-	if (currentSession === session) {
-		currentSession = null;
-		statusBarItem.text = 'GemStone session: none';
+	// remove this session's SymbolDictionaries (folders) from the workspace
+	const prefix = 'gs' + selectedSession!.sessionId.toString() + ':/';
+	const workspaceFolders = vscode.workspace.workspaceFolders || [];
+	let start, end;
+	for (let i = 0; i < workspaceFolders.length; i++) {
+		if (workspaceFolders[i].uri.toString().startsWith(prefix)) {
+			if (!start) {
+				start = i;
+				end = i;
+			} else {
+				end = i;
+			}
+		}
+	}
+	if (start && end) {
+		const flag = vscode.workspace.updateWorkspaceFolders(start, end - start + 1);
+		if (!flag) {
+			console.log('Unable to remove workspace folders!');
+			vscode.window.showErrorMessage('Unable to remove workspace folders!');
+		}
 	}
 }
 
+async function onClassSelected(event: vscode.TreeViewSelectionChangeEvent<GsClass>): Promise<void> {
+	const selections = event.selection;
+	if (selections.length === 0) {
+		selectedClass = null;
+	} else {
+		selectedClass = selections[0];
+	}
+	return new Promise(async (resolve, _) => {
+
+	});
+}
+
+async function onSessionSelected(event: vscode.TreeViewSelectionChangeEvent<Session>): Promise<void> {
+	const selections = event.selection;
+	if (selections.length === 0) {
+		selectedSession = null;
+		statusBarItem.text = 'GemStone session: none';
+	} else {
+		selectedSession = selections[0];
+		statusBarItem.text = `GemStone session: ${selectedSession?.sessionId}`;
+	}
+	return new Promise(async (resolve, _) => {
+		try {
+			await classesProvider.setSession(selectedSession);
+		} catch (error: any) {
+			vscode.window.showErrorMessage(error.message);
+		}
+		resolve();
+	});
+}
+
 async function selectNamespaceHandler(): Promise<void> {
-	var session = classesProvider.getSession();
-	if (session) {
-		var symbolDictionariesList = Object.keys(classesProvider.getSymbolDictionaries());
+	if (selectedSession) {
+		var symbolDictionariesList = classesProvider.getSymbolDictionaryNames();
 		vscode.window.showQuickPick(symbolDictionariesList)
 			.then((selection: string | undefined) => {
 				console.log(selection);
