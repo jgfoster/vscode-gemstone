@@ -1,9 +1,8 @@
 import * as vscode from 'vscode';
 import { Session } from './Session';
-import JadeServer from './JadeServer';
 
 export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
-	private session: Session | undefined;
+	private session: Session | null = null;
 	private _onDidChangeTreeData: vscode.EventEmitter<GsClass | undefined> = new vscode.EventEmitter<GsClass | undefined>();
 	readonly onDidChangeTreeData: vscode.Event<GsClass | undefined> = this._onDidChangeTreeData.event;
 	jadeServer: number;
@@ -26,46 +25,53 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 		this._onDidChangeTreeData.fire(undefined);
 	}
 
-	setSession(session: Session): void {
-		this.session = session;
-		// obtain list of SymbolDictionary instances
-		try {
-			// console.log('ClassProvider.setSession()');
-			this.jadeServer = session.oopFromExecuteString(JadeServer);
-			const myString = session.stringFromPerform(this.jadeServer, 'getSymbolList', [], 1024);
-			JSON.parse(myString).list.forEach((element: { oop: number, name: string, size: number }) => {
-				this.symbolDictionaries[element.name] = element;
-			});
-		} catch (e: any) {
-			console.error("ERROR INSIDE SET SESSION: ", e.message);
-		}
+	async setSession(session: Session | null): Promise<void> {
+		return new Promise(async (resolve, reject) => {
+			this.session = session;
+			if (session === null) {
+				resolve();
+				return;
+			}
+			// obtain list of SymbolDictionary instances
+			try {
+				const myString = await session.stringFromPerform('getSymbolList', [], 1024);
+				console.log(myString);
+
+				JSON.parse(myString).list.forEach((element: { oop: number, name: string, size: number }) => {
+					this.symbolDictionaries[element.name] = element;
+				});
+				resolve();
+			} catch (ex: any) {
+				reject(ex);
+			}
+		});
 	}
 
 	setSymbolDictionary(selection: string | undefined): void {
 		if (selection && this.session) {
-			this.activeDictionary = this.symbolDictionaries[selection];
-			const myString = this.session.stringFromPerform(
-				this.jadeServer,
-				'getSymbolListWithSelectorsCount:',
-				[this.activeDictionary.oop],
-				65525
-			);
-			JSON.parse(myString).list.forEach((element: any) => {
-				if (this.session) {
-					var superClass = this.session.stringFromPerform(
-						this.jadeServer,
-						'getAncestor:',
-						[element.oop],
-						65525
-					);
-					if (this.classSuperPairs[superClass]) {
-						this.classSuperPairs[superClass].push(element);
-					} else {
-						this.classSuperPairs[superClass] = [element];
-					}
-				}
-			});
-			this.classHierarchy = this.getHierarchyFromPairs(this.classSuperPairs);
+			// 	this.activeDictionary = this.symbolDictionaries[selection];
+			// 	const myString = this.session.stringFromPerform(
+			// 		this.jadeServer,
+			// 		'getSymbolListWithSelectorsCount:',
+			// 		[this.activeDictionary.oop],
+			// 		65525
+			// 	);
+			// 	JSON.parse(myString).list.forEach((element: any) => {
+			// 		if (this.session) {
+			// 			var superClass = this.session.stringFromPerform(
+			// 				this.jadeServer,
+			// 				'getAncestor:',
+			// 				[element.oop],
+			// 				65525
+			// 			);
+			// 			if (this.classSuperPairs[superClass]) {
+			// 				this.classSuperPairs[superClass].push(element);
+			// 			} else {
+			// 				this.classSuperPairs[superClass] = [element];
+			// 			}
+			// 		}
+			// 	});
+			// 	this.classHierarchy = this.getHierarchyFromPairs(this.classSuperPairs);
 		} else {
 			this.activeDictionary = null;
 		}
@@ -88,7 +94,7 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 		return { [key]: [] };
 	}
 
-	getSession(): Session | undefined {
+	getSession(): Session | null {
 		return this.session;
 	}
 
@@ -132,13 +138,13 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 		return Promise.resolve([new GsClass("Object", vscode.TreeItemCollapsibleState.Expanded)]); // TODO: FETCH METHODS FOR OBJECT
 	}
 
-	displayClassFinder() {
+	async displayClassFinder() {
 		if (!this.session) {
 			console.log("NO SESSION ACTIVE");
 			return;
 		}
 		if (this.allClasses.length == 0) {
-			var allClassesString = this.session.stringFromPerform(this.jadeServer, 'getAllClasses', [], 65525);
+			var allClassesString = await this.session.stringFromPerform('getAllClasses', [], 65525);
 			this.allClasses = JSON.parse(allClassesString);
 		}
 		vscode.window.showQuickPick(this.allClasses)

@@ -231,7 +231,7 @@ function onLogout(session: Session): void {
 	}
 }
 
-function onSessionSelected(event: vscode.TreeViewSelectionChangeEvent<Session>): void {
+async function onSessionSelected(event: vscode.TreeViewSelectionChangeEvent<Session>): Promise<void> {
 	const selections = event.selection;
 	if (selections.length === 0) {
 		currentSession = null;
@@ -240,7 +240,11 @@ function onSessionSelected(event: vscode.TreeViewSelectionChangeEvent<Session>):
 		currentSession = selections[0];
 		statusBarItem.text = `GemStone session: ${currentSession?.sessionId}`;
 	}
-	classesProvider.setSession(currentSession);
+	try {
+		await classesProvider.setSession(currentSession);
+	} catch (error: any) {
+		vscode.window.showErrorMessage(error.message);
+	}
 }
 
 async function doLogin(login: any, progress: any): Promise<void> {
@@ -252,9 +256,8 @@ async function doLogin(login: any, progress: any): Promise<void> {
 			await session.login();
 			await session.registerJadeServer();
 			sessions.push(session);
-			sessionsProvider.refresh();
-			sessionsTreeView.reveal(session, { focus: true, select: true });
-			// onLogin(session, progress);
+			sessionsProvider.refresh(); // show new session
+			sessionsTreeView.reveal(session, { focus: true, select: true }); // select new session
 			outputChannel.appendLine('Login ' + session.description);
 			resolve();
 		} catch (error: any) {

@@ -51,7 +51,8 @@ export class MethodsProvider implements vscode.TreeDataProvider<GsMethod> {
 
 	extractMethods(majorSplitter: string, minorSplitter: string, regexString: string, type: string, oop: number) {
 		if (this.session) {
-			var classString: string = this.session.stringFromPerform(oop, 'fileOutClass', [], 65525);
+			// var classString: string = this.session.stringFromPerform('fileOutClass', [oop], 65525);
+			var classString: string = '';
 			var classMethodStrings: string = classString.split(majorSplitter)[1];
 			var methodStrings: Array<string> = classMethodStrings.split("%");
 			for (var i = 0; i < methodStrings.length; i++) {

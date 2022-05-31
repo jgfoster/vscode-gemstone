@@ -7,12 +7,13 @@ import * as path from 'path';
 import { Login } from './Login';
 const WebSocket = require("ws");
 import JadeServer from './JadeServer';
+import exp = require('constants');
 
 let sessionCounter: number = 0;
 
 export class Session extends vscode.TreeItem {
 	isLoggedIn: boolean = false;
-	private jadeServer: number = 1;	// OOP_ILLEGAL
+	private jadeServer: string = '';
 	requestCounter: number = 0;
 	requests: Map<number, Array<Function>> = new Map;
 	sessionId: number;
@@ -140,7 +141,7 @@ export class Session extends vscode.TreeItem {
 		return this.send(json);
 	}
 
-	async oopFromExecuteString(input: string): Promise<number> {
+	async oopFromExecuteString(input: string): Promise<string> {
 		const myString = input.replace(/\"/g, '\\\"');
 		return new Promise(async (resolve, reject) => {
 			const json = new Map;
@@ -151,7 +152,7 @@ export class Session extends vscode.TreeItem {
 				json.clear();
 				json.set("request", "nbResult");
 				const obj = await this.send(json);
-				resolve(Number(obj.oop));
+				resolve(obj.oop);
 			} catch (error) {
 				reject(error);
 			}
@@ -178,10 +179,20 @@ export class Session extends vscode.TreeItem {
 		return 'nil';
 	}
 
-	stringFromPerform(receiver: number, selector: string, oopArray: number[], expectedSize: number): string {
-		console.log('stringFromPerform()');
-		// return this.gciSession.performFetchBytes(receiver, selector, oopArray, expectedSize);
-		return 'nil';
+	async stringFromPerform(selector: string, oopArray: number[], expectedSize: number): Promise<string> {
+		return new Promise(async (resolve, reject) => {
+			const json: Map<string, any> = new Map;
+			json.set("receiver", this.jadeServer);
+			json.set("request", "performFetchBytes");
+			json.set("selector", selector);
+			json.set("maxSize", expectedSize);
+			try {
+				const obj = await this.send(json);
+				resolve(obj.result);
+			} catch (error) {
+				reject(error);
+			}
+		});
 	}
 
 	iconPath = {

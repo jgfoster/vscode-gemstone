@@ -30,9 +30,10 @@ export class GemStoneFS implements vscode.FileSystemProvider {
         this.map = new Map();
         // obtain list of SymbolDictionary instances
         try {
-            // console.log('GemStoneFS class constructor');
-            this.jadeServer = session.oopFromExecuteString(JadeServer);
-            const myString = session.stringFromPerform(this.jadeServer, 'getSymbolList', [], 1024);
+            console.log('GemStoneFS class constructor');
+            this.jadeServer = -1; // session.oopFromExecuteString(JadeServer);
+            // const myString = await session.stringFromPerform('getSymbolList', [], 1024);
+            const myString = '';
             const list = JSON.parse(myString).list.map((each: any) => {
                 const uri = vscode.Uri.parse('gs' + session.sessionId.toString() + ':/' + each.name);
                 const dict = new GsDictionaryFile(session, each.name, each);
@@ -77,12 +78,12 @@ export class GemStoneFS implements vscode.FileSystemProvider {
         const result: [string, vscode.FileType][] = new Array;
         try {
             const dict = this.map.get(uri.toString());
-            const myString = this.session.stringFromPerform(
-                this.jadeServer,
-                dict.getExpansionString(),
-                [dict.oop],
-                65525
-            );
+            const myString = '';
+            // const myString = await this.session.stringFromPerform(
+            //     dict.getExpansionString(),
+            //     [dict.oop],
+            //     65525
+            // );
             JSON.parse(myString).list.forEach((element: any) => {
                 const newUri = vscode.Uri.parse(uri.toString() + '/' + element.key);
                 const newEntry = dict.addEntry(this.session, element.key, element);
@@ -98,7 +99,8 @@ export class GemStoneFS implements vscode.FileSystemProvider {
     // --- manage file contents
 
     getMethodString(entry: File): Uint8Array {
-        const classString: string = this.session.stringFromPerform(entry.gsClassOop, 'fileOutClass', [], 65525);
+        // const classString: string = this.session.stringFromPerform('fileOutClass', [], 65525);
+        const classString: string = '';
         const instanceMethodsString: string = classString.split(`! ------------------- Instance methods for ${entry.gsClass}`)[1];
         const methodStrings: Array<string> = instanceMethodsString.split("%");
         for (var methodString of methodStrings) {
