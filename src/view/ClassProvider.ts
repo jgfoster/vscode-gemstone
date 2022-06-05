@@ -112,7 +112,7 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 			// 	this.activeDictionary = this.symbolDictionaries[selection];
 			// 	const myString = this.session.stringFromPerform(
 			// 		this.jadeServer,
-			// 		'getSymbolListWithSelectorsCount:',
+			// 		'getClassesInDictionary:',
 			// 		[this.activeDictionary.oop],
 			// 		65525
 			// 	);

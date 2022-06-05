@@ -16,7 +16,7 @@ export class GsClassFile implements vscode.FileStat {
     oop: number | null;
 
     constructor(session: Session, name: string, data: any = null) {
-        this.type = vscode.FileType.Directory;
+        this.type = vscode.FileType.File;
         this.ctime = Date.now();
         this.mtime = Date.now();
         this.size = data.size || 0;

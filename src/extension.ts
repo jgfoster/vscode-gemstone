@@ -13,7 +13,7 @@ import { Session } from './model/Session';
 import { ClassesProvider } from './view/ClassProvider';
 import { GsClass } from './model/GsClass';
 import { MethodsProvider } from './view/MethodProvider';
-import { GemStoneFS } from './view/FileSystemProvider';
+import { GsFileSystemProvider } from './view/GsFileSystemProvider';
 // import fs = require('fs');
 
 const classesProvider = new ClassesProvider();
@@ -173,8 +173,8 @@ async function doLogin(login: any, progress: any): Promise<void> {
 
 			// Create filesystem for this session
 			progress.report({ message: 'Add SymbolDictionaries to Explorer' });
-			const scheme = 'gs' + session.sessionId.toString();
-			const provider = await GemStoneFS.forSession(session);
+			const scheme = session.fsScheme();
+			const provider = await GsFileSystemProvider.forSession(session);
 			const options = { isCaseSensitive: true, isReadonly: false };
 			const subscription = vscode.workspace.registerFileSystemProvider(
 				scheme,
@@ -188,8 +188,6 @@ async function doLogin(login: any, progress: any): Promise<void> {
 			outputChannel.appendLine('Login ' + session.description);
 			resolve();
 		} catch (error: any) {
-			console.log('doLogin() - 9');
-			vscode.window.showErrorMessage(error.message);
 			reject(error);
 		}
 	});
@@ -255,7 +253,9 @@ async function loginHandler(login: Login): Promise<void> {
 			if (password) {
 				try {
 					await doLogin({ ...login, 'gs_password': password }, progress);
-				} catch (_) { }
+				} catch (error: any) {
+					vscode.window.showErrorMessage(error.message);
+				}
 			}
 		});
 }
@@ -265,38 +265,34 @@ async function logoutHandler(session: Session): Promise<void> {
 		outputChannel.appendLine('Logout ' + session.description);
 		await session.logout();
 		sessionsProvider.refresh();
-		// handle log out for classesProvider + methodsProvider
+
+		// remove this session's SymbolDictionaries (folders) from the workspace
+		const prefix = selectedSession!.fsScheme() + ':/';
+		const workspaceFolders = vscode.workspace.workspaceFolders || [];
+		let start, end;
+		for (let i = 0; i < workspaceFolders.length; i++) {
+			if (workspaceFolders[i].uri.toString().startsWith(prefix)) {
+				if (!start) {
+					start = i;
+					end = i;
+				} else {
+					end = i;
+				}
+			}
+		}
+		if (start && end) {
+			const flag = vscode.workspace.updateWorkspaceFolders(start, end - start + 1);
+			if (!flag) {
+				console.log('Unable to remove workspace folders!');
+				vscode.window.showErrorMessage('Unable to remove workspace folders!');
+			}
+		}
+
 		if (selectedSession === session) {
 			selectedSession = null;
 			statusBarItem.text = 'GemStone session: none';
 		}
 	});
-}
-
-function onLogout(session: Session): void {
-	console.log('onLogout()');
-	sessionsProvider.refresh();
-	// remove this session's SymbolDictionaries (folders) from the workspace
-	const prefix = 'gs' + selectedSession!.sessionId.toString() + ':/';
-	const workspaceFolders = vscode.workspace.workspaceFolders || [];
-	let start, end;
-	for (let i = 0; i < workspaceFolders.length; i++) {
-		if (workspaceFolders[i].uri.toString().startsWith(prefix)) {
-			if (!start) {
-				start = i;
-				end = i;
-			} else {
-				end = i;
-			}
-		}
-	}
-	if (start && end) {
-		const flag = vscode.workspace.updateWorkspaceFolders(start, end - start + 1);
-		if (!flag) {
-			console.log('Unable to remove workspace folders!');
-			vscode.window.showErrorMessage('Unable to remove workspace folders!');
-		}
-	}
 }
 
 async function onClassSelected(event: vscode.TreeViewSelectionChangeEvent<GsClass>): Promise<void> {

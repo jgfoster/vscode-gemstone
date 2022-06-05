@@ -5,13 +5,13 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import {Login} from './Login';
+import { Login } from './Login';
 
 const WebSocket = require('ws');
 import JadeServer from './JadeServer';
-import exp = require('constants');
-import {SymbolDictionary} from './SymbolDictionary';
-import {privateEncrypt} from 'crypto';
+// import exp = require('constants');
+import { SymbolDictionary } from './SymbolDictionary';
+// import {privateEncrypt} from 'crypto';
 
 let sessionCounter: number = 0;
 
@@ -71,8 +71,7 @@ export class Session extends vscode.TreeItem {
     return new Promise((resolve, reject) => {
       this.requests.set(0, [resolve, reject]);
       try {
-        this.socket = new WebSocket(`ws://${this._login.gem_host}:${
-            this._login.gem_port}/webSocket.gs`);
+        this.socket = new WebSocket(`ws://${this._login.gem_host}:${this._login.gem_port}/webSocket.gs`);
       } catch (error) {
         this.requests.clear();
         reject(error);
@@ -98,13 +97,13 @@ export class Session extends vscode.TreeItem {
       // obtain list of SymbolDictionary instances
       try {
         const myString =
-            await this.stringFromPerform('getSymbolList', [], 1024);
+          await this.stringFromPerform('getSymbolList', [], 1024);
         const array = new Array;
         JSON.parse(myString).list.forEach(
-            (element: {oop: number, name: string, size: number}) => {
-              array.push(new SymbolDictionary(
-                  element.oop.toString(), element.name, element.size));
-            });
+          (element: { oop: number, name: string, size: number }) => {
+            array.push(new SymbolDictionary(
+              element.oop.toString(), element.name, element.size));
+          });
         resolve(array);
       } catch (ex: any) {
         reject(ex);
@@ -167,6 +166,10 @@ export class Session extends vscode.TreeItem {
     // this.gciSession.commit();
   }
 
+  fsScheme(): string {
+    return 'gs' + this.sessionId.toString();
+  }
+
   async login(): Promise<Map<string, any>> {
     const json = new Map;
     json.set('request', 'login');
@@ -220,8 +223,8 @@ export class Session extends vscode.TreeItem {
   }
 
   async stringFromPerform(
-      selector: string, oopArray: number[],
-      expectedSize: number): Promise<string> {
+    selector: string, oopArray: number[],
+    expectedSize: number): Promise<string> {
     return new Promise(async (resolve, reject) => {
       const json: Map<string, any> = new Map;
       json.set('receiver', this.jadeServer);

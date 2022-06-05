@@ -5,13 +5,14 @@
  *  so we can 'fold' the contents and use the 'outline' for quick lookup
  */
 
- const getDictionary = (): string => { return `getDictionary: aSymbolDictionary
+const getDictionary = (): string => {
+	return `getDictionary: aSymbolDictionary
  | comma dict stream |
  stream := WriteStream on: String new.
  stream nextPutAll: '{"list":['.
  comma := ''.
- aSymbolDictionary keysAndValuesDo: [:eachKey :eachValue | 
-     stream 
+ aSymbolDictionary keysAndValuesDo: [:eachKey :eachValue |
+     stream
          nextPutAll: comma;
          nextPutAll: '{"key":"';
          nextPutAll: eachKey asString;
@@ -28,14 +29,15 @@
  stream nextPutAll: ']}'.
  ^stream contents.`;
 };
-const getSymbolListWithSelectorsCount = (): string => {return `getSymbolListWithSelectorsCount: aSymbolDictionary
+const getClassesInDictionary = (): string => {
+	return `getClassesInDictionary: aSymbolDictionary
 | comma stream |
 stream := WriteStream on: String new.
 stream nextPutAll: '{"list":['.
 comma := ''.
 aSymbolDictionary values collect: [ :each |
 	(each class asString endsWith: ' class') ifTrue: [
-		stream 
+		stream
 			nextPutAll: comma;
 			nextPutAll: '{"oop":';
 			print: each asOop;
@@ -51,14 +53,15 @@ aSymbolDictionary values collect: [ :each |
 stream nextPutAll: ']}'.
 ^stream contents.`;
 };
-const getSelectors = (): string => { return `
+const getSelectors = (): string => {
+	return `
 getSelectors: aClass
 | comma stream |
 stream := WriteStream on: String new.
 stream nextPutAll: '{"list":['.
 comma := ''.
 aClass selectors collect: [ :each |
-	stream 
+	stream
 		nextPutAll: comma;
 		nextPutAll: '{"oop":';
 		print: each asOop;
@@ -75,13 +78,14 @@ aClass selectors collect: [ :each |
 stream nextPutAll: ']}'.
 ^stream contents.
 `}
-const getSymbolList = (): string => {return `getSymbolList 
+const getSymbolList = (): string => {
+	return `getSymbolList
 | comma stream |
 stream := WriteStream on: String new.
 stream nextPutAll: '{"list":['.
 comma := ''.
-System myUserProfile symbolList do: [:each | 
-stream 
+System myUserProfile symbolList do: [:each |
+stream
     nextPutAll: comma;
     nextPutAll: '{"oop":';
     print: each asOop;
@@ -96,14 +100,16 @@ comma := ','.
 stream nextPutAll: ']}'.
 ^stream contents.`;
 };
-const getAncestor = (): string => { return `
+const getAncestor = (): string => {
+	return `
 getAncestor: aClass
 | stream |
 stream := WriteStream on: String new.
 stream nextPutAll: aClass superClass asString.
 ^stream contents.
 `}
-const getAllSubclasses = (): string => { return `
+const getAllSubclasses = (): string => {
+	return `
 getAllSubclasses: aClass
 
 	| classes |
@@ -114,7 +120,8 @@ getAllSubclasses: aClass
 	].
 	^ classes
 `}
-const getAllClasses = (): string => { return `
+const getAllClasses = (): string => {
+	return `
 getAllClasses
 
 	| classes stream comma |
@@ -123,7 +130,7 @@ getAllClasses
 	comma := ''.
 	stream nextPutAll: '['.
 	classes do: [ :class |
-		stream 
+		stream
             nextPutAll: comma;
             nextPutAll: '"';
 			nextPutAll: class asString;
@@ -137,23 +144,23 @@ getAllClasses
 
 // list the methods
 const methods = [
-    getDictionary(),
-    getSymbolListWithSelectorsCount(),
-    getSelectors(),
-    getSymbolList(),
-    getAncestor(),
-    getAllSubclasses(),
-    getAllClasses(),
+	getDictionary(),
+	getClassesInDictionary(),
+	getSelectors(),
+	getSymbolList(),
+	getAncestor(),
+	getAllSubclasses(),
+	getAllClasses(),
 ];
 
 // this puts it all together
 const getCode = (): string => {
-let code = `
+	let code = `
 | class result server source symbolList |
 symbolList := (AllUsers userWithId: 'DataCurator') symbolList.
-symbolList := symbolList class new 
-    add: (symbolList detect: [:each | each name == #UserGlobals]); 
-    add: (symbolList detect: [:each | each name == #Globals]); 
+symbolList := symbolList class new
+    add: (symbolList detect: [:each | each name == #UserGlobals]);
+    add: (symbolList detect: [:each | each name == #Globals]);
     yourself.
 [
     class := symbolList objectNamed: #Object.
@@ -164,20 +171,20 @@ symbolList := symbolList class new
 		poolDictionaries: (#() class withAll: symbolList)
         inDictionary: SymbolDictionary new.
 `;
-methods.forEach(element => {
-    code = code + `source := '` + element.replace(new RegExp(`'`, 'g'), `''`) + `'.
+	methods.forEach(element => {
+		code = code + `source := '` + element.replace(new RegExp(`'`, 'g'), `''`) + `'.
     result := class
 		compileMethod: source
 		dictionaries: symbolList
 		category: 'category'.
     result ~~ nil ifTrue: [^GsNMethod _sourceWithErrors: result fromString: source].`;
-});
-    code = code + `
+	});
+	code = code + `
     class new "initialize"
-] on: (symbolList objectNamed: #Error) do: [:ex | 
+] on: (symbolList objectNamed: #Error) do: [:ex |
     ex return: 'ERROR: ' , (GsProcess stackReportToLevel: 100)
 ]`;
-return code;
+	return code;
 };
 
 // the result is simply a string of Smalltalk code

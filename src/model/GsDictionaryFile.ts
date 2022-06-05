@@ -40,8 +40,4 @@ export class GsDictionaryFile implements vscode.FileStat {
         }
         return result;
     }
-
-    getExpansionString(): string {
-        return 'getSymbolListWithSelectorsCount:';
-    }
 }
