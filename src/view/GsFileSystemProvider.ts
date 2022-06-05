@@ -76,7 +76,6 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
   }
 
   async readDirectory(uri: vscode.Uri): Promise<[string, vscode.FileType][]> {
-    console.log('readDirectory', uri.toString());
     return new Promise(async (resolve, reject) => {
       const result: [string, vscode.FileType][] = new Array;
       try {
@@ -91,6 +90,7 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
         });
         resolve(result);
       } catch (e: any) {
+        console.log('readDirectory', e);
         reject(e);
       }
     });

@@ -43,9 +43,7 @@ aSymbolDictionary values collect: [ :each |
 			print: each asOop;
 			nextPutAll: ',"key":"';
 			nextPutAll: each name;
-			nextPutAll: '","size":';
-			print: each selectors size;
-			nextPutAll: '}';
+			nextPutAll: '"}';
 			yourself.
 		comma := ','.
 	]

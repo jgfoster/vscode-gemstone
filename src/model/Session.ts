@@ -11,6 +11,7 @@ const WebSocket = require('ws');
 import JadeServer from './JadeServer';
 // import exp = require('constants');
 import { SymbolDictionary } from './SymbolDictionary';
+import { stringify } from 'querystring';
 // import {privateEncrypt} from 'crypto';
 
 let sessionCounter: number = 0;
@@ -30,33 +31,13 @@ export class Session extends vscode.TreeItem {
     this.description = this.tooltip;
   }
 
-  send(map: Map<string, any>): Promise<any> {
+  private send(obj: any): Promise<any> {
     const requestId = ++this.requestCounter;
-    map.set('id', requestId);
-    let json = '{';
-    let comma = '';
-    map.forEach((value, key) => {
-      json = json + comma + '"' + key + '": ';
-      if (typeof value === 'number') {
-        json = json + value.toString();
-      } else if (value instanceof Array) {
-        json = json + '[';
-        comma = '';
-        value.forEach((value1: any) => {
-          json = json + comma + value.toString();
-          comma = ', ';
-        });
-        json = json + ']';
-      } else {
-        json = json + '"' + value + '"';
-      }
-      comma = ', ';
-    });
-    json = json + '}';
+    obj.id = requestId;
     return new Promise((resolve, reject) => {
       this.requests.set(requestId, [resolve, reject]);
       try {
-        this.socket.send(json.toString(), {}, (error: any) => {
+        this.socket.send(JSON.stringify(obj), {}, (error: any) => {
           if (typeof error !== 'undefined') {
             reject(error);
           }
@@ -102,7 +83,7 @@ export class Session extends vscode.TreeItem {
         JSON.parse(myString).list.forEach(
           (element: { oop: number, name: string, size: number }) => {
             array.push(new SymbolDictionary(
-              element.oop.toString(), element.name, element.size));
+              element.oop, element.name, element.size));
           });
         resolve(array);
       } catch (ex: any) {
@@ -110,7 +91,6 @@ export class Session extends vscode.TreeItem {
       }
     });
   }
-
 
   handleClose(_: any): void {
     this.isLoggedIn = false;
@@ -136,7 +116,6 @@ export class Session extends vscode.TreeItem {
     if (obj['type'] === 'error') {
       functions![1](obj);
     } else {
-      // console.log(`handleMessage(${event})`);
       if (obj['request'] === 'login') {
         this.isLoggedIn = true;
       }
@@ -150,10 +129,8 @@ export class Session extends vscode.TreeItem {
   }
 
   async getVersion(): Promise<void> {
-    const json = new Map;
-    json.set('request', 'getGciVersion');
     try {
-      const response = await this.send(json);
+      const response = await this.send({ 'request': 'getGciVersion' });
       this.version = response.version.split(' ')[0];
       Promise.resolve();
     } catch (error) {
@@ -171,30 +148,23 @@ export class Session extends vscode.TreeItem {
   }
 
   async login(): Promise<Map<string, any>> {
-    const json = new Map;
-    json.set('request', 'login');
-    json.set('username', this._login.gs_user);
-    json.set('password', this._login.gs_password);
-    return this.send(json);
+    return this.send({
+      'request': 'login',
+      'username': this._login.gs_user,
+      'password': this._login.gs_password
+    });
   }
 
   async logout(): Promise<Map<string, any>> {
-    const json = new Map;
-    json.set('request', 'logout');
-    return this.send(json);
+    return this.send({ 'request': 'logout' });
   }
 
   async oopFromExecuteString(input: string): Promise<string> {
     const myString = input.replace(/\"/g, '\\\"');
     return new Promise(async (resolve, reject) => {
-      const json = new Map;
-      json.set('request', 'execute');
-      json.set('string', myString);
       try {
-        await this.send(json);
-        json.clear();
-        json.set('request', 'nbResult');
-        const obj = await this.send(json);
+        await this.send({ 'request': 'execute', 'string': myString });
+        const obj = await this.send({ 'request': 'nbResult' });
         resolve(obj.oop);
       } catch (error) {
         reject(error);
@@ -226,16 +196,14 @@ export class Session extends vscode.TreeItem {
     selector: string, oopArray: number[],
     expectedSize: number): Promise<string> {
     return new Promise(async (resolve, reject) => {
-      const json: Map<string, any> = new Map;
-      json.set('receiver', this.jadeServer);
-      json.set('args', oopArray);
-      json.set('request', 'performFetchBytes');
-      json.set('selector', selector);
-      json.set('maxSize', expectedSize);
-      // console.log('stringFromPerform', selector, oopArray, expectedSize,
-      // json);
       try {
-        const obj = await this.send(json);
+        const obj = await this.send({
+          'receiver': this.jadeServer,
+          'args': oopArray,
+          'request': 'performFetchBytes',
+          'selector': selector,
+          'maxSize': expectedSize
+        });
         resolve(obj.result);
       } catch (error) {
         reject(error);
