@@ -37,12 +37,18 @@ stream nextPutAll: '{"list":['.
 comma := ''.
 aSymbolDictionary values collect: [ :each |
 	(each class asString endsWith: ' class') ifTrue: [
+		| fileOut |
+		fileOut := each fileOutClass.
 		stream
 			nextPutAll: comma;
 			nextPutAll: '{"oop":';
 			print: each asOop;
 			nextPutAll: ',"key":"';
 			nextPutAll: each name;
+			nextPutAll: '","size":';
+			print: fileOut size;
+			nextPutAll: ',"md5":"';
+			nextPutAll: fileOut asMd5String;
 			nextPutAll: '"}';
 			yourself.
 		comma := ','.
@@ -52,8 +58,7 @@ stream nextPutAll: ']}'.
 ^stream contents.`;
 };
 const getSelectors = (): string => {
-	return `
-getSelectors: aClass
+	return `getSelectors: aClass
 | comma stream |
 stream := WriteStream on: String new.
 stream nextPutAll: '{"list":['.
@@ -74,8 +79,8 @@ aClass selectors collect: [ :each |
 	comma := ','.
 ].
 stream nextPutAll: ']}'.
-^stream contents.
-`}
+^stream contents.`;
+};
 const getSymbolList = (): string => {
 	return `getSymbolList
 | comma stream |
@@ -90,7 +95,7 @@ stream
     nextPutAll: ',"name":"';
     nextPutAll: each name;
     nextPutAll: '","size":';
-    print: each size;
+    print: (each select: [:each | each isClass]) size;
     nextPutAll: '}';
     yourself.
 comma := ','.
@@ -99,16 +104,14 @@ stream nextPutAll: ']}'.
 ^stream contents.`;
 };
 const getAncestor = (): string => {
-	return `
-getAncestor: aClass
+	return `getAncestor: aClass
 | stream |
 stream := WriteStream on: String new.
 stream nextPutAll: aClass superClass asString.
-^stream contents.
-`}
+^stream contents`;
+};
 const getAllSubclasses = (): string => {
-	return `
-getAllSubclasses: aClass
+	return `getAllSubclasses: aClass
 
 	| classes |
 	classes := Array new.
@@ -116,11 +119,10 @@ getAllSubclasses: aClass
 	aClass subclasses do: [ :subclass |
 		(self getAllSubclasses: subclass) do: [ :child | classes add: child ].
 	].
-	^ classes
-`}
+	^classes`;
+};
 const getAllClasses = (): string => {
-	return `
-getAllClasses
+	return `getAllClasses
 
 	| classes stream comma |
 	classes := self getAllSubclasses: Object.
@@ -137,11 +139,16 @@ getAllClasses
 		comma := ','.
 	].
 	stream nextPutAll: ']'.
-	^ stream contents
-`}
+	^stream contents`;
+};
+const fileOutClass = (): string => {
+	return `fileOutClass: aClass
+		^aClass fileOutClass`;
+};
 
 // list the methods
 const methods = [
+	fileOutClass(),
 	getDictionary(),
 	getClassesInDictionary(),
 	getSelectors(),
@@ -171,11 +178,12 @@ symbolList := symbolList class new
 `;
 	methods.forEach(element => {
 		code = code + `source := '` + element.replace(new RegExp(`'`, 'g'), `''`) + `'.
-    result := class
-		compileMethod: source
-		dictionaries: symbolList
-		category: 'category'.
-    result ~~ nil ifTrue: [^GsNMethod _sourceWithErrors: result fromString: source].`;
+	result := class
+	compileMethod: source
+	dictionaries: symbolList
+	category: 'category'.
+	result ~~ nil ifTrue: [^GsNMethod _sourceWithErrors: result fromString: source].
+`;
 	});
 	code = code + `
     class new "initialize"

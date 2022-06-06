@@ -9,10 +9,7 @@ import { Login } from './Login';
 
 const WebSocket = require('ws');
 import JadeServer from './JadeServer';
-// import exp = require('constants');
 import { SymbolDictionary } from './SymbolDictionary';
-import { stringify } from 'querystring';
-// import {privateEncrypt} from 'crypto';
 
 let sessionCounter: number = 0;
 
@@ -113,6 +110,7 @@ export class Session extends vscode.TreeItem {
     const id = obj['_id'];
     const functions = this.requests.get(id);
     this.requests.delete(id);
+    console.log(`${obj._request} took ${obj._time} ms`);
     if (obj['type'] === 'error') {
       functions![1](obj);
     } else {
@@ -204,7 +202,11 @@ export class Session extends vscode.TreeItem {
           'selector': selector,
           'maxSize': expectedSize
         });
-        resolve(obj.result);
+        if (obj.type === 'ByteArray') {
+          resolve(Buffer.from(obj.result, 'base64').toString());
+        } else {
+          resolve(obj.result);
+        }
       } catch (error) {
         reject(error);
       }

@@ -12,19 +12,18 @@ export class GsDictionaryFile implements vscode.FileStat {
 	size: number;
 
 	name: string;
-	entries: Map<string, File | GsClassFile> | null;
+	entries: Map<string, GsClassFile> = new Map;
 	session: Session;
-	oop: number | null;
+	oop: number;
 
-	constructor(session: Session, name: string, data: any = null) {
+	constructor(session: Session, name: string, data: any) {
 		this.type = vscode.FileType.Directory;
 		this.ctime = Date.now();
 		this.mtime = Date.now();
-		this.size = data.size || 0;
+		this.size = data.size;
 		this.name = name;
-		this.entries = null;
 		this.session = session;
-		this.oop = data.oop || 1;
+		this.oop = data.oop;
 	}
 
 	addEntry(session: Session, key: any, element: any) {
@@ -32,6 +31,7 @@ export class GsDictionaryFile implements vscode.FileStat {
 	}
 
 	getChildren(uri: vscode.Uri): [string, vscode.FileType][] {
+		console.log('getChildren', uri.toString());
 		let result: [string, vscode.FileType][] = [];
 		if (this.entries) {
 			for (const [name, child] of this.entries) {

@@ -4,43 +4,21 @@ import { File } from './File';
 import { Session } from './Session';
 
 export class GsClassFile implements vscode.FileStat {
-
-    type: vscode.FileType;
-    ctime: number;
-    mtime: number;
+    ctime: number = Date.now();
+    mtime: number = Date.now();
     size: number;
+    type: vscode.FileType = vscode.FileType.File;
+    md5: string;
 
     name: string;
-    entries: Map<string, File | GsClassFile> | null;
     session: Session;
-    oop: number | null;
+    oop: number;
 
-    constructor(session: Session, name: string, data: any = null) {
-        this.type = vscode.FileType.File;
-        this.ctime = Date.now();
-        this.mtime = Date.now();
-        this.size = data.size || 0;
+    constructor(session: Session, name: string, data: any) {
+        this.size = data.size;
         this.name = name;
-        this.entries = null;
         this.session = session;
-        this.oop = data.oop || 1;
-    }
-
-    addEntry(session: Session, key: any, element: any) {
-        return new File(this.session, element.key, element);
-    }
-
-    getChildren(uri: vscode.Uri): [string, vscode.FileType][] {
-        let result: [string, vscode.FileType][] = [];
-        if (this.entries) {
-            for (const [name, child] of this.entries) {
-                result.push([name, child.type]);
-            }
-        }
-        return result;
-    }
-
-    getExpansionString(): string {
-        return 'getSelectors:';
+        this.oop = data.oop;
+        this.md5 = data.md5;
     }
 }

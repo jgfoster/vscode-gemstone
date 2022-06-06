@@ -23,10 +23,9 @@ function str2ab(str: string): Uint8Array {
 
 export class GsFileSystemProvider implements vscode.FileSystemProvider {
   private session: Session;
-  public readonly map: Map<any, any>;
+  public readonly map: Map<string, any> = new Map();
   private constructor(session: Session) {
     this.session = session;
-    this.map = new Map();
   }
 
   static async forSession(session: Session): Promise<GsFileSystemProvider> {
@@ -58,8 +57,12 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
 
   // --- manage file metadata
 
-  // return a FileStat-type (ctime: number, mtime: number, size: number, type:
-  // FileType)
+  // return a FileStat-type
+  //    (ctime: number, mtime: number, size: number, type: FileType)
+  // VS Code looks for the following in each directory:
+  //    .vscode/settings.json
+  //    .vscode/tasks.json
+  //    .vscode/launch.json
   stat(uri: vscode.Uri): vscode.FileStat {
     if (uri.toString().includes('.vscode')) {
       throw vscode.FileSystemError.FileNotFound(uri);
@@ -90,7 +93,6 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
         });
         resolve(result);
       } catch (e: any) {
-        console.log('readDirectory', e);
         reject(e);
       }
     });
@@ -98,35 +100,22 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
 
   // --- manage file contents
 
-  getMethodString(entry: File): Uint8Array {
-    // const classString: string =
-    // this.session.stringFromPerform('fileOutClass', [], 65525);
-    const classString: string = '';
-    const instanceMethodsString: string = classString.split(
-      `! ------------------- Instance methods for ${entry.gsClass}`)[1];
-    const methodStrings: Array<string> = instanceMethodsString.split('%');
-    for (var methodString of methodStrings) {
-      var re = /method: .*$\n^(.*)/gm;
-      var match =
-        re.exec(methodString);  // TODO: fix matches for comparison methods
-      // (such as =>) and keyword methods
-      if (match && match[1] == entry.name) {
-        return str2ab(methodString.split(`method: ${entry.gsClass}`)[1].trim());
-      }
-    }
-    return str2ab('We do not yet support \'' + entry.gsClass + '\' instances!');
-  }
-
-  readFile(uri: vscode.Uri): Uint8Array {
+  async readFile(uri: vscode.Uri): Promise<Uint8Array> {
     if (uri.toString().includes('.vscode')) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
-    const entry: File = this.map.get(uri.toString());
-    if (!entry) {
-      console.error('stat(\'' + uri.toString() + '\') entry not found!');
-      throw vscode.FileSystemError.FileNotFound(uri);
-    }
-    return this.getMethodString(entry);
+    return new Promise(async (resolve, reject) => {
+      const entry: File = this.map.get(uri.toString());
+      if (!entry) {
+        throw vscode.FileSystemError.FileNotFound(uri);
+      }
+      try {
+        let result = await this.session.stringFromPerform('fileOutClass:', [entry.oop], entry.size + 32);
+        resolve(str2ab(result));
+      } catch (e: any) {
+        reject(e);
+      }
+    });
   }
 
   uint8ArrayToExecutableString(array: Uint8Array) {
@@ -165,7 +154,7 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
   }
 
   createDirectory(uri: vscode.Uri): void {
-    console.log('GemStoneFS.createDirectory(' + uri.toString() + ')');
+    console.log(`GemStoneFS.createDirectory(${uri.toString()})`);
   }
 
   private _emitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
