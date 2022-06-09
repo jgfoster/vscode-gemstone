@@ -19,15 +19,9 @@ export class Login extends vscode.TreeItem {
 		public readonly host_password: string
 	) {
 		super(label, vscode.TreeItemCollapsibleState.None);
+		this.tooltip = `${this.gs_user} in ${this.stone} (${this.version}) on ${this.gem_host}`;
+		this.description = this.tooltip;
 		this.library = null;
-	}
-
-	get tooltip(): string {
-		return `${this.gs_user} in ${this.stone} (${this.version}) on ${this.gem_host}`;
-	}
-
-	get description(): string {
-		return this.tooltip;
 	}
 
 	iconPath = {

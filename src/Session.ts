@@ -15,6 +15,8 @@ export class Session extends vscode.TreeItem {
 	) {
 		super(login.label, vscode.TreeItemCollapsibleState.None);
 		this.gciSession = new GciSession(login);
+		this.tooltip = `${this.sessionId}: ${this.login.gs_user} in ${this.login.stone} (${this.login.version}) on ${this.login.gem_host}`;
+		this.description = this.tooltip;
 		this.command = {
 			command: 'gemstone-sessions.selectSession',
 			title: 'Select session',
@@ -39,14 +41,6 @@ export class Session extends vscode.TreeItem {
 
 	stringFromPerform(receiver: number, selector: string, oopArray: number[], expectedSize: number): string {
 		return this.gciSession.performFetchBytes(receiver, selector, oopArray, expectedSize);
-	}
-
-	get tooltip(): string {
-		return this.description;
-	}
-
-	get description(): string {
-		return `${this.sessionId}: ${this.login.gs_user} in ${this.login.stone} (${this.login.version}) on ${this.login.gem_host}`;
 	}
 
 	isLoggedIn() {

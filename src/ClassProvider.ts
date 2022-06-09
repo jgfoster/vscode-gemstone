@@ -8,7 +8,7 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 	readonly onDidChangeTreeData: vscode.Event<GsClass | undefined> = this._onDidChangeTreeData.event;
 	jadeServer: number;
 	symbolDictionaries: {[key: string]: {oop: number, name: string, size: number}};
-	activeDictionary: {oop: number, name: string, size: number};
+	activeDictionary: {oop: number, name: string, size: number} | null;
 	classHierarchy: any;
 	classSuperPairs: any;
 	allClasses: string[];
@@ -16,7 +16,7 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 	constructor() {
 		this.jadeServer = 1;    // OOP_ILLEGAL
 		this.symbolDictionaries = {};
-		this.activeDictionary = {};
+		this.activeDictionary = null;
 		this.classHierarchy = {};
 		this.classSuperPairs = {};
 		this.allClasses = [];
@@ -41,39 +41,41 @@ export class ClassesProvider implements vscode.TreeDataProvider<GsClass> {
 	}
 
 	setSymbolDictionary(selection: string | undefined): void {
-		this.activeDictionary = this.symbolDictionaries[selection];
-		const myString = this.session.stringFromPerform(
-			this.jadeServer, 
-			'getSymbolListWithSelectorsCount:',
-			[this.activeDictionary.oop], 
-			65525
-		);
-		JSON.parse(myString).list.forEach((element: any) => {
-			var superClass = this.session.stringFromPerform(
-				this.jadeServer,
-				'getAncestor:',
-				[element.oop],
+		if (selection) {
+			this.activeDictionary = this.symbolDictionaries[selection];
+			const myString = this.session!.stringFromPerform(
+				this.jadeServer, 
+				'getSymbolListWithSelectorsCount:',
+				[this.activeDictionary!.oop], 
 				65525
 			);
-			if (this.classSuperPairs[superClass]) {
-				this.classSuperPairs[superClass].push(element);
-			} else {
-				this.classSuperPairs[superClass] = [element];
+			JSON.parse(myString).list.forEach((element: any) => {
+				var superClass = this.session!.stringFromPerform(
+					this.jadeServer,
+					'getAncestor:',
+					[element.oop],
+					65525
+				);
+				if (this.classSuperPairs[superClass]) {
+					this.classSuperPairs[superClass].push(element);
+				} else {
+					this.classSuperPairs[superClass] = [element];
+				}
+			});
+			this.classHierarchy = this.getHierarchyFromPairs(this.classSuperPairs);
 			}
-		});
-		this.classHierarchy = this.getHierarchyFromPairs(this.classSuperPairs);
 	}
 
-	getHierarchyFromPairs(pairs, key="Object") {
-		var hierarchy = {};
+	getHierarchyFromPairs(pairs: any, key="Object") {
+		var hierarchy: Map<any, any> = new Map;
 		if (key in Object.keys(pairs)) {
 			for (var i = 0; i < pairs[key].length; i++) {
 				var tempObj = pairs[key][i];
 				pairs[key].splice(i, 1);
-				if (!hierarchy[key]) {
-					hierarchy[key] = [];
+				if (!hierarchy.get(key)) {
+					hierarchy.set(key, []);
 				}
-				hierarchy[key].push(this.getHierarchyFromPairs(pairs, tempObj.key));
+				hierarchy.get(key).push(this.getHierarchyFromPairs(pairs, tempObj.key));
 				pairs[key].splice(i, 0, tempObj);
 			}			
 			return hierarchy;
