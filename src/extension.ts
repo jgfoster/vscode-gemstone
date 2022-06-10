@@ -29,14 +29,13 @@ let sessionsTreeView: vscode.TreeView<Session>;
 
 let context: vscode.ExtensionContext;
 
-// this method is called when your extension is activated
-// your extension is activated when the user selects the extension
+// this method is called when the user selects the extension
 export function activate(aContext: vscode.ExtensionContext) {
-	console.log('activate');
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
+	console.log('activate');
 	context = aContext;
 
-	// GemStone needs a workspace and a folder (I don't recall why!)
+	// GemStone needs a workspace and a folder to support a file system
 	if (!isValidSetup()) { return; }
 
 	// create various UI components used by this extension
@@ -100,7 +99,8 @@ async function createStatusBarItem(aContext: vscode.ExtensionContext): Promise<v
 	statusBarItem.command = 'gemstone.showSessionId';
 	statusBarItem.show();
 	aContext.subscriptions.push(vscode.commands.registerCommand('gemstone.showSessionId', () => {
-		vscode.window.showInformationMessage(`GemStone session: ${selectedSession ? selectedSession.sessionId : 'none'}`);
+		let sess = selectedSession ? selectedSession.sessionId : 'none';
+		vscode.window.showInformationMessage(`GemStone session: ${sess}`);
 	}));
 }
 
@@ -237,7 +237,7 @@ async function loginHandler(login: Login): Promise<void> {
 			cancellable: false
 		},
 		async (progress, _) => {
-			console.log('loginHandler', login);
+			// console.log('loginHandler', login);
 			let password: string | null | undefined = login.gs_password;
 			if (!password) {
 				await vscode.window.showInputBox({
@@ -260,12 +260,11 @@ async function loginHandler(login: Login): Promise<void> {
 					vscode.window.showErrorMessage(error.message);
 				}
 			}
-			console.log('loginHandler done');
 		});
 }
 
 async function logoutHandler(session: Session): Promise<void> {
-	console.log('logoutHandler', session);
+	// console.log('logoutHandler', session);
 	return new Promise(async (resolve, reject) => {
 		outputChannel.appendLine('Logout ' + session.description);
 		await session.logout();

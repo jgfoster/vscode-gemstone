@@ -2,7 +2,7 @@
 	"name": "gemstone",
 	"displayName": "GemStone IDE",
 	"description": "GemStone/S IDE for Visual Studio Code",
-	"version": "0.3.0",
+	"version": "0.5.0",
 	"preview": true,
 	"publisher": "jgfoster",
 	"license": "MIT",
