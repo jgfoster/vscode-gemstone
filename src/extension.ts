@@ -32,6 +32,7 @@ let context: vscode.ExtensionContext;
 // this method is called when your extension is activated
 // your extension is activated when the user selects the extension
 export function activate(aContext: vscode.ExtensionContext) {
+	console.log('activate');
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	context = aContext;
 
@@ -161,6 +162,7 @@ async function displayIt(textEditor: vscode.TextEditor, edit: vscode.TextEditorE
 async function doLogin(login: any, progress: any): Promise<void> {
 	return new Promise(async (resolve, reject) => {
 		try {
+			console.log('doLogin');
 			const session = new Session(login);
 			await session.connect();
 			await session.getVersion();
@@ -187,6 +189,7 @@ async function doLogin(login: any, progress: any): Promise<void> {
 			outputChannel.appendLine('Login ' + session.description);
 			resolve();
 		} catch (error: any) {
+			console.error('doLogin - error - ', error);
 			reject(error);
 		}
 	});
@@ -234,6 +237,7 @@ async function loginHandler(login: Login): Promise<void> {
 			cancellable: false
 		},
 		async (progress, _) => {
+			console.log('loginHandler', login);
 			let password: string | null | undefined = login.gs_password;
 			if (!password) {
 				await vscode.window.showInputBox({
@@ -256,10 +260,12 @@ async function loginHandler(login: Login): Promise<void> {
 					vscode.window.showErrorMessage(error.message);
 				}
 			}
+			console.log('loginHandler done');
 		});
 }
 
 async function logoutHandler(session: Session): Promise<void> {
+	console.log('logoutHandler', session);
 	return new Promise(async (resolve, reject) => {
 		outputChannel.appendLine('Logout ' + session.description);
 		await session.logout();

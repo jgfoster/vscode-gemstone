@@ -42,8 +42,11 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
           return { 'uri': uri, 'name': each.name };
         });
         const workspaceFolders = vscode.workspace.workspaceFolders;
+        // console.log('GsFileSystemProvider.forSession()', workspaceFolders?.length, workspaceFolders![0]);
+        //   If the first workspace folder is added, removed or changed, the currently executing extensions (including the one that called this method) will be terminated and restarted so that the (deprecated) rootPath property is updated to point to the first workspace folder.
+        //   Use the onDidChangeWorkspaceFolders() event to get notified when the workspace folders have been updated.
         const flag = vscode.workspace.updateWorkspaceFolders(
-          workspaceFolders ? workspaceFolders.length : 0, 0, ...list);
+          workspaceFolders ? workspaceFolders.length : 0, null, ...list);
         if (flag) {
           resolve(fs);
         } else {
@@ -131,8 +134,8 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     const entry: File = this.map.get(uri.toString());
     try {
       var executeString: string = `${entry.gsClass} compileMethod: '${this.uint8ArrayToExecutableString(content)}'`;
-      console.log('GemStoneFS.writeFile(' + uri.toString() + ')');
-      console.log('content: ', executeString);
+      console.log(`GemStoneFS.writeFile(${uri.toString()}, ${options.create}, ${options.overwrite})`);
+      console.log('content: ',executeString);
       this.session.oopFromExecuteString(executeString);
       this.session.commit();
     } catch (e) {
@@ -162,6 +165,7 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     this._emitter.event;
 
   watch(_resource: vscode.Uri): vscode.Disposable {
+    // console.log(`GsFileSystemProvider.watch()`, _resource.toString());
     // ignore, fires for all changes...
     return new vscode.Disposable(() => { });
   }
