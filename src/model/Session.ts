@@ -181,13 +181,18 @@ export class Session extends vscode.TreeItem {
     });
   }
 
-  stringFromExecute(input: string, size: number = 1024): string {
-    console.log('stringFromExecute(input: string, size: number = 1024)');
-    // const myString = '| x | x := [' + input + '] value. ' +
-    // 	'x size > ' + (size - 4).toString() +
-    // 	' ifTrue: [x := (x copyFrom: 1 to: ' + (size - 4).toString() + ') ,
-    // \'...\']. x'; return this.gciSession.executeFetchBytes(myString, size);
-    return 'nil';
+  async stringFromExecute(input: string, size: number = 1024): Promise<string> {
+    const myString = '| x | x := [' + input + '] value printString. ' +
+    	'x size > ' + (size - 4).toString() +
+    	' ifTrue: [x := (x copyFrom: 1 to: ' + (size - 4).toString() + ') , \'...\']. x'; 
+    return new Promise(async (resolve, reject) => {
+      try {
+        let result = await this.send({ 'request': 'executeFetchBytes', 'string': myString, 'size': size });
+        resolve(result.result);
+      } catch (e: any) {
+        reject(e);
+      }
+    });
   }
 
   async stringFromPerform(

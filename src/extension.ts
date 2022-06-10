@@ -14,7 +14,6 @@ import { ClassesProvider } from './view/ClassProvider';
 import { GsClass } from './model/GsClass';
 import { MethodsProvider } from './view/MethodProvider';
 import { GsFileSystemProvider } from './view/GsFileSystemProvider';
-// import fs = require('fs');
 
 const classesProvider = new ClassesProvider();
 let classesTreeView: vscode.TreeView<GsClass>;
@@ -129,7 +128,7 @@ async function createViewForSessionList(): Promise<void> {
 }
 
 // evaluate a Smalltalk expression found in a TextEditor and insert the value as a string
-function displayIt(textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit, args: any[]) {
+async function displayIt(textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit, args: any[]) {
 	if (!selectedSession) {
 		vscode.window.showErrorMessage('No GemStone session!');
 		return;
@@ -146,7 +145,7 @@ function displayIt(textEditor: vscode.TextEditor, edit: vscode.TextEditorEdit, a
 		return;
 	}
 	try {
-		const result = ' ' + selectedSession.stringFromExecute('[' + text + '] value printString');
+		const result = ' ' + await selectedSession.stringFromExecute(text);
 		textEditor.edit((editBuilder: vscode.TextEditorEdit) => {
 			editBuilder.insert(selection.end, result);
 		}).then(success => {
