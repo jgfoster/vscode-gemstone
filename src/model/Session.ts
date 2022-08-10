@@ -4,10 +4,9 @@
 
 import * as path from 'path';
 import * as vscode from 'vscode';
+import WebSocket = require('ws');
 
 import { Login } from './Login';
-
-const WebSocket = require('ws');
 import JadeServer from './JadeServer';
 import { SymbolDictionary } from './SymbolDictionary';
 
@@ -19,13 +18,14 @@ export class Session extends vscode.TreeItem {
   requestCounter: number = 0;
   requests: Map<number, Array<Function>> = new Map;
   sessionId: number;
-  socket: typeof WebSocket;
+  socket: WebSocket | null;
   version: string = '';
   constructor(private _login: Login) {
     super(_login.label, vscode.TreeItemCollapsibleState.None);
     this.sessionId = ++sessionCounter;
     this.tooltip = `${this.sessionId}: ${this._login.tooltip}`;
     this.description = this.tooltip;
+    this.socket = null;
   }
 
   private send(obj: any): Promise<any> {
@@ -34,7 +34,7 @@ export class Session extends vscode.TreeItem {
     return new Promise((resolve, reject) => {
       this.requests.set(requestId, [resolve, reject]);
       try {
-        this.socket.send(JSON.stringify(obj), {}, (error: any) => {
+        this.socket!.send(JSON.stringify(obj), {}, (error: any) => {
           if (typeof error !== 'undefined') {
             reject(error);
           }
@@ -54,16 +54,16 @@ export class Session extends vscode.TreeItem {
         this.requests.clear();
         reject(error);
       }
-      this.socket.on('close', (event: any) => {
+      this.socket!.on('close', (event: any) => {
         this.handleClose(event);
       });
-      this.socket.on('error', (event: any) => {
+      this.socket!.on('error', (event: any) => {
         this.handleError(event);
       });
-      this.socket.on('message', (event: any) => {
+      this.socket!.on('message', (event: any) => {
         this.handleMessage(event);
       });
-      this.socket.on('open', (_: any) => {
+      this.socket!.on('open', (_: any) => {
         this.requests.delete(0);
         resolve();
       });
@@ -119,7 +119,7 @@ export class Session extends vscode.TreeItem {
       }
       if (obj['request'] === 'logout') {
         this.isLoggedIn = false;
-        this.socket.close();
+        this.socket!.close();
         this.socket = null;
       }
       functions![0](obj);
@@ -183,8 +183,8 @@ export class Session extends vscode.TreeItem {
 
   async stringFromExecute(input: string, size: number = 1024): Promise<string> {
     const myString = '| x | x := [' + input + '] value printString. ' +
-    	'x size > ' + (size - 4).toString() +
-    	' ifTrue: [x := (x copyFrom: 1 to: ' + (size - 4).toString() + ') , \'...\']. x'; 
+      'x size > ' + (size - 4).toString() +
+      ' ifTrue: [x := (x copyFrom: 1 to: ' + (size - 4).toString() + ') , \'...\']. x';
     return new Promise(async (resolve, reject) => {
       try {
         let result = await this.send({ 'request': 'executeFetchBytes', 'string': myString, 'size': size });
