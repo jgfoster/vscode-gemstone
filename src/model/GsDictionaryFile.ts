@@ -1,10 +1,9 @@
 
 import * as vscode from 'vscode';
-import { File } from './File';
 import { Session } from './Session';
-import { GsClassFile } from './GsClassFile';
+import { GsFile, GsClassFile } from './GsClassFile';
 
-export class GsDictionaryFile implements vscode.FileStat {
+export class GsDictionaryFile implements vscode.FileStat, GsFile {
 
 	type: vscode.FileType;
 	ctime: number;

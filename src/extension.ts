@@ -10,17 +10,10 @@ import { LoginsProvider } from './view/LoginProvider';
 import { Login } from './model/Login';
 import { SessionsProvider } from './view/SessionProvider';
 import { Session } from './model/Session';
-import { ClassesProvider } from './view/ClassProvider';
-import { GsClass } from './model/GsClass';
-import { MethodsProvider } from './view/MethodProvider';
 import { GsFileSystemProvider } from './view/GsFileSystemProvider';
 
-const classesProvider = new ClassesProvider();
-let classesTreeView: vscode.TreeView<GsClass>;
 const loginsProvider = new LoginsProvider();
-const methodsProvider = new MethodsProvider();
 let outputChannel: vscode.OutputChannel;
-let selectedClass: GsClass | null = null;
 let selectedSession: Session | null = null;
 const statusBarItem: vscode.StatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 const sessions: Session[] = [];
@@ -42,8 +35,6 @@ export function activate(aContext: vscode.ExtensionContext) {
 	createOutputChannel();
 	createViewForLoginList();
 	createViewForSessionList();
-	createViewForClassList();
-	createViewForMethodList();
 	createStatusBarItem(aContext);
 
 	// The commands have been defined in the package.json file ("contributes"/"commands")
@@ -57,24 +48,17 @@ export function activate(aContext: vscode.ExtensionContext) {
 		'gemstone.logout',
 		logoutHandler
 	));
-	aContext.subscriptions.push(vscode.commands.registerCommand(
-		'gemstone.selectNamespace',
-		selectNamespaceHandler
-	));
 	aContext.subscriptions.push(vscode.commands.registerTextEditorCommand(
 		'gemstone.displayIt',
 		displayIt
 	));
 	aContext.subscriptions.push(vscode.commands.registerCommand(
 		'gemstone.displayClassFinder',
-		() => classesProvider.displayClassFinder()
+		() => null
 	));
 	aContext.subscriptions.push(vscode.commands.registerCommand(
 		'gemstone.fetchMethods',
-		(classObj: any) => {
-			methodsProvider.getMethodsFor(classObj);
-			methodsProvider.refresh();
-		}
+		(_: any) => null
 	));
 	aContext.subscriptions.push(vscode.commands.registerCommand(
 		'gemstone.openDocument',
@@ -102,18 +86,6 @@ async function createStatusBarItem(aContext: vscode.ExtensionContext): Promise<v
 		let sess = selectedSession ? selectedSession.sessionId : 'none';
 		vscode.window.showInformationMessage(`GemStone session: ${sess}`);
 	}));
-}
-
-async function createViewForClassList(): Promise<void> {
-	classesTreeView = vscode.window.createTreeView('gemstone-classes', { treeDataProvider: classesProvider });
-	classesTreeView.onDidChangeSelection(onClassSelected);
-	vscode.commands.registerCommand('gemstone-classes.refreshEntry', () => {
-		classesProvider.refresh();
-	});
-}
-
-async function createViewForMethodList(): Promise<void> {
-	vscode.window.registerTreeDataProvider('gemstone-methods', methodsProvider);
 }
 
 async function createViewForLoginList(): Promise<void> {
@@ -196,6 +168,10 @@ async function doLogin(login: any, progress: any): Promise<void> {
 }
 
 // on activation check to see if we have a workspace and a folder
+// "If the first workspace folder is added, removed or changed, the currently executing extensions 
+// (including the one that called this method) will be terminated and restarted" 
+// [updateWorkspaceFolders()](https://code.visualstudio.com/api/references/vscode-api#workspace.updateWorkspaceFolders), 
+// and we can't have that!
 function isValidSetup(): boolean {
 	const workspaceFolders = vscode.workspace.workspaceFolders;
 	if (!workspaceFolders) {
@@ -299,19 +275,7 @@ async function logoutHandler(session: Session): Promise<void> {
 	});
 }
 
-async function onClassSelected(event: vscode.TreeViewSelectionChangeEvent<GsClass>): Promise<void> {
-	const selections = event.selection;
-	if (selections.length === 0) {
-		selectedClass = null;
-	} else {
-		selectedClass = selections[0];
-	}
-	return new Promise(async (resolve, _) => {
-
-	});
-}
-
-async function onSessionSelected(event: vscode.TreeViewSelectionChangeEvent<Session>): Promise<void> {
+function onSessionSelected(event: vscode.TreeViewSelectionChangeEvent<Session>): void {
 	const selections = event.selection;
 	if (selections.length === 0) {
 		selectedSession = null;
@@ -320,14 +284,6 @@ async function onSessionSelected(event: vscode.TreeViewSelectionChangeEvent<Sess
 		selectedSession = selections[0];
 		statusBarItem.text = `GemStone session: ${selectedSession?.sessionId}`;
 	}
-	return new Promise(async (resolve, _) => {
-		try {
-			await classesProvider.setSession(selectedSession);
-		} catch (error: any) {
-			vscode.window.showErrorMessage(error.message);
-		}
-		resolve();
-	});
 }
 
 async function selectNamespaceHandler(): Promise<void> {

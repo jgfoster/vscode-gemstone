@@ -2,7 +2,7 @@
 	"name": "gemstone",
 	"displayName": "GemStone IDE",
 	"description": "GemStone/S IDE for Visual Studio Code",
-	"version": "0.5.0",
+	"version": "0.6.0",
 	"preview": true,
 	"publisher": "jgfoster",
 	"license": "MIT",
@@ -30,10 +30,6 @@
 			{
 				"command": "gemstone.login",
 				"title": "Login"
-			},
-			{
-				"command": "gemstone.selectNamespace",
-				"title": "Select Namespace"
 			},
 			{
 				"command": "gemstone.fetchMethods",
@@ -128,11 +124,6 @@
 			],
 			"view/title": [
 				{
-					"command": "gemstone.selectNamespace",
-					"when": "view == gemstone-classes",
-					"group": "navigation"
-				},
-				{
 					"command": "gemstone-sessions.refreshEntry",
 					"when": "view == gemstone-sessions",
 					"group": "navigation"
@@ -157,14 +148,6 @@
 				{
 					"id": "gemstone-sessions",
 					"name": "Sessions"
-				},
-				{
-					"id": "gemstone-classes",
-					"name": "Classes"
-				},
-				{
-					"id": "gemstone-methods",
-					"name": "Methods"
 				}
 			]
 		}

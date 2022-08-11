@@ -18,7 +18,7 @@ The traditional approach to a GemStone IDE requires a GCI library on the client 
 
 Note: To use this extension you do _not_ need to fork, clone, or download the GitHub project. The GitHub repository is needed only for development. The usage is integrated with VS Code and installed as is any other extension using the instructions below.
 
-To use this extension you need to have a Workspace with at least one open folder. In Code,
+To use this extension you need to have a Workspace with at least one folder ("If the first workspace folder is added, removed or changed, the currently executing extensions (including the one that called this method) will be terminated and restarted" [updateWorkspaceFolders()](https://code.visualstudio.com/api/references/vscode-api#workspace.updateWorkspaceFolders), and we can't have that!). In Code,
 * Select the `New Window` menu
 * Select the `Add Folder to Workspace...` menu and select a convenient folder
   * While it could be anywhere, consider a place where you could save Smalltalk scripts or have related source code

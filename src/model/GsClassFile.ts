@@ -1,9 +1,13 @@
 
 import * as vscode from 'vscode';
-import { File } from './File';
 import { Session } from './Session';
 
-export class GsClassFile implements vscode.FileStat {
+export interface GsFile {
+    oop: number;
+    size: number;
+}
+
+export class GsClassFile implements vscode.FileStat, GsFile {
     ctime: number = Date.now();
     mtime: number = Date.now();
     size: number;

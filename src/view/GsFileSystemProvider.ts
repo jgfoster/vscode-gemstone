@@ -5,12 +5,9 @@
 
 import * as vscode from 'vscode';
 
-import { File } from '../model/File';
-import { GsClassFile } from '../model/GsClassFile';
+import { GsFile } from '../model/GsClassFile';
 import { GsDictionaryFile } from '../model/GsDictionaryFile';
 import { Session } from '../model/Session';
-
-export type Entry = File | GsDictionaryFile | GsClassFile;
 
 function str2ab(str: string): Uint8Array {
   var buf = new ArrayBuffer(str.length);
@@ -24,6 +21,7 @@ function str2ab(str: string): Uint8Array {
 export class GsFileSystemProvider implements vscode.FileSystemProvider {
   private session: Session;
   public readonly map: Map<string, any> = new Map();
+
   private constructor(session: Session) {
     this.session = session;
   }
@@ -42,8 +40,10 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
           return { 'uri': uri, 'name': each.name };
         });
         const workspaceFolders = vscode.workspace.workspaceFolders;
-        // console.log('GsFileSystemProvider.forSession()', workspaceFolders?.length, workspaceFolders![0]);
-        //   If the first workspace folder is added, removed or changed, the currently executing extensions (including the one that called this method) will be terminated and restarted so that the (deprecated) rootPath property is updated to point to the first workspace folder.
+        //   If the first workspace folder is added, removed or changed, the currently executing extensions 
+        //    (including the one that called this method) will be terminated and restarted so that the (deprecated) 
+        //    rootPath property is updated to point to the first workspace folder.
+        //   See isValidSetup() where we ensure that a first folder exists.
         //   Use the onDidChangeWorkspaceFolders() event to get notified when the workspace folders have been updated.
         const flag = vscode.workspace.updateWorkspaceFolders(
           workspaceFolders ? workspaceFolders.length : 0, null, ...list);
@@ -73,7 +73,7 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     if (uri.toString().includes('.git')) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
-    const entry = this.map.get(uri.toString());
+    const entry: vscode.FileStat = this.map.get(uri.toString());
     if (!entry) {
       console.error('stat(\'' + uri.toString() + '\') entry not found!');
       throw vscode.FileSystemError.FileNotFound(uri);
@@ -81,6 +81,7 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     return entry;
   }
 
+  // https://github.com/microsoft/vscode/issues/157859
   async readDirectory(uri: vscode.Uri): Promise<[string, vscode.FileType][]> {
     return new Promise(async (resolve, reject) => {
       const result: [string, vscode.FileType][] = new Array;
@@ -108,7 +109,7 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
     return new Promise(async (resolve, reject) => {
-      const entry: File = this.map.get(uri.toString());
+      const entry: GsFile = this.map.get(uri.toString());
       if (!entry) {
         throw vscode.FileSystemError.FileNotFound(uri);
       }
@@ -131,16 +132,16 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     create: boolean,
     overwrite: boolean
   }): void {
-    const entry: File = this.map.get(uri.toString());
-    try {
-      var executeString: string = `${entry.gsClass} compileMethod: '${this.uint8ArrayToExecutableString(content)}'`;
-      console.log(`GemStoneFS.writeFile(${uri.toString()}, ${options.create}, ${options.overwrite})`);
-      console.log('content: ',executeString);
-      this.session.oopFromExecuteString(executeString);
-      this.session.commit();
-    } catch (e) {
-      console.log('ERROR', e);
-    }
+    // const entry: any = this.map.get(uri.toString());
+    // try {
+    //   var executeString: string = `${entry.gsClass} compileMethod: '${this.uint8ArrayToExecutableString(content)}'`;
+    //   console.log(`GemStoneFS.writeFile(${uri.toString()}, ${options.create}, ${options.overwrite})`);
+    //   console.log('content: ', executeString);
+    //   this.session.oopFromExecuteString(executeString);
+    //   this.session.commit();
+    // } catch (e) {
+    //   console.log('ERROR', e);
+    // }
   }
 
   // --- manage files/folders
