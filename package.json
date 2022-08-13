@@ -32,10 +32,6 @@
 				"title": "Login"
 			},
 			{
-				"command": "gemstone.fetchMethods",
-				"title": "Fetch Methods"
-			},
-			{
 				"command": "gemstone.openDocument",
 				"title": "Open Document"
 			},
@@ -103,10 +99,6 @@
 				"key": "ctrl+d",
 				"mac": "cmd+d",
 				"when": "editorTextFocus"
-			},
-			{
-				"command": "gemstone.displayClassFinder",
-				"key": "ctrl+shift+f"
 			}
 		],
 		"menus": {

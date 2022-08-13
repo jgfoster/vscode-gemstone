@@ -12,15 +12,14 @@ import { SessionsProvider } from './view/SessionProvider';
 import { Session } from './model/Session';
 import { GsFileSystemProvider } from './view/GsFileSystemProvider';
 
+let context: vscode.ExtensionContext;
 const loginsProvider = new LoginsProvider();
 let outputChannel: vscode.OutputChannel;
 let selectedSession: Session | null = null;
-const statusBarItem: vscode.StatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 const sessions: Session[] = [];
 const sessionsProvider = new SessionsProvider(sessions);
 let sessionsTreeView: vscode.TreeView<Session>;
-
-let context: vscode.ExtensionContext;
+const statusBarItem: vscode.StatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 
 // this method is called when the user selects the extension
 export function activate(aContext: vscode.ExtensionContext) {
@@ -43,33 +42,22 @@ export function activate(aContext: vscode.ExtensionContext) {
 	aContext.subscriptions.push(vscode.commands.registerCommand(
 		'gemstone.login',
 		loginHandler
-	));
+	)); // login
 	aContext.subscriptions.push(vscode.commands.registerCommand(
 		'gemstone.logout',
 		logoutHandler
-	));
-	aContext.subscriptions.push(vscode.commands.registerTextEditorCommand(
-		'gemstone.displayIt',
-		displayIt
-	));
-	aContext.subscriptions.push(vscode.commands.registerCommand(
-		'gemstone.displayClassFinder',
-		() => null
-	));
-	aContext.subscriptions.push(vscode.commands.registerCommand(
-		'gemstone.fetchMethods',
-		(_: any) => null
-	));
+	)); // logout
 	aContext.subscriptions.push(vscode.commands.registerCommand(
 		'gemstone.openDocument',
 		(content: string) => {
 			vscode.workspace.openTextDocument({ content })
 		}
-	));
-}
+	)); // openDocument
 
-export function deactivate() {
-	console.log('deactivate');
+	aContext.subscriptions.push(vscode.commands.registerTextEditorCommand(
+		'gemstone.displayIt',
+		displayIt
+	)); // displayIt
 }
 
 // https://code.visualstudio.com/api/references/vscode-api#OutputChannel
@@ -98,6 +86,15 @@ async function createViewForSessionList(): Promise<void> {
 	vscode.commands.registerCommand('gemstone-sessions.refreshEntry', () => {
 		sessionsProvider.refresh();
 	});
+}
+
+export async function deactivate() {
+	console.log(`sessions.length = ${sessions.length}`);
+	for (const session of sessions) {
+		if (session.isLoggedIn) {
+			await logoutHandler(session);
+		}
+	}
 }
 
 // evaluate a Smalltalk expression found in a TextEditor and insert the value as a string
@@ -134,7 +131,6 @@ async function displayIt(textEditor: vscode.TextEditor, edit: vscode.TextEditorE
 async function doLogin(login: any, progress: any): Promise<void> {
 	return new Promise(async (resolve, reject) => {
 		try {
-			console.log('doLogin');
 			const session = new Session(login);
 			await session.connect();
 			await session.getVersion();
@@ -196,6 +192,8 @@ function isValidSetup(): boolean {
 		const flag = vscode.workspace.updateWorkspaceFolders(start, end - start + 1);
 		if (!flag) {
 			vscode.window.showErrorMessage('Unable to remove workspace folders!');
+		} else {
+			console.log('deleted left-over folders');
 		}
 	}
 	if (workspaceFolders.length === 0) {
@@ -213,7 +211,6 @@ async function loginHandler(login: Login): Promise<void> {
 			cancellable: false
 		},
 		async (progress, _) => {
-			// console.log('loginHandler', login);
 			let password: string | null | undefined = login.gs_password;
 			if (!password) {
 				await vscode.window.showInputBox({
@@ -240,42 +237,42 @@ async function loginHandler(login: Login): Promise<void> {
 }
 
 async function logoutHandler(session: Session): Promise<void> {
-	// console.log('logoutHandler', session);
-	return new Promise(async (resolve, reject) => {
-		outputChannel.appendLine('Logout ' + session.description);
-		await session.logout();
-		sessionsProvider.refresh();
-
-		// remove this session's SymbolDictionaries (folders) from the workspace
-		const prefix = selectedSession!.fsScheme() + ':/';
-		const workspaceFolders = vscode.workspace.workspaceFolders || [];
-		let start, end;
-		for (let i = 0; i < workspaceFolders.length; i++) {
-			if (workspaceFolders[i].uri.toString().startsWith(prefix)) {
-				if (!start) {
-					start = i;
-					end = i;
-				} else {
-					end = i;
-				}
+	outputChannel.appendLine('Logout ' + session.description);
+	console.log(`logoutHandler() - selectedSession = ${selectedSession}`);
+	// remove this session's SymbolDictionaries (folders) from the workspace
+	const prefix = selectedSession!.fsScheme() + ':/';
+	const workspaceFolders = vscode.workspace.workspaceFolders || [];
+	let start, end;
+	for (let i = 0; i < workspaceFolders.length; i++) {
+		if (workspaceFolders[i].uri.toString().startsWith(prefix)) {
+			if (!start) {
+				start = i;
+				end = i;
+			} else {
+				end = i;
 			}
 		}
-		if (start && end) {
-			const flag = vscode.workspace.updateWorkspaceFolders(start, end - start + 1);
-			if (!flag) {
-				console.log('Unable to remove workspace folders!');
-				vscode.window.showErrorMessage('Unable to remove workspace folders!');
-			}
+	}
+	if (start && end) {
+		const flag = vscode.workspace.updateWorkspaceFolders(start, end - start + 1);
+		if (!flag) {
+			console.log('Unable to remove workspace folders!');
+			vscode.window.showErrorMessage('Unable to remove workspace folders!');
 		}
+	}
 
-		if (selectedSession === session) {
-			selectedSession = null;
-			statusBarItem.text = 'GemStone session: none';
-		}
-	});
+	if (selectedSession === session) {
+		selectedSession = null;
+		statusBarItem.text = 'GemStone session: none';
+	}
+
+	// sessions.forEach((item, index, array) => { if (item === session) array.splice(index, 1); });
+	await session.logout();
+	sessionsProvider.refresh();
 }
 
 function onSessionSelected(event: vscode.TreeViewSelectionChangeEvent<Session>): void {
+	console.log(`onSessionSelected - ${event.selection}`);
 	const selections = event.selection;
 	if (selections.length === 0) {
 		selectedSession = null;
@@ -284,19 +281,4 @@ function onSessionSelected(event: vscode.TreeViewSelectionChangeEvent<Session>):
 		selectedSession = selections[0];
 		statusBarItem.text = `GemStone session: ${selectedSession?.sessionId}`;
 	}
-}
-
-async function selectNamespaceHandler(): Promise<void> {
-	// if (selectedSession) {
-	// 	var symbolDictionariesList = classesProvider.getSymbolDictionaryNames();
-	// 	vscode.window.showQuickPick(symbolDictionariesList)
-	// 		.then((selection: string | undefined) => {
-	// 			console.log(selection);
-	// 			classesProvider.setSymbolDictionary(selection);
-	// 			classesProvider.refresh();
-	// 		});
-	// } else {
-	// 	vscode.window.showErrorMessage("No Session Active");
-	// }
-	return Promise.resolve();
 }

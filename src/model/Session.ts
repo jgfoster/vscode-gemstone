@@ -20,6 +20,7 @@ export class Session extends vscode.TreeItem {
   sessionId: number;
   socket: WebSocket | null;
   version: string = '';
+
   constructor(private _login: Login) {
     super(_login.label, vscode.TreeItemCollapsibleState.None);
     this.sessionId = ++sessionCounter;
@@ -145,16 +146,16 @@ export class Session extends vscode.TreeItem {
     return 'gs' + this.sessionId.toString();
   }
 
-  async login(): Promise<Map<string, any>> {
-    return this.send({
+  async login(): Promise<void> {
+    await this.send({
       'request': 'login',
       'username': this._login.gs_user,
       'password': this._login.gs_password
     });
   }
 
-  async logout(): Promise<Map<string, any>> {
-    return this.send({ 'request': 'logout' });
+  async logout(): Promise<void> {
+    await this.send({ 'request': 'logout' });  // send logout request to Gem
   }
 
   async oopFromExecuteString(input: string): Promise<string> {

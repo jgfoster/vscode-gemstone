@@ -26,7 +26,7 @@ export class SessionsProvider implements vscode.TreeDataProvider<Session> {
 		return Promise.resolve(this.sessions.filter(each => each.isLoggedIn));
 	}
 
-	getParent(element: Session) {
+	getParent(_: Session) {
 		return null;	// a Session is always a top-level entity
 	}
 }
