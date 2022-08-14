@@ -10,8 +10,6 @@ import { Login } from './Login';
 import JadeServer from './JadeServer';
 import { SymbolDictionary } from './SymbolDictionary';
 
-let sessionCounter: number = 0;
-
 export class Session extends vscode.TreeItem {
   isLoggedIn: boolean = false;
   private jadeServer: string = '';
@@ -19,11 +17,12 @@ export class Session extends vscode.TreeItem {
   requests: Map<number, Array<Function>> = new Map;
   sessionId: number;
   socket: WebSocket | null;
+  subscriptions: vscode.Disposable[] = [];
   version: string = '';
 
-  constructor(private _login: Login) {
+  constructor(private _login: Login, nextSessionId: number) {
     super(_login.label, vscode.TreeItemCollapsibleState.None);
-    this.sessionId = ++sessionCounter;
+    this.sessionId = nextSessionId;
     this.tooltip = `${this.sessionId}: ${this._login.tooltip}`;
     this.description = this.tooltip;
     this.socket = null;
@@ -156,6 +155,7 @@ export class Session extends vscode.TreeItem {
 
   async logout(): Promise<void> {
     await this.send({ 'request': 'logout' });  // send logout request to Gem
+    this.subscriptions.forEach((each) => each.dispose());  // dispose of file system provider
   }
 
   async oopFromExecuteString(input: string): Promise<string> {

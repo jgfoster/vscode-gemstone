@@ -38,14 +38,6 @@
 			{
 				"command": "gemstone.logout",
 				"title": "Logout"
-			},
-			{
-				"command": "gemstone-sessions.refreshEntry",
-				"title": "Refresh Sessions",
-				"icon": {
-					"light": "resources/light/refresh.svg",
-					"dark": "resources/dark/refresh.svg"
-				}
 			}
 		],
 		"configuration": {
@@ -112,13 +104,6 @@
 					"command": "gemstone.logout",
 					"when": "view == gemstone-sessions",
 					"group": "inline"
-				}
-			],
-			"view/title": [
-				{
-					"command": "gemstone-sessions.refreshEntry",
-					"when": "view == gemstone-sessions",
-					"group": "navigation"
 				}
 			]
 		},

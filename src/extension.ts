@@ -60,7 +60,7 @@ export function activate(aContext: vscode.ExtensionContext) {
 	)); // displayIt
 }
 
-async function closeOpenFiles(session: Session): Promise<void> {
+async function closeEditors(session: Session): Promise<void> {
 	let myFiles: vscode.Uri[] = [];
 	vscode.workspace.textDocuments.forEach((each) => {
 		if (each.uri.scheme === session.fsScheme()) {
@@ -83,13 +83,8 @@ async function createOutputChannel(): Promise<void> {
 }
 
 async function createStatusBarItem(aContext: vscode.ExtensionContext): Promise<void> {
-	statusBarItem.text = 'GemStone session: none';
-	statusBarItem.command = 'gemstone.showSessionId';
+	updateStatusBar();
 	statusBarItem.show();
-	aContext.subscriptions.push(vscode.commands.registerCommand('gemstone.showSessionId', () => {
-		let sess = selectedSession ? selectedSession.sessionId : 'none';
-		vscode.window.showInformationMessage(`GemStone session: ${sess}`);
-	}));
 }
 
 async function createViewForLoginList(): Promise<void> {
@@ -99,9 +94,6 @@ async function createViewForLoginList(): Promise<void> {
 async function createViewForSessionList(): Promise<void> {
 	sessionsTreeView = vscode.window.createTreeView('gemstone-sessions', { treeDataProvider: sessionsProvider });
 	sessionsTreeView.onDidChangeSelection(onSessionSelected);
-	vscode.commands.registerCommand('gemstone-sessions.refreshEntry', () => {
-		sessionsProvider.refresh();
-	});
 }
 
 export async function deactivate() {
@@ -147,28 +139,28 @@ async function displayIt(textEditor: vscode.TextEditor, edit: vscode.TextEditorE
 async function doLogin(login: any, progress: any): Promise<void> {
 	return new Promise(async (resolve, reject) => {
 		try {
-			const session = new Session(login);
+			const session = new Session(login, nextSessionId());
 			await session.connect();
 			await session.getVersion();
 			await session.login();
 			await session.registerJadeServer();
+			selectedSession = session;
 			sessions.push(session);
 			sessionsProvider.refresh(); // show new session
 			sessionsTreeView.reveal(session, { focus: true, select: true }); // select new session
+			updateStatusBar();
 
 			// Create filesystem for this session
 			progress.report({ message: 'Add SymbolDictionaries to Explorer' });
 			const scheme = session.fsScheme();
-			const provider = await GsFileSystemProvider.forSession(session);
+			const fsProvider = await GsFileSystemProvider.forSession(session);
 			const options = { isCaseSensitive: true, isReadonly: false };
 			const subscription = vscode.workspace.registerFileSystemProvider(
 				scheme,
-				provider,
+				fsProvider,
 				options
 			);
-			context.subscriptions.push(subscription);
-
-			// methodsProvider.setSession(session);
+			session.subscriptions.push(subscription);
 
 			outputChannel.appendLine('Login ' + session.description);
 			resolve();
@@ -254,9 +246,57 @@ async function loginHandler(login: Login): Promise<void> {
 
 async function logoutHandler(session: Session): Promise<void> {
 	outputChannel.appendLine('Logout ' + session.description);
-	console.log(`logoutHandler() - selectedSession = ${selectedSession}`);
+	await closeEditors(session);
+	await removeFolders(session);
+	removeSession(session);
+
+	await session.logout();
+	sessionsProvider.refresh();
+
+	if (selectedSession === session) {
+		if (sessions.length === 0) {
+			selectedSession = null;
+		} else {
+			selectedSession = sessions[0];
+			await sessionsTreeView.reveal(selectedSession, { select: true, focus: true });
+		}
+		sessionsProvider.refresh();
+		updateStatusBar();
+	}
+}
+
+function nextSessionId(): number {
+	let nextSessionId = 1;
+	while (true) {
+		let isAvailable = true;
+		sessions.forEach((each) => {
+			if (each.sessionId === nextSessionId) {
+				isAvailable = false;
+				return;
+			}
+		});
+		if (isAvailable) {
+			return nextSessionId;
+		}
+		++nextSessionId;
+	}
+}
+
+function onSessionSelected(event: vscode.TreeViewSelectionChangeEvent<Session>): void {
+	// this seems to work for manual selections but not for automatic selections
+	const sessions: Session[] = event.selection;
+	if (sessions.length === 0) {
+		selectedSession = null;
+		updateStatusBar();
+	} else {
+		selectedSession = sessions[0];
+		updateStatusBar();
+	}
+}
+
+async function removeFolders(session: Session): Promise<void> {
 	// remove this session's SymbolDictionaries (folders) from the workspace
-	const prefix = selectedSession!.fsScheme() + ':/';
+	const prefix = session!.fsScheme() + ':/';
 	const workspaceFolders = vscode.workspace.workspaceFolders || [];
 	let start, end;
 	for (let i = 0; i < workspaceFolders.length; i++) {
@@ -276,27 +316,12 @@ async function logoutHandler(session: Session): Promise<void> {
 			vscode.window.showErrorMessage('Unable to remove workspace folders!');
 		}
 	}
-
-	await closeOpenFiles(session);
-
-	// sessions.forEach((item, index, array) => { if (item === session) array.splice(index, 1); });
-	await session.logout();
-	sessionsProvider.refresh();
-
-	if (selectedSession === session) {
-		selectedSession = null;
-		statusBarItem.text = 'GemStone session: none';
-	}
 }
 
-function onSessionSelected(event: vscode.TreeViewSelectionChangeEvent<Session>): void {
-	console.log(`onSessionSelected - ${event.selection}`);
-	const selections = event.selection;
-	if (selections.length === 0) {
-		selectedSession = null;
-		statusBarItem.text = 'GemStone session: none';
-	} else {
-		selectedSession = selections[0];
-		statusBarItem.text = `GemStone session: ${selectedSession?.sessionId}`;
-	}
+function removeSession(session: Session): void {
+	sessions.forEach((item, index, array) => { if (item === session) array.splice(index, 1); });
+}
+
+function updateStatusBar(): void {
+	statusBarItem.text = `GemStone session: ${selectedSession ? selectedSession?.sessionId : 'none'}`;
 }

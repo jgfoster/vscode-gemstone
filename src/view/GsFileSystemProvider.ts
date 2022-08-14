@@ -19,11 +19,20 @@ function str2ab(str: string): Uint8Array {
 }
 
 export class GsFileSystemProvider implements vscode.FileSystemProvider {
-  private session: Session;
+  private _emitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
+  private _session: Session;
   public readonly map: Map<string, any> = new Map();
 
   private constructor(session: Session) {
-    this.session = session;
+    this._session = session;
+  }
+
+  createDirectory(uri: vscode.Uri): void {
+    console.log(`GemStoneFS.createDirectory(${uri.toString()})`);
+  }
+
+  delete(uri: vscode.Uri): void {
+    console.log('GemStoneFS.delete(' + uri.toString() + ')');
   }
 
   static async forSession(session: Session): Promise<GsFileSystemProvider> {
@@ -37,7 +46,7 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
           const uri = vscode.Uri.parse(session.fsScheme() + ':/' + each.name);
           const dict = new GsDictionaryFile(session, each.name, each);
           fs.map.set(uri.toString(), dict);
-          return { 'uri': uri, 'name': each.name };
+          return { 'uri': uri, 'name': uri.toString() };
         });
         const workspaceFolders = vscode.workspace.workspaceFolders;
         //   If the first workspace folder is added, removed or changed, the currently executing extensions 
@@ -58,28 +67,8 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     });
   }
 
-  // --- manage file metadata
-
-  // return a FileStat-type
-  //    (ctime: number, mtime: number, size: number, type: FileType)
-  // VS Code looks for the following in each directory:
-  //    .vscode/settings.json
-  //    .vscode/tasks.json
-  //    .vscode/launch.json
-  stat(uri: vscode.Uri): vscode.FileStat {
-    if (uri.toString().includes('.vscode')) {
-      throw vscode.FileSystemError.FileNotFound(uri);
-    }
-    if (uri.toString().includes('.git')) {
-      throw vscode.FileSystemError.FileNotFound(uri);
-    }
-    const entry: vscode.FileStat = this.map.get(uri.toString());
-    if (!entry) {
-      console.error('stat(\'' + uri.toString() + '\') entry not found!');
-      throw vscode.FileSystemError.FileNotFound(uri);
-    }
-    return entry;
-  }
+  readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> =
+    this._emitter.event;
 
   // https://github.com/microsoft/vscode/issues/157859
   async readDirectory(uri: vscode.Uri): Promise<[string, vscode.FileType][]> {
@@ -87,11 +76,11 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
       const result: [string, vscode.FileType][] = new Array;
       try {
         const dict = this.map.get(uri.toString());
-        const myString = await this.session.stringFromPerform(
+        const myString = await this._session.stringFromPerform(
           'getClassesInDictionary:', [dict.oop], 65525);
         JSON.parse(myString).list.forEach((element: any) => {
           const newUri = vscode.Uri.parse(uri.toString() + '/' + element.key);
-          const newEntry = dict.addEntry(this.session, element.key, element);
+          const newEntry = dict.addEntry(this._session, element.key, element);
           this.map.set(newUri.toString(), newEntry);
           result.push([element.key, newEntry.type]);
         });
@@ -114,12 +103,40 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
         throw vscode.FileSystemError.FileNotFound(uri);
       }
       try {
-        let result = await this.session.stringFromPerform('fileOutClass:', [entry.oop], entry.size + 32);
+        let result = await this._session.stringFromPerform('fileOutClass:', [entry.oop], entry.size + 32);
         resolve(str2ab(result));
       } catch (e: any) {
         reject(e);
       }
     });
+  }
+
+  rename(oldUri: vscode.Uri, newUri: vscode.Uri, options: { overwrite: boolean }):
+    void {
+    console.log(
+      'GemStoneFS.rename(' + oldUri.toString() + ', ' + newUri.toString() +
+      ')');
+  }
+
+  // return a FileStat-type
+  //    (ctime: number, mtime: number, size: number, type: FileType)
+  // VS Code looks for the following in each directory:
+  //    .vscode/settings.json
+  //    .vscode/tasks.json
+  //    .vscode/launch.json
+  stat(uri: vscode.Uri): vscode.FileStat {
+    if (uri.toString().includes('.vscode')) {
+      throw vscode.FileSystemError.FileNotFound(uri);
+    }
+    if (uri.toString().includes('.git')) {
+      throw vscode.FileSystemError.FileNotFound(uri);
+    }
+    const entry: vscode.FileStat = this.map.get(uri.toString());
+    if (!entry) {
+      console.error('stat(\'' + uri.toString() + '\') entry not found!');
+      throw vscode.FileSystemError.FileNotFound(uri);
+    }
+    return entry;
   }
 
   uint8ArrayToExecutableString(array: Uint8Array) {
@@ -128,7 +145,13 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     return executableString;
   }
 
-  writeFile(uri: vscode.Uri, content: Uint8Array, options: {
+  watch(_resource: vscode.Uri): vscode.Disposable {
+    // console.log(`GsFileSystemProvider.watch()`, _resource.toString());
+    // ignore, fires for all changes...
+    return new vscode.Disposable(() => { });
+  }
+
+  writeFile(_uri: vscode.Uri, _content: Uint8Array, _options: {
     create: boolean,
     overwrite: boolean
   }): void {
@@ -142,32 +165,5 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     // } catch (e) {
     //   console.log('ERROR', e);
     // }
-  }
-
-  // --- manage files/folders
-
-  rename(oldUri: vscode.Uri, newUri: vscode.Uri, options: { overwrite: boolean }):
-    void {
-    console.log(
-      'GemStoneFS.rename(' + oldUri.toString() + ', ' + newUri.toString() +
-      ')');
-  }
-
-  delete(uri: vscode.Uri): void {
-    console.log('GemStoneFS.delete(' + uri.toString() + ')');
-  }
-
-  createDirectory(uri: vscode.Uri): void {
-    console.log(`GemStoneFS.createDirectory(${uri.toString()})`);
-  }
-
-  private _emitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
-  readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> =
-    this._emitter.event;
-
-  watch(_resource: vscode.Uri): vscode.Disposable {
-    // console.log(`GsFileSystemProvider.watch()`, _resource.toString());
-    // ignore, fires for all changes...
-    return new vscode.Disposable(() => { });
   }
 }
