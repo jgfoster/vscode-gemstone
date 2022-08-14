@@ -50,7 +50,7 @@ export function activate(aContext: vscode.ExtensionContext) {
 	aContext.subscriptions.push(vscode.commands.registerCommand(
 		'gemstone.openDocument',
 		(content: string) => {
-			vscode.workspace.openTextDocument({ content })
+			vscode.workspace.openTextDocument({ content });
 		}
 	)); // openDocument
 
@@ -58,6 +58,22 @@ export function activate(aContext: vscode.ExtensionContext) {
 		'gemstone.displayIt',
 		displayIt
 	)); // displayIt
+}
+
+async function closeOpenFiles(session: Session): Promise<void> {
+	let myFiles: vscode.Uri[] = [];
+	vscode.workspace.textDocuments.forEach((each) => {
+		if (each.uri.scheme === session.fsScheme()) {
+			myFiles.push(each.uri);
+		}
+	});
+	for (let i = 0; i < myFiles.length; ++i) {
+		const each = myFiles[i];
+		while (vscode.window.activeTextEditor?.document.uri != each) {
+			await vscode.commands.executeCommand('workbench.action.nextEditor');
+		}
+		await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+	}
 }
 
 // https://code.visualstudio.com/api/references/vscode-api#OutputChannel
@@ -261,14 +277,16 @@ async function logoutHandler(session: Session): Promise<void> {
 		}
 	}
 
-	if (selectedSession === session) {
-		selectedSession = null;
-		statusBarItem.text = 'GemStone session: none';
-	}
+	await closeOpenFiles(session);
 
 	// sessions.forEach((item, index, array) => { if (item === session) array.splice(index, 1); });
 	await session.logout();
 	sessionsProvider.refresh();
+
+	if (selectedSession === session) {
+		selectedSession = null;
+		statusBarItem.text = 'GemStone session: none';
+	}
 }
 
 function onSessionSelected(event: vscode.TreeViewSelectionChangeEvent<Session>): void {
