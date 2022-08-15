@@ -5,30 +5,6 @@
  *  so we can 'fold' the contents and use the 'outline' for quick lookup
  */
 
-const getDictionary = (): string => {
-	return `getDictionary: aSymbolDictionary
- | comma dict stream |
- stream := WriteStream on: String new.
- stream nextPutAll: '{"list":['.
- comma := ''.
- aSymbolDictionary keysAndValuesDo: [:eachKey :eachValue |
-     stream
-         nextPutAll: comma;
-         nextPutAll: '{"key":"';
-         nextPutAll: eachKey asString;
-         nextPutAll: '","oop":';
-         print: eachValue asOop;
-         nextPutAll: ',"class":"';
-         nextPutAll: eachValue class name asString;
-         nextPutAll: '","classOop":';
-         print: eachValue class asOop;
-         nextPutAll: '}';
-         yourself.
-     comma := ','.
- ].
- stream nextPutAll: ']}'.
- ^stream contents.`;
-};
 const getClassesInDictionary = (): string => {
 	return `getClassesInDictionary: aSymbolDictionary
 | comma stream |
@@ -43,7 +19,7 @@ aSymbolDictionary values collect: [ :each |
 			nextPutAll: comma;
 			nextPutAll: '{"oop":';
 			print: each asOop;
-			nextPutAll: ',"key":"';
+			nextPutAll: ',"name":"';
 			nextPutAll: each name;
 			nextPutAll: '","size":';
 			print: fileOut size;
@@ -53,30 +29,6 @@ aSymbolDictionary values collect: [ :each |
 			yourself.
 		comma := ','.
 	]
-].
-stream nextPutAll: ']}'.
-^stream contents.`;
-};
-const getSelectors = (): string => {
-	return `getSelectors: aClass
-| comma stream |
-stream := WriteStream on: String new.
-stream nextPutAll: '{"list":['.
-comma := ''.
-aClass selectors collect: [ :each |
-	stream
-		nextPutAll: comma;
-		nextPutAll: '{"oop":';
-		print: each asOop;
-		nextPutAll: ',"key":"';
-		nextPutAll: each asSymbol;
-		nextPutAll: '","class":"';
-		nextPutAll: aClass name;
-		nextPutAll: '","classOop":';
-		print: aClass asOop;
-		nextPutAll: '}';
-		yourself.
-	comma := ','.
 ].
 stream nextPutAll: ']}'.
 ^stream contents.`;
@@ -103,44 +55,6 @@ comma := ','.
 stream nextPutAll: ']}'.
 ^stream contents.`;
 };
-const getAncestor = (): string => {
-	return `getAncestor: aClass
-| stream |
-stream := WriteStream on: String new.
-stream nextPutAll: aClass superClass asString.
-^stream contents`;
-};
-const getAllSubclasses = (): string => {
-	return `getAllSubclasses: aClass
-
-	| classes |
-	classes := Array new.
-	classes add: aClass name asSymbol.
-	aClass subclasses do: [ :subclass |
-		(self getAllSubclasses: subclass) do: [ :child | classes add: child ].
-	].
-	^classes`;
-};
-const getAllClasses = (): string => {
-	return `getAllClasses
-
-	| classes stream comma |
-	classes := self getAllSubclasses: Object.
-	stream := WriteStream on: String new.
-	comma := ''.
-	stream nextPutAll: '['.
-	classes do: [ :class |
-		stream
-            nextPutAll: comma;
-            nextPutAll: '"';
-			nextPutAll: class asString;
-            nextPutAll: '"';
-			yourself.
-		comma := ','.
-	].
-	stream nextPutAll: ']'.
-	^stream contents`;
-};
 const fileOutClass = (): string => {
 	return `fileOutClass: aClass
 		^aClass fileOutClass`;
@@ -149,13 +63,8 @@ const fileOutClass = (): string => {
 // list the methods
 const methods = [
 	fileOutClass(),
-	getDictionary(),
 	getClassesInDictionary(),
-	getSelectors(),
 	getSymbolList(),
-	getAncestor(),
-	getAllSubclasses(),
-	getAllClasses(),
 ];
 
 // this puts it all together

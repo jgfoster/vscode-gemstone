@@ -2,6 +2,9 @@
 import * as vscode from 'vscode';
 import { Session } from './Session';
 import { GsFile, GsClassFile } from './GsClassFile';
+import { assert } from 'console';
+import { SymbolDictionary } from '../model/SymbolDictionary';
+
 
 export class GsDictionaryFile implements vscode.FileStat, GsFile {
 
@@ -15,18 +18,19 @@ export class GsDictionaryFile implements vscode.FileStat, GsFile {
 	session: Session;
 	oop: number;
 
-	constructor(session: Session, name: string, data: any) {
+	constructor(session: Session, aSymbolDictionary: SymbolDictionary) {
 		this.type = vscode.FileType.Directory;
 		this.ctime = Date.now();
 		this.mtime = Date.now();
-		this.size = data.size;
-		this.name = name;
+		this.size = aSymbolDictionary.size;
+		this.name = aSymbolDictionary.name;
 		this.session = session;
-		this.oop = data.oop;
+		this.oop = aSymbolDictionary.oop;
 	}
 
-	addEntry(session: Session, key: any, element: any) {
-		return new GsClassFile(this.session, element.key, element);
+	addEntry(session: Session, element: { oop: number, name: string, size: number, md5: string }) {
+		assert(this.session === session);
+		return new GsClassFile(session, element);
 	}
 
 	getChildren(uri: vscode.Uri): [string, vscode.FileType][] {

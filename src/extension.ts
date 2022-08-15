@@ -97,11 +97,15 @@ async function createViewForSessionList(): Promise<void> {
 }
 
 export async function deactivate() {
-	console.log(`sessions.length = ${sessions.length}`);
+	// The extensions run in a separate process, called the extension host process.
+	// When closing a window, the renderer process goes down immediately.
+	// The extension host process has at most 5 seconds to shut down, after which it will exit.
+	// The vscode API will be unreliable at deactivation time, especially parts that are serviced 
+	//		by the renderer process (like e.g. openTextDocument, etc.)
+	// https://github.com/Microsoft/vscode/issues/47881
+	console.log(`logout ${sessions.length} session(s).`);
 	for (const session of sessions) {
-		if (session.isLoggedIn) {
-			await logoutHandler(session);
-		}
+		await logoutHandler(session);
 	}
 }
 
