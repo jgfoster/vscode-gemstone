@@ -6,32 +6,27 @@
  */
 
 const getClassesInDictionary = (): string => {
-	return `getClassesInDictionary: aSymbolDictionary
-| comma stream |
+	return `getClassesInDictionary: aSymbolDictionary chunk: anInteger
+| comma stream string |
 stream := WriteStream on: String new.
 stream nextPutAll: '{"list":['.
 comma := ''.
 aSymbolDictionary values collect: [ :each |
 	(each class asString endsWith: ' class') ifTrue: [
-		| fileOut |
-		fileOut := each fileOutClass.
 		stream
 			nextPutAll: comma;
 			nextPutAll: '{"oop":';
 			print: each asOop;
 			nextPutAll: ',"name":"';
 			nextPutAll: each name;
-			nextPutAll: '","size":';
-			print: fileOut size;
-			nextPutAll: ',"md5":"';
-			nextPutAll: fileOut asMd5String;
-			nextPutAll: '"}';
+			nextPutAll: '.tpz","size":0,"md5":""}';
 			yourself.
 		comma := ','.
 	]
 ].
 stream nextPutAll: ']}'.
-^stream contents.`;
+string := stream contents.
+^string copyFrom: anInteger - 1 * 25000 + 1 to: (anInteger * 25000 min: string size)`;
 };
 const getSymbolList = (): string => {
 	return `getSymbolList
@@ -56,8 +51,11 @@ stream nextPutAll: ']}'.
 ^stream contents.`;
 };
 const fileOutClass = (): string => {
-	return `fileOutClass: aClass
-		^aClass fileOutClass`;
+	return `fileOutClass: aClass chunk: anInteger
+	| string |
+	
+	string := aClass fileOutClass.
+	^string copyFrom: anInteger - 1 * 25000 + 1 to: (anInteger * 25000 min: string size)`;
 };
 
 // list the methods

@@ -98,6 +98,7 @@ export class Session extends vscode.TreeItem {
   }
 
   handleError(event: any): void {
+    console.log(`error - ${event}`);
     this.isLoggedIn = false;
     this.requests.forEach(element => {
       element[1](event);
@@ -106,7 +107,9 @@ export class Session extends vscode.TreeItem {
   }
 
   handleMessage(event: any): void {
-    const obj = JSON.parse(String.fromCharCode(...event));
+    // maximum payload size < 60 KB; we use 25 KB to be safe (bytes are sent as hex so double the size)!
+    const myString = String.fromCharCode(...event);
+    const obj = JSON.parse(myString);
     const id = obj['_id'];
     const functions = this.requests.get(id);
     this.requests.delete(id);
@@ -198,7 +201,7 @@ export class Session extends vscode.TreeItem {
 
   async stringFromPerform(
     selector: string, oopArray: number[],
-    expectedSize: number): Promise<string> {
+    expectedSize: number = 25000): Promise<string> {
     return new Promise(async (resolve, reject) => {
       try {
         const obj = await this.send({

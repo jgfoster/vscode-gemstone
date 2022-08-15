@@ -3,7 +3,6 @@
  *https://github.com/microsoft/vscode-extension-samples/blob/master/fsprovider-sample/src/fileSystemProvider.ts
  *--------------------------------------------------------------------------------------------*/
 
-import { type } from 'os';
 import * as vscode from 'vscode';
 
 import { GsClassFile, GsFile } from '../model/GsClassFile';
@@ -11,21 +10,21 @@ import { GsDictionaryFile } from '../model/GsDictionaryFile';
 import { Session } from '../model/Session';
 import { SymbolDictionary } from '../model/SymbolDictionary';
 
-function str2ab(str: string): Uint8Array {
-  var buf = new ArrayBuffer(str.length);
-  var bufView = new Uint8Array(buf);
-  for (var i = 0, strLen = str.length; i < strLen; i++) {
-    bufView[i] = str.charCodeAt(i);
-  }
-  return bufView;
-}
-
 export class GsFileSystemProvider implements vscode.FileSystemProvider {
   private _emitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
   private _session: Session;
   public readonly map: Map<string, GsFile> = new Map();
   readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> =
     this._emitter.event;
+
+  str2ab(str: string): Uint8Array {
+    var buf = new ArrayBuffer(str.length);
+    var bufView = new Uint8Array(buf);
+    for (var i = 0, strLen = str.length; i < strLen; i++) {
+      bufView[i] = str.charCodeAt(i);
+    }
+    return bufView;
+  }
 
   private constructor(session: Session) {
     this._session = session;
@@ -71,14 +70,27 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     });
   }
 
+  async read(selector: string, oop: number): Promise<string> {
+    let myString: string = '';
+    let chunk: number = 1;
+    while (true) {
+      const nextChunk = await this._session.stringFromPerform(selector, [oop, chunk * 8 + 2]);
+      myString += nextChunk;
+      console.log(`nextChunk.length = ${nextChunk.length}`);
+      if (nextChunk.length < 25000) {
+        return myString;
+      }
+      ++chunk;
+    }
+  }
+
   // https://github.com/microsoft/vscode/issues/157859
   async readDirectory(dictionaryUri: vscode.Uri): Promise<[string, vscode.FileType][]> {
     return new Promise(async (resolve, reject) => {
       const result: [string, vscode.FileType][] = [];
       try {
         const aGsDictionaryFile: GsDictionaryFile = this.map.get(dictionaryUri.toString())! as GsDictionaryFile;
-        const myString = await this._session.stringFromPerform('getClassesInDictionary:', [aGsDictionaryFile.oop], 65535);
-        console.log(`myString.length = ${myString.length}`);
+        let myString: string = await this.read('getClassesInDictionary:chunk:', aGsDictionaryFile.oop);
         JSON.parse(myString).list.forEach((eachClass: { oop: number, name: string, size: number, md5: string }) => {
           const newUri = vscode.Uri.parse(dictionaryUri.toString() + '/' + eachClass.name);
           const newEntry: GsClassFile = aGsDictionaryFile.addEntry(this._session, eachClass);
@@ -87,6 +99,7 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
         });
         resolve(result);
       } catch (e: any) {
+        console.log(`readDirectory() - error - ${e}`);
         reject(e);
       }
     });
@@ -96,15 +109,16 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     if (uri.toString().includes('.vscode')) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
+    const entry: GsFile = this.map.get(uri.toString())!;
+    if (!entry) {
+      throw vscode.FileSystemError.FileNotFound(uri);
+    }
     return new Promise(async (resolve, reject) => {
-      const entry: GsFile = this.map.get(uri.toString())!;
-      if (!entry) {
-        throw vscode.FileSystemError.FileNotFound(uri);
-      }
       try {
-        let result = await this._session.stringFromPerform('fileOutClass:', [entry.oop], entry.size + 32);
-        resolve(str2ab(result));
+        let result = await this.read('fileOutClass:chunk:', entry.oop);
+        resolve(this.str2ab(result));
       } catch (e: any) {
+        console.log(`readFile() - error - ${e}`);
         reject(e);
       }
     });
