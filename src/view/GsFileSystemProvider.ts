@@ -3,11 +3,13 @@
  *https://github.com/microsoft/vscode-extension-samples/blob/master/fsprovider-sample/src/fileSystemProvider.ts
  *--------------------------------------------------------------------------------------------*/
 
+import { type } from 'os';
 import * as vscode from 'vscode';
 
-import { GsFile } from '../model/GsClassFile';
+import { GsClassFile, GsFile } from '../model/GsClassFile';
 import { GsDictionaryFile } from '../model/GsDictionaryFile';
 import { Session } from '../model/Session';
+import { SymbolDictionary } from '../model/SymbolDictionary';
 
 function str2ab(str: string): Uint8Array {
   var buf = new ArrayBuffer(str.length);
@@ -21,7 +23,9 @@ function str2ab(str: string): Uint8Array {
 export class GsFileSystemProvider implements vscode.FileSystemProvider {
   private _emitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
   private _session: Session;
-  public readonly map: Map<string, any> = new Map();
+  public readonly map: Map<string, GsFile> = new Map();
+  readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> =
+    this._emitter.event;
 
   private constructor(session: Session) {
     this._session = session;
@@ -41,11 +45,11 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
 
       // obtain list of SymbolDictionary instances
       try {
-        const symbolList = await session.getSymbolList();
-        const list = symbolList.map((each: any) => {
-          const uri = vscode.Uri.parse(session.fsScheme() + ':/' + each.name);
-          const dict = new GsDictionaryFile(session, each.name, each);
-          fs.map.set(uri.toString(), dict);
+        const symbolList: Array<SymbolDictionary> = await session.getSymbolList();
+        const list: { 'uri': vscode.Uri, 'name': string }[] = symbolList.map((aSymbolDictionary: SymbolDictionary) => {
+          const uri: vscode.Uri = vscode.Uri.parse(session.fsScheme() + ':/' + aSymbolDictionary.name);
+          const gsDictionaryFile: GsDictionaryFile = new GsDictionaryFile(session, aSymbolDictionary);
+          fs.map.set(uri.toString(), gsDictionaryFile);
           return { 'uri': uri, 'name': uri.toString() };
         });
         const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -67,22 +71,19 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     });
   }
 
-  readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> =
-    this._emitter.event;
-
   // https://github.com/microsoft/vscode/issues/157859
-  async readDirectory(uri: vscode.Uri): Promise<[string, vscode.FileType][]> {
+  async readDirectory(dictionaryUri: vscode.Uri): Promise<[string, vscode.FileType][]> {
     return new Promise(async (resolve, reject) => {
-      const result: [string, vscode.FileType][] = new Array;
+      const result: [string, vscode.FileType][] = [];
       try {
-        const dict = this.map.get(uri.toString());
-        const myString = await this._session.stringFromPerform(
-          'getClassesInDictionary:', [dict.oop], 65525);
-        JSON.parse(myString).list.forEach((element: any) => {
-          const newUri = vscode.Uri.parse(uri.toString() + '/' + element.key);
-          const newEntry = dict.addEntry(this._session, element.key, element);
+        const aGsDictionaryFile: GsDictionaryFile = this.map.get(dictionaryUri.toString())! as GsDictionaryFile;
+        const myString = await this._session.stringFromPerform('getClassesInDictionary:', [aGsDictionaryFile.oop], 65535);
+        console.log(`myString.length = ${myString.length}`);
+        JSON.parse(myString).list.forEach((eachClass: { oop: number, name: string, size: number, md5: string }) => {
+          const newUri = vscode.Uri.parse(dictionaryUri.toString() + '/' + eachClass.name);
+          const newEntry: GsClassFile = aGsDictionaryFile.addEntry(this._session, eachClass);
           this.map.set(newUri.toString(), newEntry);
-          result.push([element.key, newEntry.type]);
+          result.push([eachClass.name, newEntry.type]);
         });
         resolve(result);
       } catch (e: any) {
@@ -91,14 +92,12 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     });
   }
 
-  // --- manage file contents
-
   async readFile(uri: vscode.Uri): Promise<Uint8Array> {
     if (uri.toString().includes('.vscode')) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
     return new Promise(async (resolve, reject) => {
-      const entry: GsFile = this.map.get(uri.toString());
+      const entry: GsFile = this.map.get(uri.toString())!;
       if (!entry) {
         throw vscode.FileSystemError.FileNotFound(uri);
       }
@@ -131,7 +130,7 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     if (uri.toString().includes('.git')) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
-    const entry: vscode.FileStat = this.map.get(uri.toString());
+    const entry: vscode.FileStat = this.map.get(uri.toString())!;
     if (!entry) {
       console.error('stat(\'' + uri.toString() + '\') entry not found!');
       throw vscode.FileSystemError.FileNotFound(uri);
@@ -145,16 +144,25 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     return executableString;
   }
 
-  watch(_resource: vscode.Uri): vscode.Disposable {
-    // console.log(`GsFileSystemProvider.watch()`, _resource.toString());
-    // ignore, fires for all changes...
-    return new vscode.Disposable(() => { });
+  watch(_uri: vscode.Uri, _options: {
+    recursive: boolean,
+    excludes: string[]
+  }): vscode.Disposable {
+    // It is the file system provider's job to call onDidChangeFile for every change given these rules. 
+    // No event should be emitted for files that match any of the provided excludes.
+    // https://code.visualstudio.com/api/references/vscode-api#FileSystemProvider
+    // console.log(`GsFileSystemProvider.watch(${uri.toString()}, {excludes: ${options['excludes']}, recursive: ${_options['recursive']}})`);
+    // We should notify VS Code when the file changes (e.g., by a different session in a commit)
+    return new vscode.Disposable(() => {
+      // console.log(`dispose watch(${uri.toString()})`);
+    });
   }
 
-  writeFile(_uri: vscode.Uri, _content: Uint8Array, _options: {
+  writeFile(uri: vscode.Uri, _content: Uint8Array, _options: {
     create: boolean,
     overwrite: boolean
   }): void {
+    console.log(`write(${uri}), "...", {create: ${_options.create}, overwrite: ${_options.overwrite}})`);
     // const entry: any = this.map.get(uri.toString());
     // try {
     //   var executeString: string = `${entry.gsClass} compileMethod: '${this.uint8ArrayToExecutableString(content)}'`;
