@@ -4,13 +4,25 @@
 
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
+// LSP client copied from https://github.com/badetitou/vscode-pharo
+
 import * as vscode from 'vscode';
+import {
+	LanguageClient,
+	LanguageClientOptions,
+	ServerOptions,
+	StreamInfo,
+	TransportKind
+} from 'vscode-languageclient/node';
+import * as net from 'net';
 
 import { LoginsProvider } from './view/LoginProvider';
 import { Login } from './model/Login';
 import { SessionsProvider } from './view/SessionProvider';
 import { Session } from './model/Session';
 import { GsFileSystemProvider } from './view/GsFileSystemProvider';
+
+export let client: LanguageClient;
 
 let context: vscode.ExtensionContext;
 const loginsProvider = new LoginsProvider();
@@ -35,7 +47,35 @@ export function activate(aContext: vscode.ExtensionContext) {
 	createViewForLoginList();
 	createViewForSessionList();
 	createStatusBarItem(aContext);
+	createCommands(aContext);
 
+	// Create the pharo language server client
+	client = createGemStoneLanguageServer(context);
+		
+	// Start the client. This will also launch the server
+	client.start();
+	context.subscriptions.push(client);
+	console.log('Client started');
+
+}
+
+async function closeEditors(session: Session): Promise<void> {
+	let myFiles: vscode.Uri[] = [];
+	vscode.workspace.textDocuments.forEach((each) => {
+		if (each.uri.scheme === session.fsScheme()) {
+			myFiles.push(each.uri);
+		}
+	});
+	for (let i = 0; i < myFiles.length; ++i) {
+		const each = myFiles[i];
+		while (vscode.window.activeTextEditor?.document.uri != each) {
+			await vscode.commands.executeCommand('workbench.action.nextEditor');
+		}
+		await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+	}
+}
+
+function createCommands(aContext: vscode.ExtensionContext) {
 	// The commands have been defined in the package.json file ("contributes"/"commands")
 	// Now provide the implementations of the commands with registerCommand
 	// The commandId parameter must match the command field in package.json
@@ -58,28 +98,47 @@ export function activate(aContext: vscode.ExtensionContext) {
 		'gemstone.displayIt',
 		displayIt
 	)); // displayIt
+
 }
 
-async function closeEditors(session: Session): Promise<void> {
-	let myFiles: vscode.Uri[] = [];
-	vscode.workspace.textDocuments.forEach((each) => {
-		if (each.uri.scheme === session.fsScheme()) {
-			myFiles.push(each.uri);
+function createGemStoneLanguageServer(aContext: vscode.ExtensionContext) {
+	let serverOptions: ServerOptions = () => createServerWithSocket(aContext);
+
+	// Options to control the language client
+	let clientOptions: LanguageClientOptions = {
+		// Register the server for plain text documents
+		documentSelector: [
+			{ scheme: 'file', language: 'topaz' },
+		],
+		synchronize: {
+			// Notify the server about file changes to '.clientrc files contained in the workspace
+			// fileEvents: workspace.createFileSystemWatcher('**/.clientrc')
 		}
-	});
-	for (let i = 0; i < myFiles.length; ++i) {
-		const each = myFiles[i];
-		while (vscode.window.activeTextEditor?.document.uri != each) {
-			await vscode.commands.executeCommand('workbench.action.nextEditor');
-		}
-		await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
-	}
+	};
+
+	// Create the language client and start the client.
+	return new LanguageClient(
+		'GemStoneLanguageServer',
+		'GemStone Language Server',
+		serverOptions,
+		clientOptions
+	);
 }
 
 // https://code.visualstudio.com/api/references/vscode-api#OutputChannel
 async function createOutputChannel(): Promise<void> {
 	outputChannel = vscode.window.createOutputChannel('GemStone');
 	outputChannel.appendLine('Activated GemStone extension');
+}
+
+async function createServerWithSocket(aContext: vscode.ExtensionContext): Promise<StreamInfo> {
+	let socket = await Promise.resolve(getSocket(dls));
+
+	let result: StreamInfo = {
+		writer: socket,
+		reader: socket
+	};
+	return Promise.resolve(result);
 }
 
 async function createStatusBarItem(aContext: vscode.ExtensionContext): Promise<void> {
@@ -172,6 +231,18 @@ async function doLogin(login: any, progress: any): Promise<void> {
 			console.error('doLogin - error - ', error);
 			reject(error);
 		}
+	});
+}
+
+async function getSocket(): Promise<net.Socket>  {
+	return new Promise(function(resolve) {
+		let socket: net.Socket;
+		console.log(`Try to connect to port ${data}`);
+		socket = net.connect({ port: parseInt(data), host: '127.0.0.1' }, () => {
+			// 'connect' listener.
+			console.log('connected to server!');
+			resolve(socket)
+		});
 	});
 }
 
