@@ -5,15 +5,14 @@
 
 import * as vscode from 'vscode';
 
-import { GsClassFile, GsFile } from '../model/GsClassFile';
-import { GsDictionaryFile } from '../model/GsDictionaryFile';
+import { GsClassFile, GsDictionaryFile, GsFile, GsSessionFile } from '../model/GsFile';
 import { Session } from '../model/Session';
 import { SymbolDictionary } from '../model/SymbolDictionary';
 
 export class GsFileSystemProvider implements vscode.FileSystemProvider {
   private _emitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
   private _session: Session;
-  public readonly map: Map<string, GsFile> = new Map();
+  public readonly entries: Map<string, GsFile> = new Map();
   readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> =
     this._emitter.event;
 
@@ -40,17 +39,16 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
 
   static async forSession(session: Session): Promise<GsFileSystemProvider> {
     return new Promise(async (resolve, reject) => {
-      const fs = new GsFileSystemProvider(session);
+      const instance = new GsFileSystemProvider(session);
 
       // obtain list of SymbolDictionary instances
       try {
         const symbolList: Array<SymbolDictionary> = await session.getSymbolList();
-        const list: { 'uri': vscode.Uri, 'name': string }[] = symbolList.map((aSymbolDictionary: SymbolDictionary) => {
-          const uri: vscode.Uri = vscode.Uri.parse(session.fsScheme() + ':/' + aSymbolDictionary.name);
-          const gsDictionaryFile: GsDictionaryFile = new GsDictionaryFile(session, aSymbolDictionary);
-          fs.map.set(uri.toString(), gsDictionaryFile);
-          return { 'uri': uri, 'name': uri.toString() };
-        });
+        const root = new GsSessionFile(session, symbolList);
+        instance.entries.set(root.uri.toString(), root);
+        for (const each of root.entries.entries()) {
+          instance.entries.set(each[0], each[1] as GsDictionaryFile);
+        };
         const workspaceFolders = vscode.workspace.workspaceFolders;
         //   If the first workspace folder is added, removed or changed, the currently executing extensions 
         //    (including the one that called this method) will be terminated and restarted so that the (deprecated) 
@@ -58,9 +56,9 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
         //   See isValidSetup() where we ensure that a first folder exists.
         //   Use the onDidChangeWorkspaceFolders() event to get notified when the workspace folders have been updated.
         const flag = vscode.workspace.updateWorkspaceFolders(
-          workspaceFolders ? workspaceFolders.length : 0, null, ...list);
+          workspaceFolders ? workspaceFolders.length : 0, null, ...[{'uri': root.uri, 'name': root.name}]);
         if (flag) {
-          resolve(fs);
+          resolve(instance);
         } else {
           reject({ 'message': 'Unable to create workspace folder!' });
         }
@@ -76,7 +74,6 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     while (true) {
       const nextChunk = await this._session.stringFromPerform(selector, [oop, chunk * 8 + 2]);
       myString += nextChunk;
-      console.log(`nextChunk.length = ${nextChunk.length}`);
       if (nextChunk.length < 25000) {
         return myString;
       }
@@ -85,16 +82,28 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
   }
 
   // https://github.com/microsoft/vscode/issues/157859
-  async readDirectory(dictionaryUri: vscode.Uri): Promise<[string, vscode.FileType][]> {
+  async readDirectory(parentUri: vscode.Uri): Promise<[string, vscode.FileType][]> {
+    console.log(`readDirectory(${parentUri.toString()})`);
+    const regexp = /^gs\d+:\/session-\d+$/g;
+    if (regexp.test(parentUri.toString())) {
+      return new Promise(async (resolve, reject) => {
+        const list: [string, vscode.FileType][] = [];
+        const gsSessionFile: GsSessionFile = this.entries.get(parentUri.toString())! as GsSessionFile;
+        for (const each of gsSessionFile.entries.values()) {
+          list.push([each.name, vscode.FileType.Directory]);
+        }
+        resolve(list);
+      });
+    };
     return new Promise(async (resolve, reject) => {
       const result: [string, vscode.FileType][] = [];
       try {
-        const aGsDictionaryFile: GsDictionaryFile = this.map.get(dictionaryUri.toString())! as GsDictionaryFile;
+        const aGsDictionaryFile: GsDictionaryFile = this.entries.get(parentUri.toString())! as GsDictionaryFile;
         let myString: string = await this.read('getClassesInDictionary:chunk:', aGsDictionaryFile.oop);
         JSON.parse(myString).list.forEach((eachClass: { oop: number, name: string, size: number, md5: string }) => {
-          const newUri = vscode.Uri.parse(dictionaryUri.toString() + '/' + eachClass.name);
+          const newUri = vscode.Uri.parse(parentUri.toString() + '/' + eachClass.name);
           const newEntry: GsClassFile = aGsDictionaryFile.addEntry(this._session, eachClass);
-          this.map.set(newUri.toString(), newEntry);
+          this.entries.set(newUri.toString(), newEntry);
           result.push([eachClass.name, newEntry.type]);
         });
         resolve(result);
@@ -109,7 +118,7 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     if (uri.toString().includes('.vscode')) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
-    const entry: GsFile = this.map.get(uri.toString())!;
+    const entry: GsClassFile = this.entries.get(uri.toString())! as GsClassFile;
     if (!entry) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
@@ -138,13 +147,13 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
   //    .vscode/tasks.json
   //    .vscode/launch.json
   stat(uri: vscode.Uri): vscode.FileStat {
-    if (uri.toString().includes('.vscode')) {
-      throw vscode.FileSystemError.FileNotFound(uri);
-    }
     if (uri.toString().includes('.git')) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
-    const entry: vscode.FileStat = this.map.get(uri.toString())!;
+    if (uri.toString().includes('.vscode')) {
+      throw vscode.FileSystemError.FileNotFound(uri);
+    }
+    const entry: vscode.FileStat = this.entries.get(uri.toString())!;
     if (!entry) {
       console.error('stat(\'' + uri.toString() + '\') entry not found!');
       throw vscode.FileSystemError.FileNotFound(uri);
