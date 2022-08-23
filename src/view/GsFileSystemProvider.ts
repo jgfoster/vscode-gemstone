@@ -12,7 +12,7 @@ import { SymbolDictionary } from '../model/SymbolDictionary';
 export class GsFileSystemProvider implements vscode.FileSystemProvider {
   private _emitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
   private _session: Session;
-  public readonly map: Map<string, GsFile> = new Map();
+  public readonly entries: Map<string, GsFile> = new Map();
   readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> =
     this._emitter.event;
 
@@ -43,12 +43,11 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
 
       // obtain list of SymbolDictionary instances
       try {
-        console.log('getSymbolList() - 1');
         const symbolList: Array<SymbolDictionary> = await session.getSymbolList();
         const root = new GsSessionFile(session, symbolList);
-        instance.map.set(root.uri.toString(), root);
+        instance.entries.set(root.uri.toString(), root);
         for (const each of root.entries.entries()) {
-          instance.map.set(each[0], each[1] as GsDictionaryFile);
+          instance.entries.set(each[0], each[1] as GsDictionaryFile);
         };
         const workspaceFolders = vscode.workspace.workspaceFolders;
         //   If the first workspace folder is added, removed or changed, the currently executing extensions 
@@ -75,7 +74,6 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     while (true) {
       const nextChunk = await this._session.stringFromPerform(selector, [oop, chunk * 8 + 2]);
       myString += nextChunk;
-      console.log(`nextChunk.length = ${nextChunk.length}`);
       if (nextChunk.length < 25000) {
         return myString;
       }
@@ -84,30 +82,28 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
   }
 
   // https://github.com/microsoft/vscode/issues/157859
-  async readDirectory(dictionaryUri: vscode.Uri): Promise<[string, vscode.FileType][]> {
+  async readDirectory(parentUri: vscode.Uri): Promise<[string, vscode.FileType][]> {
+    console.log(`readDirectory(${parentUri.toString()})`);
     const regexp = /^gs\d+:\/session-\d+$/g;
-    const flag = regexp.test(dictionaryUri.toString());
-    if (flag) {
-      console.log('getSymbolList() - 2');
-      const symbolList: Array<SymbolDictionary> = await this._session.getSymbolList();
+    if (regexp.test(parentUri.toString())) {
       return new Promise(async (resolve, reject) => {
-        const result: [string, vscode.FileType][] = [];
-        symbolList.forEach((each: SymbolDictionary, index: number) => {
-          console.log(`readDirectory() - ${each.name}`);
-          result.push([`${index + 1}: ${each.name}`, vscode.FileType.Directory]);
-        });
-        resolve(result);
+        const list: [string, vscode.FileType][] = [];
+        const gsSessionFile: GsSessionFile = this.entries.get(parentUri.toString())! as GsSessionFile;
+        for (const each of gsSessionFile.entries.values()) {
+          list.push([each.name, vscode.FileType.Directory]);
+        }
+        resolve(list);
       });
     };
     return new Promise(async (resolve, reject) => {
       const result: [string, vscode.FileType][] = [];
       try {
-        const aGsDictionaryFile: GsDictionaryFile = this.map.get(dictionaryUri.toString())! as GsDictionaryFile;
+        const aGsDictionaryFile: GsDictionaryFile = this.entries.get(parentUri.toString())! as GsDictionaryFile;
         let myString: string = await this.read('getClassesInDictionary:chunk:', aGsDictionaryFile.oop);
         JSON.parse(myString).list.forEach((eachClass: { oop: number, name: string, size: number, md5: string }) => {
-          const newUri = vscode.Uri.parse(dictionaryUri.toString() + '/' + eachClass.name);
+          const newUri = vscode.Uri.parse(parentUri.toString() + '/' + eachClass.name);
           const newEntry: GsClassFile = aGsDictionaryFile.addEntry(this._session, eachClass);
-          this.map.set(newUri.toString(), newEntry);
+          this.entries.set(newUri.toString(), newEntry);
           result.push([eachClass.name, newEntry.type]);
         });
         resolve(result);
@@ -122,7 +118,7 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     if (uri.toString().includes('.vscode')) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
-    const entry: GsClassFile = this.map.get(uri.toString())! as GsClassFile;
+    const entry: GsClassFile = this.entries.get(uri.toString())! as GsClassFile;
     if (!entry) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
@@ -157,7 +153,7 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     if (uri.toString().includes('.vscode')) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
-    const entry: vscode.FileStat = this.map.get(uri.toString())!;
+    const entry: vscode.FileStat = this.entries.get(uri.toString())!;
     if (!entry) {
       console.error('stat(\'' + uri.toString() + '\') entry not found!');
       throw vscode.FileSystemError.FileNotFound(uri);

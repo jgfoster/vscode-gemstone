@@ -71,7 +71,6 @@ export class Session extends vscode.TreeItem {
   }
 
   async getSymbolList(): Promise<Array<SymbolDictionary>> {
-    console.log('getSymbolList() - 0');
     return new Promise(async (resolve, reject) => {
       // obtain list of SymbolDictionary instances
       try {

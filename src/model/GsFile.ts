@@ -54,10 +54,9 @@ export class GsDictionaryFile implements vscode.FileStat, GsFile {
 		this.ctime = Date.now();
 		this.mtime = Date.now();
 		this.size = aSymbolDictionary.size;
-		this.name = `${index}: ${aSymbolDictionary.name}`;
+		this.name = `${index + 1}-${aSymbolDictionary.name}`;
 		this.session = session;
 		this.oop = aSymbolDictionary.oop;
-		console.log(`GsDictionaryFile() - ${this.name}`);
 	}
 
 	addEntry(session: Session, element: { oop: number, name: string, size: number, md5: string }) {
@@ -66,7 +65,7 @@ export class GsDictionaryFile implements vscode.FileStat, GsFile {
 	}
 
 	getChildren(uri: vscode.Uri): [string, vscode.FileType][] {
-		// console.log('getChildren', uri.toString());
+		console.log('getChildren', uri.toString());
 		let result: [string, vscode.FileType][] = [];
 		if (this.entries) {
 			for (const [name, child] of this.entries) {
@@ -96,13 +95,13 @@ export class GsSessionFile implements vscode.FileStat, GsFile {
 		this.type = vscode.FileType.Directory;
 		this.ctime = Date.now();
 		this.mtime = Date.now();
-		this.size = 0;
+		this.size = dictionaries.length;
 		this.name = `session-${session.sessionId}`;
 		this.session = session;
     const uriString = `${session.fsScheme()}:/${this.name}`;
     this.uri = vscode.Uri.parse(uriString);
     dictionaries.forEach((aSymbolDictionary: SymbolDictionary, index: number) => {
-      const uri: vscode.Uri = vscode.Uri.parse(`${session.fsScheme()}:/session-${session.sessionId}/${aSymbolDictionary.name}`);
+      const uri: vscode.Uri = vscode.Uri.parse(`${session.fsScheme()}:/session-${session.sessionId}/${index + 1}-${aSymbolDictionary.name}`);
       const gsDictionaryFile: GsDictionaryFile = new GsDictionaryFile(session, aSymbolDictionary, index);
       this.entries.set(uri.toString(), gsDictionaryFile);
     });
