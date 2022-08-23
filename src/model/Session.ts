@@ -145,7 +145,7 @@ export class Session extends vscode.TreeItem {
   }
 
   fsScheme(): string {
-    return 'gs' + this.sessionId.toString();
+    return `gs${this.sessionId.toString()}`;
   }
 
   async login(): Promise<void> {
