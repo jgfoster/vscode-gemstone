@@ -5,7 +5,6 @@
  * and https://github.com/microsoft/vscode-extension-samples/blob/main/lsp-multi-server-sample/client/src/extension.ts
  */
 
-// import * as net from 'net';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import WebSocket = require('ws');
@@ -13,11 +12,11 @@ import WebSocket = require('ws');
 import { Login } from './Login';
 import JadeServer from './JadeServer';
 import { SymbolDictionary } from './SymbolDictionary';
-// import { LanguageClient, LanguageClientOptions, ServerOptions, StreamInfo } from 'vscode-languageclient/node';
+import { LanguageClient, LanguageClientOptions, ServerOptions, StreamInfo } from 'vscode-languageclient/node';
+import stream = require('stream');
 
 export class Session extends vscode.TreeItem {
   isLoggedIn: boolean = false;
-  // languageServer: LanguageClient | null = null;
   private jadeServer: string = '';
   requestCounter: number = 0;
   requests: Map<number, Array<Function>> = new Map;
@@ -26,6 +25,57 @@ export class Session extends vscode.TreeItem {
   subscriptions: vscode.Disposable[] = [];
   version: string = '';
 
+  languageServer: LanguageClient | null = null;
+  languageServerBuffer: string = '';
+  languageServerPending: number = 0;
+  // https://nodejs.dev/en/learn/nodejs-streams#how-to-create-a-readable-stream
+  languageServerReader: stream.Readable = new stream.Readable({
+    read() {},  // languageServerReader.push(aString);
+  });
+  languageServerWriter: stream.Writable = new stream.Writable({
+    write: (chunk, _encoding, next) => {
+      const myChunk: string = chunk.toString();
+      if (this.languageServerPending === 0) {
+        if (myChunk.startsWith('Content-Length: ')) {
+          this.languageServerPending = Number(myChunk.substring(16));
+        } else {
+          console.log(`Unexpected LSP message: '${myChunk}`);
+        }
+      } else {
+        this.languageServerBuffer = this.languageServerBuffer + myChunk;
+        if (this.languageServerBuffer.length === this.languageServerPending) {
+          console.log('received a complete message');
+          const message = JSON.parse(this.languageServerBuffer);
+          if (message.method === 'initialize') {
+            console.log('received an initialize message');
+            const result = {
+              jsonrpc: "2.0",
+              id: 1,
+              method: "InitializeResult",
+              params: {
+                serverInfo: {
+                  name: 'GemStone/S 64 Bit',
+                  version: '3.6.5'
+                },
+                capabilities: {}
+              }
+            };
+            const resultJson = JSON.stringify(result);
+            this.languageServerReader.push(`Content-Length: ${resultJson.length}\r\n\r\n`);
+            this.languageServerReader.push(resultJson);
+          } else if (message.error) {
+            console.log(`Error: ${message.error.code}: '${message.error.message}'`);
+          } else {
+            console.log(`Unknown: ${Object.keys(message)}`);
+          }
+          this.languageServerBuffer = '';
+          this.languageServerPending = 0;
+        }
+      }
+      next();
+    }
+  });
+  
   constructor(private _login: Login, nextSessionId: number) {
     super(_login.label, vscode.TreeItemCollapsibleState.None);
     this.sessionId = nextSessionId;
@@ -75,51 +125,34 @@ export class Session extends vscode.TreeItem {
     });
   }
 
-//   createGemStoneLanguageServer(aContext: vscode.ExtensionContext) {
-//     let serverOptions: ServerOptions = () => createServerWithSocket(aContext);
+  async createGemStoneLanguageServer(aContext: vscode.ExtensionContext): Promise<void> {
+    
+    // https://github.com/microsoft/vscode-languageserver-node/blob/2e2658c897fbd20e134076f685da005d173d5e92/client/src/node/main.ts:101
+    let streamInfo: StreamInfo = { writer: this.languageServerWriter, reader: this.languageServerReader};
+    // https://github.com/microsoft/vscode-languageserver-node/blob/2e2658c897fbd20e134076f685da005d173d5e92/client/src/node/main.ts:126
+    let serverOptions: ServerOptions = async () => streamInfo;
   
-//     // Options to control the language client
-//     let clientOptions: LanguageClientOptions = {
-//       // Register the server for plain text documents
-//       documentSelector: [
-//         { scheme: 'file', language: 'topaz' },
-//       ],
-//       synchronize: {
-//         // Notify the server about file changes to '.clientrc files contained in the workspace
-//         // fileEvents: workspace.createFileSystemWatcher('**/.clientrc')
-//       }
-//     };
+    let clientOptions: LanguageClientOptions = {
+      documentSelector: [
+        { scheme: this.fsScheme(), language: 'topaz' },
+      ],
+      synchronize: {
+        // Notify the server about file changes to '.clientrc files contained in the workspace
+        // fileEvents: workspace.createFileSystemWatcher('**/.clientrc')
+      }
+    };
   
-//     // Create the language client and start the client.
-//     return new LanguageClient(
-//       'GemStoneLanguageServer',
-//       'GemStone Language Server',
-//       serverOptions,
-//       clientOptions
-//     );
-//   }
-  
-// async createServerWithSocket(aContext: vscode.ExtensionContext): Promise<StreamInfo> {
-// 	let socket = await Promise.resolve(getSocket(dls));
+    // Create the language client and start the client.
 
-// 	let result: StreamInfo = {
-// 		writer: socket,
-// 		reader: socket
-// 	};
-// 	return Promise.resolve(result);
-// }
-
-// async getSocket(): Promise<net.Socket>  {
-// 	return new Promise(function(resolve) {
-// 		let socket: net.Socket;
-// 		console.log(`Try to connect to port ${data}`);
-// 		socket = net.connect({ port: parseInt(data), host: '127.0.0.1' }, () => {
-// 			// 'connect' listener.
-// 			console.log('connected to server!');
-// 			resolve(socket)
-// 		});
-// 	});
-// }
+    this.languageServer = new LanguageClient(
+      'GemStoneLanguageServer',
+      'GemStone Language Server',
+      serverOptions,
+      clientOptions
+    );
+    this.languageServer.start();
+    aContext.subscriptions.push(this.languageServer);
+  }
 
   async getSymbolList(): Promise<Array<SymbolDictionary>> {
     return new Promise(async (resolve, reject) => {
@@ -199,16 +232,14 @@ export class Session extends vscode.TreeItem {
     return `gs${this.sessionId.toString()}`;
   }
 
-  async login(): Promise<void> {
+  async login(aContext: vscode.ExtensionContext): Promise<void> {
     await this.send({
       'request': 'login',
       'username': this._login.gs_user,
       'password': this._login.gs_password
     });
 
-    // this.languageServer = createGemStoneLanguageServer(context);
-    // this.languageServer.start();
-    // context.subscriptions.push(this.languageServer);
+    await this.createGemStoneLanguageServer(aContext);
   }
 
   async logout(): Promise<void> {

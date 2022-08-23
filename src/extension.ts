@@ -150,7 +150,7 @@ async function doLogin(login: any, progress: any): Promise<void> {
 			const session = new Session(login, nextSessionId());
 			await session.connect();
 			await session.getVersion();
-			await session.login();
+			await session.login(context);
 			await session.registerJadeServer();
 			selectedSession = session;
 			sessions.push(session);
