@@ -43,6 +43,7 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
 
       // obtain list of SymbolDictionary instances
       try {
+        console.log('getSymbolList() - 1');
         const symbolList: Array<SymbolDictionary> = await session.getSymbolList();
         const root = new GsSessionFile(session, symbolList);
         instance.map.set(root.uri.toString(), root);
@@ -87,11 +88,13 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
     const regexp = /^gs\d+:\/session-\d+$/g;
     const flag = regexp.test(dictionaryUri.toString());
     if (flag) {
+      console.log('getSymbolList() - 2');
       const symbolList: Array<SymbolDictionary> = await this._session.getSymbolList();
       return new Promise(async (resolve, reject) => {
         const result: [string, vscode.FileType][] = [];
-        symbolList.forEach((each: SymbolDictionary) => {
-          result.push([each.name, vscode.FileType.Directory]);
+        symbolList.forEach((each: SymbolDictionary, index: number) => {
+          console.log(`readDirectory() - ${each.name}`);
+          result.push([`${index + 1}: ${each.name}`, vscode.FileType.Directory]);
         });
         resolve(result);
       });
