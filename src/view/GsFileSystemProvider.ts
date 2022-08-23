@@ -83,7 +83,6 @@ export class GsFileSystemProvider implements vscode.FileSystemProvider {
 
   // https://github.com/microsoft/vscode/issues/157859
   async readDirectory(parentUri: vscode.Uri): Promise<[string, vscode.FileType][]> {
-    console.log(`readDirectory(${parentUri.toString()})`);
     const regexp = /^gs\d+:\/session-\d+$/g;
     if (regexp.test(parentUri.toString())) {
       return new Promise(async (resolve, reject) => {

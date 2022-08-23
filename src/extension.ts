@@ -2,27 +2,13 @@
  *  gemstone: GemStone/S 64 Bit IDE for Visual Studio Code
  */
 
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
-// LSP client copied from https://github.com/badetitou/vscode-pharo
-
 import * as vscode from 'vscode';
-import {
-	LanguageClient,
-	LanguageClientOptions,
-	ServerOptions,
-	StreamInfo,
-	TransportKind
-} from 'vscode-languageclient/node';
-import * as net from 'net';
 
 import { LoginsProvider } from './view/LoginProvider';
 import { Login } from './model/Login';
 import { SessionsProvider } from './view/SessionProvider';
 import { Session } from './model/Session';
 import { GsFileSystemProvider } from './view/GsFileSystemProvider';
-
-export let client: LanguageClient;
 
 let context: vscode.ExtensionContext;
 const loginsProvider = new LoginsProvider();
@@ -48,15 +34,6 @@ export function activate(aContext: vscode.ExtensionContext) {
 	createViewForSessionList();
 	createStatusBarItem(aContext);
 	createCommands(aContext);
-
-	// Create the pharo language server client
-	client = createGemStoneLanguageServer(context);
-		
-	// Start the client. This will also launch the server
-	client.start();
-	context.subscriptions.push(client);
-	console.log('Client started');
-
 }
 
 async function closeEditors(session: Session): Promise<void> {
@@ -101,44 +78,10 @@ function createCommands(aContext: vscode.ExtensionContext) {
 
 }
 
-function createGemStoneLanguageServer(aContext: vscode.ExtensionContext) {
-	let serverOptions: ServerOptions = () => createServerWithSocket(aContext);
-
-	// Options to control the language client
-	let clientOptions: LanguageClientOptions = {
-		// Register the server for plain text documents
-		documentSelector: [
-			{ scheme: 'file', language: 'topaz' },
-		],
-		synchronize: {
-			// Notify the server about file changes to '.clientrc files contained in the workspace
-			// fileEvents: workspace.createFileSystemWatcher('**/.clientrc')
-		}
-	};
-
-	// Create the language client and start the client.
-	return new LanguageClient(
-		'GemStoneLanguageServer',
-		'GemStone Language Server',
-		serverOptions,
-		clientOptions
-	);
-}
-
 // https://code.visualstudio.com/api/references/vscode-api#OutputChannel
 async function createOutputChannel(): Promise<void> {
 	outputChannel = vscode.window.createOutputChannel('GemStone');
 	outputChannel.appendLine('Activated GemStone extension');
-}
-
-async function createServerWithSocket(aContext: vscode.ExtensionContext): Promise<StreamInfo> {
-	let socket = await Promise.resolve(getSocket(dls));
-
-	let result: StreamInfo = {
-		writer: socket,
-		reader: socket
-	};
-	return Promise.resolve(result);
 }
 
 async function createStatusBarItem(aContext: vscode.ExtensionContext): Promise<void> {
@@ -162,10 +105,12 @@ export async function deactivate() {
 	// The vscode API will be unreliable at deactivation time, especially parts that are serviced 
 	//		by the renderer process (like e.g. openTextDocument, etc.)
 	// https://github.com/Microsoft/vscode/issues/47881
-	console.log(`logout ${sessions.length} session(s).`);
+
+	const promises: Thenable<void>[] = [];
 	for (const session of sessions) {
-		await logoutHandler(session);
+		promises.push(logoutHandler(session));
 	}
+	return Promise.all(promises).then(() => undefined);
 }
 
 // evaluate a Smalltalk expression found in a TextEditor and insert the value as a string
@@ -231,18 +176,6 @@ async function doLogin(login: any, progress: any): Promise<void> {
 			console.error('doLogin - error - ', error);
 			reject(error);
 		}
-	});
-}
-
-async function getSocket(): Promise<net.Socket>  {
-	return new Promise(function(resolve) {
-		let socket: net.Socket;
-		console.log(`Try to connect to port ${data}`);
-		socket = net.connect({ port: parseInt(data), host: '127.0.0.1' }, () => {
-			// 'connect' listener.
-			console.log('connected to server!');
-			resolve(socket)
-		});
 	});
 }
 

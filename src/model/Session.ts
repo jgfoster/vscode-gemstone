@@ -1,7 +1,11 @@
 /*
  *	Session.ts
+ *
+ * Language Server Protocol client influenced by https://github.com/badetitou/vscode-pharo
+ * and https://github.com/microsoft/vscode-extension-samples/blob/main/lsp-multi-server-sample/client/src/extension.ts
  */
 
+// import * as net from 'net';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import WebSocket = require('ws');
@@ -9,14 +13,16 @@ import WebSocket = require('ws');
 import { Login } from './Login';
 import JadeServer from './JadeServer';
 import { SymbolDictionary } from './SymbolDictionary';
+// import { LanguageClient, LanguageClientOptions, ServerOptions, StreamInfo } from 'vscode-languageclient/node';
 
 export class Session extends vscode.TreeItem {
   isLoggedIn: boolean = false;
+  // languageServer: LanguageClient | null = null;
   private jadeServer: string = '';
   requestCounter: number = 0;
   requests: Map<number, Array<Function>> = new Map;
   sessionId: number;
-  socket: WebSocket | null;
+  socket: WebSocket | null = null;
   subscriptions: vscode.Disposable[] = [];
   version: string = '';
 
@@ -25,7 +31,6 @@ export class Session extends vscode.TreeItem {
     this.sessionId = nextSessionId;
     this.tooltip = `${this.sessionId}: ${this._login.tooltip}`;
     this.description = this.tooltip;
-    this.socket = null;
   }
 
   private send(obj: any): Promise<any> {
@@ -69,6 +74,52 @@ export class Session extends vscode.TreeItem {
       });
     });
   }
+
+//   createGemStoneLanguageServer(aContext: vscode.ExtensionContext) {
+//     let serverOptions: ServerOptions = () => createServerWithSocket(aContext);
+  
+//     // Options to control the language client
+//     let clientOptions: LanguageClientOptions = {
+//       // Register the server for plain text documents
+//       documentSelector: [
+//         { scheme: 'file', language: 'topaz' },
+//       ],
+//       synchronize: {
+//         // Notify the server about file changes to '.clientrc files contained in the workspace
+//         // fileEvents: workspace.createFileSystemWatcher('**/.clientrc')
+//       }
+//     };
+  
+//     // Create the language client and start the client.
+//     return new LanguageClient(
+//       'GemStoneLanguageServer',
+//       'GemStone Language Server',
+//       serverOptions,
+//       clientOptions
+//     );
+//   }
+  
+// async createServerWithSocket(aContext: vscode.ExtensionContext): Promise<StreamInfo> {
+// 	let socket = await Promise.resolve(getSocket(dls));
+
+// 	let result: StreamInfo = {
+// 		writer: socket,
+// 		reader: socket
+// 	};
+// 	return Promise.resolve(result);
+// }
+
+// async getSocket(): Promise<net.Socket>  {
+// 	return new Promise(function(resolve) {
+// 		let socket: net.Socket;
+// 		console.log(`Try to connect to port ${data}`);
+// 		socket = net.connect({ port: parseInt(data), host: '127.0.0.1' }, () => {
+// 			// 'connect' listener.
+// 			console.log('connected to server!');
+// 			resolve(socket)
+// 		});
+// 	});
+// }
 
   async getSymbolList(): Promise<Array<SymbolDictionary>> {
     return new Promise(async (resolve, reject) => {
@@ -154,6 +205,10 @@ export class Session extends vscode.TreeItem {
       'username': this._login.gs_user,
       'password': this._login.gs_password
     });
+
+    // this.languageServer = createGemStoneLanguageServer(context);
+    // this.languageServer.start();
+    // context.subscriptions.push(this.languageServer);
   }
 
   async logout(): Promise<void> {
