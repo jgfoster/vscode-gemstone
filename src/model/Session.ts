@@ -44,29 +44,45 @@ export class Session extends vscode.TreeItem {
       } else {
         this.languageServerBuffer = this.languageServerBuffer + myChunk;
         if (this.languageServerBuffer.length === this.languageServerPending) {
-          console.log('received a complete message');
           const message = JSON.parse(this.languageServerBuffer);
           if (message.method === 'initialize') {
-            console.log('received an initialize message');
+            console.log('LSP: initialize');
             const result = {
               jsonrpc: "2.0",
-              id: 1,
-              method: "InitializeResult",
-              params: {
+              id: message.id,
+              result: {
                 serverInfo: {
                   name: 'GemStone/S 64 Bit',
                   version: '3.6.5'
                 },
-                capabilities: {}
+                capabilities: {
+                  positionEncoding: 'utf-16',
+                  textDocumentSync: { openClose: true, change: 2 }
+                }
               }
             };
             const resultJson = JSON.stringify(result);
             this.languageServerReader.push(`Content-Length: ${resultJson.length}\r\n\r\n`);
             this.languageServerReader.push(resultJson);
+          } else if (message.method === 'initialized') {
+            console.log('LSP: initialized');
+          } else if (message.method === 'shutdown') {
+            console.log('LSP: shutdown');
+            const result = {
+              jsonrpc: "2.0",
+              id: message.id,
+              result: null
+            };
+            const resultJson = JSON.stringify(result);
+            this.languageServerReader.push(`Content-Length: ${resultJson.length}\r\n\r\n`);
+            this.languageServerReader.push(resultJson);
+          } else if (message.method === 'exit') {
+            console.log('LSP: exit');
           } else if (message.error) {
-            console.log(`Error: ${message.error.code}: '${message.error.message}'`);
+            console.log(`LSP Error: ${message.error.code}: '${message.error.message}'`);
           } else {
-            console.log(`Unknown: ${Object.keys(message)}`);
+            console.log(`LSP: '${Object.keys(message)}'?; ${message.method}`);
+            console.log(message.params);
           }
           this.languageServerBuffer = '';
           this.languageServerPending = 0;
@@ -243,6 +259,8 @@ export class Session extends vscode.TreeItem {
   }
 
   async logout(): Promise<void> {
+    this.languageServer!.stop();
+    this.languageServer = null;
     await this.send({ 'request': 'logout' });  // send logout request to Gem
     this.subscriptions.forEach((each) => each.dispose());  // dispose of file system provider
   }
