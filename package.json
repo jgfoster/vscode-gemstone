@@ -1,8 +1,8 @@
 {
-	"name": "gemstone",
-	"displayName": "GemStone IDE",
-	"description": "GemStone/S IDE for Visual Studio Code",
-	"version": "0.6.0",
+	"name": "files",
+	"displayName": "File System Demo",
+	"description": "Demonstrate file system expansion",
+	"version": "1.0.0",
 	"preview": true,
 	"publisher": "jgfoster",
 	"license": "MIT",
@@ -10,136 +10,21 @@
 		"vscode": "^1.67.0"
 	},
 	"categories": [
-		"Debuggers",
-		"Programming Languages"
+		"Snippets",
+		"Other",
+		"Testing"
 	],
-	"keywords": [
-		"GemStone",
-		"Smalltalk",
-		"Database",
-		"Object Database",
-		"IDE"
-	],
+	"keywords": [],
 	"main": "./out/extension.js",
 	"contributes": {
-		"commands": [
-			{
-				"command": "gemstone.displayIt",
-				"title": "Display It"
-			},
-			{
-				"command": "gemstone.login",
-				"title": "Login"
-			},
-			{
-				"command": "gemstone.openDocument",
-				"title": "Open Document"
-			},
-			{
-				"command": "gemstone.logout",
-				"title": "Logout"
-			}
-		],
-		"configuration": {
-			"type": "object",
-			"title": "GemStone",
-			"properties": {
-				"gemstone.logins": {
-					"type": "array",
-					"items": {
-						"type": "object",
-						"title": "Login Parameters",
-						"properties": {
-							"label": {
-								"type": "string",
-								"description": "A label for this login"
-							},
-							"gem_host": {
-								"type": "string",
-								"description": "Hostname or IP address of gem server"
-							},
-							"gem_port": {
-								"type": "number",
-								"description": "Gem server port"
-							},
-							"gs_user": {
-								"type": "string",
-								"description": "GemStone user name"
-							},
-							"gs_password": {
-								"type": "string",
-								"description": "GemStone password"
-							}
-						}
-					},
-					"default": [
-						{
-							"label": "Default",
-							"gem_host": "localhost",
-							"gem_port": 50378,
-							"gs_user": "DataCurator",
-							"gs_password": "swordfish"
-						}
-					],
-					"description": "GemStone/S 64 Bit login parameters"
-				}
-			}
-		},
-		"keybindings": [
-			{
-				"command": "gemstone.displayIt",
-				"key": "ctrl+d",
-				"mac": "cmd+d",
-				"when": "editorTextFocus"
-			}
-		],
-		"menus": {
-			"view/item/context": [
-				{
-					"command": "gemstone.login",
-					"when": "view == gemstone-logins",
-					"group": "inline"
-				},
-				{
-					"command": "gemstone.logout",
-					"when": "view == gemstone-sessions",
-					"group": "inline"
-				}
-			]
-		},
-		"viewsContainers": {
-			"activitybar": [
-				{
-					"id": "gemstone",
-					"title": "GemStone/S Tools",
-					"icon": "resources/sparkle32.png"
-				}
-			]
-		},
-		"views": {
-			"gemstone": [
-				{
-					"id": "gemstone-logins",
-					"name": "Logins"
-				},
-				{
-					"id": "gemstone-sessions",
-					"name": "Sessions"
-				}
-			]
-		}
+		"commands": [],
+		"keybindings": [],
+		"menus": {},
+		"viewsContainers": {},
+		"views": {}
 	},
 	"activationEvents": [
-		"onView:gemstone-logins",
-		"onFileSystem:gs1",
-		"onFileSystem:gs2",
-		"onFileSystem:gs3",
-		"onFileSystem:gs4",
-		"onFileSystem:gs5",
-		"onFileSystem:gs6",
-		"onFileSystem:gs7",
-		"onFileSystem:gs8",
-		"onFileSystem:gs9"
+		"onFileSystem:schema"
 	],
 	"dependencies": {
 		"@types/request": "^2.48.1",
@@ -177,7 +62,6 @@
 		"pretest": "npm run compile && npm run lint",
 		"test": "node ./out/test/runTest.js"
 	},
-	"icon": "resources/sparkle128.png",
 	"homepage": "https://github.com/jgfoster/vscode-gemstone",
 	"repository": {
 		"type": "git",
