@@ -24,7 +24,7 @@
 		"views": {}
 	},
 	"activationEvents": [
-		"onFileSystem:schema"
+		"onStartupFinished"
 	],
 	"dependencies": {
 		"@types/request": "^2.48.1",
@@ -62,6 +62,7 @@
 		"pretest": "npm run compile && npm run lint",
 		"test": "node ./out/test/runTest.js"
 	},
+	"icon": "resources/sparkle128.png",
 	"homepage": "https://github.com/jgfoster/vscode-gemstone",
 	"repository": {
 		"type": "git",
