@@ -18,7 +18,6 @@ export function activate(aContext: vscode.ExtensionContext) {
 	console.log('activate');
 	context = aContext;
 
-	login = vscode.workspace.getConfiguration('gemstone.login');
 	// GemStone needs a workspace and a folder to support a file system
 	if (!isValidSetup()) { return; }
 
@@ -43,6 +42,10 @@ function registerCommandHandlers(aContext: vscode.ExtensionContext) {
 	aContext.subscriptions.push(vscode.commands.registerTextEditorCommand(
 		'gemstone.displayIt',
 		displayIt
+	)); // displayIt
+	aContext.subscriptions.push(vscode.commands.registerCommand(
+		'gemstone.settings',
+		settings
 	)); // displayIt
 }
 
@@ -132,6 +135,7 @@ function isValidSetup(): boolean {
 }
 
 async function loginHandler(): Promise<void> {
+	login = vscode.workspace.getConfiguration('gemstone.login');
 	vscode.window.withProgress(
 		{
 			location: vscode.ProgressLocation.Notification,
@@ -156,7 +160,7 @@ async function loginHandler(): Promise<void> {
 			}
 			if (password) {
 				try {
-					await doLogin({ ...login, 'gsPassword': password }, progress);
+					await doLogin({ ...login, 'gemPassword': password }, progress);
 				} catch (error: any) {
 					vscode.window.showErrorMessage(error.message);
 				}
@@ -170,4 +174,8 @@ async function logoutHandler(): Promise<void> {
 	session = null;
 	statusBarItem.command ='gemstone.login';
 	statusBarItem.text = 'Login';
+}
+
+async function settings(): Promise<void> {
+	vscode.commands.executeCommand('workbench.action.openSettings', 'GemStone');
 }
