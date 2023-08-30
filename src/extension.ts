@@ -177,5 +177,5 @@ async function logoutHandler(): Promise<void> {
 }
 
 async function settings(): Promise<void> {
-	vscode.commands.executeCommand('workbench.action.openSettings', 'GemStone');
+	vscode.commands.executeCommand('workbench.action.openWorkspaceSettings', 'GemStone');
 }
