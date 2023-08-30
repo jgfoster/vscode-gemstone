@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { Session } from './Session';
 import { assert } from 'console';
 import { SymbolDictionary } from './SymbolDictionary';
-import { urlToOptions } from 'vscode-test/out/util';
+// import { urlToOptions } from 'vscode-test/out/util';
 
 export interface GsFile {
 	ctime: number;
@@ -82,7 +82,6 @@ export class GsSessionFile implements vscode.FileStat, GsFile {
 	size: number;
 	type: vscode.FileType;
 
-	name: string;
 	entries: Map<string, GsDictionaryFile> = new Map;
 	session: Session;
   uri: vscode.Uri;
@@ -96,12 +95,10 @@ export class GsSessionFile implements vscode.FileStat, GsFile {
 		this.ctime = Date.now();
 		this.mtime = Date.now();
 		this.size = dictionaries.length;
-		this.name = `session-${session.sessionId}`;
 		this.session = session;
-    const uriString = `${session.fsScheme()}:/${this.name}`;
-    this.uri = vscode.Uri.parse(uriString);
+    this.uri = vscode.Uri.parse('gs://');
     dictionaries.forEach((aSymbolDictionary: SymbolDictionary, index: number) => {
-      const uri: vscode.Uri = vscode.Uri.parse(`${session.fsScheme()}:/session-${session.sessionId}/${index + 1}-${aSymbolDictionary.name}`);
+      const uri: vscode.Uri = vscode.Uri.parse(`gs://${index + 1}-${aSymbolDictionary.name}`);
       const gsDictionaryFile: GsDictionaryFile = new GsDictionaryFile(session, aSymbolDictionary, index);
       this.entries.set(uri.toString(), gsDictionaryFile);
     });

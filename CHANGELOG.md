@@ -1,5 +1,7 @@
 # Change Log
 
+### 0.7.0
+* Begin rewrite to have single login per workspace and map classes to local files
 ### 0.2.2
 * Use webpack to reduce distribution size from 4.8 MB to 300 KB
 ### 0.2.1

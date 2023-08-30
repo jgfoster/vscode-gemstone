@@ -5,22 +5,20 @@
  * and https://github.com/microsoft/vscode-extension-samples/blob/main/lsp-multi-server-sample/client/src/extension.ts
  */
 
-import * as path from 'path';
 import * as vscode from 'vscode';
 import WebSocket = require('ws');
 
-import { Login } from './Login';
 import JadeServer from './JadeServer';
 import { SymbolDictionary } from './SymbolDictionary';
-import { LanguageClient, LanguageClientOptions, ServerOptions, StreamInfo } from 'vscode-languageclient/node';
+import { LanguageClient, LanguageClientOptions, ServerOptions, StreamInfo, integer } from 'vscode-languageclient/node';
 import stream = require('stream');
 
-export class Session extends vscode.TreeItem {
+export class Session {
   isLoggedIn: boolean = false;
   private jadeServer: string = '';
   requestCounter: number = 0;
   requests: Map<number, Array<Function>> = new Map;
-  sessionId: number;
+  private session: string = '';
   socket: WebSocket | null = null;
   subscriptions: vscode.Disposable[] = [];
   version: string = '';
@@ -92,12 +90,7 @@ export class Session extends vscode.TreeItem {
     }
   });
   
-  constructor(private _login: Login, nextSessionId: number) {
-    super(_login.label, vscode.TreeItemCollapsibleState.None);
-    this.sessionId = nextSessionId;
-    this.tooltip = `${this.sessionId}: ${this._login.tooltip}`;
-    this.description = this.tooltip;
-  }
+  constructor(private _login: any) {  }
 
   private send(obj: any): Promise<any> {
     const requestId = ++this.requestCounter;
@@ -120,7 +113,7 @@ export class Session extends vscode.TreeItem {
     return new Promise((resolve, reject) => {
       this.requests.set(0, [resolve, reject]);
       try {
-        this.socket = new WebSocket(`ws://${this._login.gem_host}:${this._login.gem_port}/webSocket.gs`);
+        this.socket = new WebSocket(`ws://${this._login.gemHost}:${this._login.gemPort}/webSocket.gs`);
       } catch (error) {
         this.requests.clear();
         reject(error);
@@ -150,7 +143,7 @@ export class Session extends vscode.TreeItem {
   
     let clientOptions: LanguageClientOptions = {
       documentSelector: [
-        { scheme: this.fsScheme(), language: 'topaz' },
+        { scheme: 'gs', language: 'topaz' },
       ],
       synchronize: {
         // Notify the server about file changes to '.clientrc files contained in the workspace
@@ -219,8 +212,7 @@ export class Session extends vscode.TreeItem {
     } else {
       if (obj['request'] === 'login') {
         this.isLoggedIn = true;
-      }
-      if (obj['request'] === 'logout') {
+      } else if (obj['request'] === 'logout') {
         this.isLoggedIn = false;
         this.socket!.close();
         this.socket = null;
@@ -244,24 +236,20 @@ export class Session extends vscode.TreeItem {
     // this.gciSession.commit();
   }
 
-  fsScheme(): string {
-    return `gs${this.sessionId.toString()}`;
-  }
-
   async login(aContext: vscode.ExtensionContext): Promise<void> {
-    await this.send({
+    let result = await this.send({
       'request': 'login',
-      'username': this._login.gs_user,
-      'password': this._login.gs_password
+      'username': this._login.gemUser,
+      'password': this._login.gemPassword
     });
-
+    this.session = result['result'];
     await this.createGemStoneLanguageServer(aContext);
   }
 
   async logout(): Promise<void> {
     this.languageServer!.stop();
     this.languageServer = null;
-    await this.send({ 'request': 'logout' });  // send logout request to Gem
+    await this.send({ 'session': this.session, 'request': 'logout' });  // send logout request to Gem
     this.subscriptions.forEach((each) => each.dispose());  // dispose of file system provider
   }
 
@@ -269,8 +257,8 @@ export class Session extends vscode.TreeItem {
     const myString = input.replace(/\"/g, '\\\"');
     return new Promise(async (resolve, reject) => {
       try {
-        await this.send({ 'request': 'execute', 'string': myString });
-        const obj = await this.send({ 'request': 'nbResult' });
+        let result = await this.send({ 'session': this.session, 'request': 'execute', 'string': myString });
+        const obj = await this.send({ 'session': this.session, 'request': 'nbResult' });
         resolve(obj.oop);
       } catch (error) {
         reject(error);
@@ -295,7 +283,7 @@ export class Session extends vscode.TreeItem {
       ' ifTrue: [x := (x copyFrom: 1 to: ' + (size - 4).toString() + ') , \'...\']. x';
     return new Promise(async (resolve, reject) => {
       try {
-        let result = await this.send({ 'request': 'executeFetchBytes', 'string': myString, 'size': size });
+        let result = await this.send({ 'session': this.session, 'request': 'executeFetchBytes', 'string': myString, 'size': size });
         resolve(result.result);
       } catch (e: any) {
         reject(e);
@@ -309,6 +297,7 @@ export class Session extends vscode.TreeItem {
     return new Promise(async (resolve, reject) => {
       try {
         const obj = await this.send({
+          'session': this.session, 
           'receiver': this.jadeServer,
           'args': oopArray,
           'request': 'performFetchBytes',
@@ -325,9 +314,4 @@ export class Session extends vscode.TreeItem {
       }
     });
   }
-
-  iconPath = {
-    light: path.join(__filename, '..', '..', 'resources', 'light', 'Login.svg'),
-    dark: path.join(__filename, '..', '..', 'resources', 'dark', 'Login.svg')
-  };
 }

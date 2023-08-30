@@ -1,190 +1,100 @@
 {
-	"name": "gemstone",
-	"displayName": "GemStone IDE",
-	"description": "GemStone/S IDE for Visual Studio Code",
-	"version": "0.6.0",
-	"preview": true,
-	"publisher": "jgfoster",
-	"license": "MIT",
-	"engines": {
-		"vscode": "^1.67.0"
-	},
-	"categories": [
-		"Debuggers",
-		"Programming Languages"
-	],
-	"keywords": [
-		"GemStone",
-		"Smalltalk",
-		"Database",
-		"Object Database",
-		"IDE"
-	],
-	"main": "./out/extension.js",
-	"contributes": {
-		"commands": [
-			{
-				"command": "gemstone.displayIt",
-				"title": "Display It"
-			},
-			{
-				"command": "gemstone.login",
-				"title": "Login"
-			},
-			{
-				"command": "gemstone.openDocument",
-				"title": "Open Document"
-			},
-			{
-				"command": "gemstone.logout",
-				"title": "Logout"
-			}
-		],
-		"configuration": {
-			"type": "object",
-			"title": "GemStone",
-			"properties": {
-				"gemstone.logins": {
-					"type": "array",
-					"items": {
-						"type": "object",
-						"title": "Login Parameters",
-						"properties": {
-							"label": {
-								"type": "string",
-								"description": "A label for this login"
-							},
-							"gem_host": {
-								"type": "string",
-								"description": "Hostname or IP address of gem server"
-							},
-							"gem_port": {
-								"type": "number",
-								"description": "Gem server port"
-							},
-							"gs_user": {
-								"type": "string",
-								"description": "GemStone user name"
-							},
-							"gs_password": {
-								"type": "string",
-								"description": "GemStone password"
-							}
-						}
-					},
-					"default": [
-						{
-							"label": "Default",
-							"gem_host": "localhost",
-							"gem_port": 50378,
-							"gs_user": "DataCurator",
-							"gs_password": "swordfish"
-						}
-					],
-					"description": "GemStone/S 64 Bit login parameters"
-				}
-			}
-		},
-		"keybindings": [
-			{
-				"command": "gemstone.displayIt",
-				"key": "ctrl+d",
-				"mac": "cmd+d",
-				"when": "editorTextFocus"
-			}
-		],
-		"menus": {
-			"view/item/context": [
-				{
-					"command": "gemstone.login",
-					"when": "view == gemstone-logins",
-					"group": "inline"
-				},
-				{
-					"command": "gemstone.logout",
-					"when": "view == gemstone-sessions",
-					"group": "inline"
-				}
-			]
-		},
-		"viewsContainers": {
-			"activitybar": [
-				{
-					"id": "gemstone",
-					"title": "GemStone/S Tools",
-					"icon": "resources/sparkle32.png"
-				}
-			]
-		},
-		"views": {
-			"gemstone": [
-				{
-					"id": "gemstone-logins",
-					"name": "Logins"
-				},
-				{
-					"id": "gemstone-sessions",
-					"name": "Sessions"
-				}
-			]
-		}
-	},
-	"activationEvents": [
-		"onView:gemstone-logins",
-		"onFileSystem:gs1",
-		"onFileSystem:gs2",
-		"onFileSystem:gs3",
-		"onFileSystem:gs4",
-		"onFileSystem:gs5",
-		"onFileSystem:gs6",
-		"onFileSystem:gs7",
-		"onFileSystem:gs8",
-		"onFileSystem:gs9"
-	],
-	"dependencies": {
-		"@types/request": "^2.48.1",
-		"@types/tar": "^4.0.1",
-		"fast-xml-parser": "^4.2.5",
-		"fs": "0.0.1-security",
-		"request": "^2.88.0",
-		"tar": "^4.4.18",
-		"vscode-languageclient": "^8.0.2",
-		"ws": "^8.6.0"
-	},
-	"devDependencies": {
-		"@types/glob": "^7.1.3",
-		"@types/mocha": "^8.0.0",
-		"@types/node": "^14.0.27",
-		"@types/vscode": "^1.49.0",
-		"@types/ws": "^8.5.3",
-		"@typescript-eslint/eslint-plugin": "^4.1.1",
-		"@typescript-eslint/parser": "^4.1.1",
-		"eslint": "^7.9.0",
-		"glob": "^7.1.6",
-		"mocha": "^10.2.0",
-		"ts-loader": "^6.2.2",
-		"ts-webpack": "^1.0.0",
-		"tslint": "^5.12.1",
-		"typescript": "^4.0.2",
-		"vscode-test": "^1.4.0",
-		"webpack": "^5.76.0"
-	},
-	"scripts": {
-		"vscode:prepublish": "npm run compile",
-		"compile": "tsc -p ./",
-		"lint": "eslint src --ext ts",
-		"watch": "tsc -watch -p ./",
-		"pretest": "npm run compile && npm run lint",
-		"test": "node ./out/test/runTest.js"
-	},
-	"icon": "resources/sparkle128.png",
-	"homepage": "https://github.com/jgfoster/vscode-gemstone",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/jgfoster/vscode-gemstone.git"
-	},
-	"bugs": {
-		"url": "https://github.com/jgfoster/vscode-gemstone/issues",
-		"email": "vscode@jgfoster.net"
-	}
+  "name": "gemstone",
+  "displayName": "GemStone IDE",
+  "description": "GemStone/S IDE for Visual Studio Code",
+  "version": "0.7.0",
+  "preview": true,
+  "publisher": "jgfoster",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.81.0"
+  },
+  "categories": [
+    "Debuggers",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "GemStone",
+    "Smalltalk",
+    "Database",
+    "Object Database",
+    "IDE"
+  ],
+  "activationEvents": [ ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "gemstone.displayIt", "title": "GemStone Display It"  },
+      { "command": "gemstone.login",     "title": "GemStone Login"       },
+      { "command": "gemstone.logout",    "title": "GemStone Logout"      }
+    ],
+    "configuration": {
+      "title":  "GemStone/S 64 Bit Login",
+      "properties": {
+        "gemstone.login.gemHost": {
+            "type": "string",
+            "default": "localhost",
+            "description": "Hostname or IP address of gem server"
+        },
+        "gemstone.login.gemPort": {
+          "type": "number",
+          "default": 50378,
+          "description": "Gem server port"
+        },
+        "gemstone.login.gemUser": {
+          "type": "string",
+          "default": "DataCurator",
+          "description": "GemStone user name"
+        },
+        "gemstone.login.gemPassword": {
+          "type": "string",
+          "default": "swordfish",
+          "description": "GemStone password"
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "gemstone.displayIt",
+        "key": "ctrl+d",
+        "mac": "cmd+d",
+        "when": "editorTextFocus"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "dependencies": {
+		"vscode-languageclient": "^8.1.0",
+    "ws": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.1",
+    "@types/node": "16.x",
+    "@types/vscode": "^1.81.0",
+    "@types/ws": "^8.5.5",
+    "@typescript-eslint/eslint-plugin": "^6.4.1",
+    "@typescript-eslint/parser": "^6.4.1",
+    "@vscode/test-electron": "^2.3.4",
+    "eslint": "^8.47.0",
+    "glob": "^10.3.3",
+    "mocha": "^10.2.0",
+    "typescript": "^5.1.6"
+  },
+  "icon": "resources/sparkle128.png",
+  "homepage": "https://github.com/jgfoster/vscode-gemstone",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jgfoster/vscode-gemstone.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jgfoster/vscode-gemstone/issues",
+    "email": "vscode@jgfoster.net"
+  }
 }
