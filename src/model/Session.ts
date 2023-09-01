@@ -9,7 +9,6 @@ import * as vscode from 'vscode';
 import WebSocket = require('ws');
 
 import JadeServer from './JadeServer';
-import { SymbolDictionary } from './SymbolDictionary';
 import { LanguageClient, LanguageClientOptions, ServerOptions, StreamInfo, integer } from 'vscode-languageclient/node';
 import stream = require('stream');
 
@@ -163,19 +162,45 @@ export class Session {
     aContext.subscriptions.push(this.languageServer);
   }
 
-  async getSymbolList(): Promise<Array<SymbolDictionary>> {
+  async getClass(oop: number): Promise<string> {
     return new Promise(async (resolve, reject) => {
-      // obtain list of SymbolDictionary instances
       try {
-        const myString =
-          await this.stringFromPerform('getSymbolList', [], 1024);
-        const array = new Array;
-        JSON.parse(myString).list.forEach(
-          (element: { oop: number, name: string, size: number }) => {
-            array.push(new SymbolDictionary(
-              element.oop, element.name, element.size));
-          });
-        resolve(array);
+        let result = '';
+        let chunkNumber = 1;
+        do {
+          const myString = await this.stringFromPerform('getClass:chunk:', [oop, chunkNumber * 8 + 2]);
+          result = result + myString;
+          chunkNumber = chunkNumber + 1;
+        } while (result.length % 25000 == 0); 
+        resolve(result);
+      } catch (ex: any) {
+        reject(ex);
+      }
+    });
+  }
+
+  async getClassesInDictionary(oop: number): Promise<Array<any>> {
+    return new Promise(async (resolve, reject) => {
+      try {
+        let result = '';
+        let chunkNumber = 1;
+        do {
+          const myString = await this.stringFromPerform('getClassesInDictionary:chunk:', [oop, chunkNumber * 8 + 2]);
+          result = result + myString;
+          chunkNumber = chunkNumber + 1;
+        } while (result.length % 25000 == 0); 
+        resolve(JSON.parse(result).list);
+      } catch (ex: any) {
+        reject(ex);
+      }
+    });
+  }
+
+  async getSymbolList(): Promise<Array<any>> {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const myString = await this.stringFromPerform('getSymbolList', [], 1024);
+        resolve(JSON.parse(myString).list);
       } catch (ex: any) {
         reject(ex);
       }
@@ -269,7 +294,9 @@ export class Session {
   async registerJadeServer(): Promise<void> {
     return new Promise(async (resolve, reject) => {
       try {
-        this.jadeServer = await this.oopFromExecuteString(JadeServer);
+        const result = await this.oopFromExecuteString(JadeServer);
+        console.log(result);
+        this.jadeServer = result;
         resolve();
       } catch (error) {
         reject(error);

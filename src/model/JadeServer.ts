@@ -5,21 +5,34 @@
  *  so we can 'fold' the contents and use the 'outline' for quick lookup
  */
 
+const getClass = (): string => {
+	return `getClass: aClass chunk: anInteger
+| string |
+string := aClass fileOutClass.
+^string copyFrom: anInteger - 1 * 25000 + 1 to: (anInteger * 25000 min: string size)`;
+}
 const getClassesInDictionary = (): string => {
 	return `getClassesInDictionary: aSymbolDictionary chunk: anInteger
 | comma stream string |
 stream := WriteStream on: String new.
 stream nextPutAll: '{"list":['.
 comma := ''.
-aSymbolDictionary values collect: [ :each |
-	(each class asString endsWith: ' class') ifTrue: [
+aSymbolDictionary keysAndValuesDo: [ :eachKey :eachValue |
+	eachValue isClass ifTrue: [
+		string := eachValue fileOutClass.
 		stream
 			nextPutAll: comma;
 			nextPutAll: '{"oop":';
-			print: each asOop;
+			print: eachValue asOop;
 			nextPutAll: ',"name":"';
-			nextPutAll: each name;
-			nextPutAll: '.tpz","size":0,"md5":""}';
+			nextPutAll: eachKey;
+			nextPutAll: '.gs","size":';
+			print: string size;
+			nextPutAll: ',"md5":"';
+			nextPutAll: string asMd5String;
+			nextPutAll: '","readOnly":';
+			print: eachValue canBeWritten not;
+			nextPutAll: '}';
 			yourself.
 		comma := ','.
 	]
@@ -30,22 +43,28 @@ string := stream contents.
 };
 const getSymbolList = (): string => {
 	return `getSymbolList
-| comma stream |
+| comma stream index list |
 stream := WriteStream on: String new.
 stream nextPutAll: '{"list":['.
 comma := ''.
-System myUserProfile symbolList do: [:each |
-stream
-    nextPutAll: comma;
-    nextPutAll: '{"oop":';
-    print: each asOop;
-    nextPutAll: ',"name":"';
-    nextPutAll: each name;
-    nextPutAll: '","size":';
-    print: (each select: [:each | each isClass]) size;
-    nextPutAll: '}';
-    yourself.
-comma := ','.
+list := System myUserProfile symbolList.
+1 to: list size do: [:i | | each |
+	each := list at: i.
+	stream
+			nextPutAll: comma;
+			nextPutAll: '{"oop":';
+			print: each asOop;
+			nextPutAll: ',"name":"';
+			print: i;
+			nextPut: $-;
+			nextPutAll: each name;
+			nextPutAll: '","size":';
+			print: (each select: [:each | each isClass]) size;
+			nextPutAll: ',"readOnly":';
+			print: each canBeWritten not;
+			nextPutAll: '}';
+			yourself.
+	comma := ','.
 ].
 stream nextPutAll: ']}'.
 ^stream contents.`;
@@ -60,6 +79,7 @@ const fileOutClass = (): string => {
 
 // list the methods
 const methods = [
+	getClass(),
 	fileOutClass(),
 	getClassesInDictionary(),
 	getSymbolList(),
@@ -95,7 +115,7 @@ symbolList := symbolList class new
 	code = code + `
     class new "initialize"
 ] on: (symbolList objectNamed: #Error) do: [:ex |
-    ex return: 'ERROR: ' , (GsProcess stackReportToLevel: 100)
+    self error: (GsProcess stackReportToLevel: 100)
 ]`;
 	return code;
 };
