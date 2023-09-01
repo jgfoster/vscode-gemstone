@@ -85,7 +85,7 @@
     "viewsWelcome": [
       {
         "view": "gemstone",
-        "contents": "In order to use the GemStone/S IDE you need to have GCI running via [WebGS](https://github.com/jgfoster/WebGS) and configure the GemStone extension with the proper login information.\n[Open Settings](command:gemstone.settings)\nOnce you have configured the settings, you can login:\n[Login (copy FROM GemStone)](command:gemstone.login)\nAfter a login, this extension will create a local directory for each SymbolDictionary in the user's SymbolList and create a local file for each class.\nWhen logged in, edits to the local file will be pushed to GemStone and changes in other sessions will cause local updates.\nNote that local edits will not be pushed to GemStone if you are not logged in, and will be replace on login!\n",
+        "contents": "In order to use the GemStone/S IDE you need to have GCI running via [WebGS](https://github.com/jgfoster/WebGS) and configure the GemStone extension with the proper login information.\n[Open Settings](command:gemstone.settings)\nOnce you have configured the settings, you can login:\n[Login (copy FROM GemStone)](command:gemstone.login)\nAfter a login, this extension will create a local directory for each SymbolDictionary in the user's SymbolList and create a local file for each class.\nFUTURE FEATURE: When logged in, edits to the local file will be pushed to GemStone and changes in other sessions will cause local updates. Note that local edits will not be pushed to GemStone if you are not logged in, and will be replace on login!\n",
         "when": "gemstone.isLoggedIn == false"
       },
       {

@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import {Md5} from 'ts-md5';
 
 import { Session } from './model/Session';
+import { Disposable } from 'vscode-languageclient';
 
 // context gets the language server as a subscription
 let context: vscode.ExtensionContext;
@@ -12,6 +13,7 @@ let session: Session | null = null;
 let login: any;
 const statusBarItem: vscode.StatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 let watcher: vscode.FileSystemWatcher | null = null;
+let diagnosticCollection: vscode.DiagnosticCollection;
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -28,28 +30,9 @@ export function activate(aContext: vscode.ExtensionContext) {
 	registerCommandHandlers(aContext);
 	createStatusBarItem(aContext);
 	vscode.commands.executeCommand('setContext', 'gemstone.isLoggedIn', false);
-}
 
-function registerCommandHandlers(aContext: vscode.ExtensionContext) {
-	// The commands have been defined in the package.json file ("contributes"/"commands")
-	// Now provide the implementations of the commands with registerCommand
-	// The commandId parameter must match the command field in package.json
-	aContext.subscriptions.push(vscode.commands.registerCommand(
-		'gemstone.login',
-		loginHandler
-	)); // login
-	aContext.subscriptions.push(vscode.commands.registerCommand(
-		'gemstone.logout',
-		logoutHandler
-	)); // logout
-	aContext.subscriptions.push(vscode.commands.registerTextEditorCommand(
-		'gemstone.displayIt',
-		displayIt
-	)); // displayIt
-	aContext.subscriptions.push(vscode.commands.registerCommand(
-		'gemstone.settings',
-		settings
-	)); // displayIt
+	diagnosticCollection = vscode.languages.createDiagnosticCollection('gs');
+	aContext.subscriptions.push(diagnosticCollection);
 }
 
 // https://code.visualstudio.com/api/references/vscode-api#OutputChannel
@@ -67,6 +50,7 @@ async function createStatusBarItem(aContext: vscode.ExtensionContext): Promise<v
 // This method is called when your extension is deactivated
 export function deactivate() {
 	logoutHandler();
+	context.subscriptions.forEach((each: Disposable) => each.dispose());  // diagnostics
 }
 
 // evaluate a Smalltalk expression found in a TextEditor and insert the value as a string
@@ -124,6 +108,11 @@ async function doLogin(login: any, progress: any): Promise<void> {
 
 function fileChanged(uri: vscode.Uri): void {
 	console.log(`fileChanged(${uri})`);
+	diagnosticCollection.clear();
+	const issues: vscode.Diagnostic[] = [];
+	const range = new vscode.Range(22, 5, 22, 10);
+	issues.push(new vscode.Diagnostic(range, "message", vscode.DiagnosticSeverity.Error));
+	diagnosticCollection.set(uri, issues);
 }
 
 function fileCreated(uri: vscode.Uri): void {
@@ -218,6 +207,28 @@ async function logoutHandler(): Promise<void> {
 	vscode.commands.executeCommand('setContext', 'gemstone.isLoggedIn', false);
 	watcher!.dispose();
 	watcher = null;
+}
+
+function registerCommandHandlers(aContext: vscode.ExtensionContext) {
+	// The commands have been defined in the package.json file ("contributes"/"commands")
+	// Now provide the implementations of the commands with registerCommand
+	// The commandId parameter must match the command field in package.json
+	aContext.subscriptions.push(vscode.commands.registerCommand(
+		'gemstone.login',
+		loginHandler
+	)); // login
+	aContext.subscriptions.push(vscode.commands.registerCommand(
+		'gemstone.logout',
+		logoutHandler
+	)); // logout
+	aContext.subscriptions.push(vscode.commands.registerTextEditorCommand(
+		'gemstone.displayIt',
+		displayIt
+	)); // displayIt
+	aContext.subscriptions.push(vscode.commands.registerCommand(
+		'gemstone.settings',
+		settings
+	)); // displayIt
 }
 
 async function settings(): Promise<void> {

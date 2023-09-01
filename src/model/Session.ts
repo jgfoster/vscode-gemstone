@@ -1,8 +1,5 @@
 /*
  *	Session.ts
- *
- * Language Server Protocol client influenced by https://github.com/badetitou/vscode-pharo
- * and https://github.com/microsoft/vscode-extension-samples/blob/main/lsp-multi-server-sample/client/src/extension.ts
  */
 
 import * as vscode from 'vscode';
@@ -21,73 +18,6 @@ export class Session {
   socket: WebSocket | null = null;
   subscriptions: vscode.Disposable[] = [];
   version: string = '';
-
-  languageServer: LanguageClient | null = null;
-  languageServerBuffer: string = '';
-  languageServerPending: number = 0;
-  // https://nodejs.dev/en/learn/nodejs-streams#how-to-create-a-readable-stream
-  languageServerReader: stream.Readable = new stream.Readable({
-    read() {},  // languageServerReader.push(aString);
-  });
-  languageServerWriter: stream.Writable = new stream.Writable({
-    write: (chunk, _encoding, next) => {
-      const myChunk: string = chunk.toString();
-      if (this.languageServerPending === 0) {
-        if (myChunk.startsWith('Content-Length: ')) {
-          this.languageServerPending = Number(myChunk.substring(16));
-        } else {
-          console.log(`Unexpected LSP message: '${myChunk}`);
-        }
-      } else {
-        this.languageServerBuffer = this.languageServerBuffer + myChunk;
-        if (this.languageServerBuffer.length === this.languageServerPending) {
-          const message = JSON.parse(this.languageServerBuffer);
-          if (message.method === 'initialize') {
-            console.log('LSP: initialize');
-            const result = {
-              jsonrpc: "2.0",
-              id: message.id,
-              result: {
-                serverInfo: {
-                  name: 'GemStone/S 64 Bit',
-                  version: '3.6.5'
-                },
-                capabilities: {
-                  positionEncoding: 'utf-16',
-                  textDocumentSync: { openClose: true, change: 2 }
-                }
-              }
-            };
-            const resultJson = JSON.stringify(result);
-            this.languageServerReader.push(`Content-Length: ${resultJson.length}\r\n\r\n`);
-            this.languageServerReader.push(resultJson);
-          } else if (message.method === 'initialized') {
-            console.log('LSP: initialized');
-          } else if (message.method === 'shutdown') {
-            console.log('LSP: shutdown');
-            const result = {
-              jsonrpc: "2.0",
-              id: message.id,
-              result: null
-            };
-            const resultJson = JSON.stringify(result);
-            this.languageServerReader.push(`Content-Length: ${resultJson.length}\r\n\r\n`);
-            this.languageServerReader.push(resultJson);
-          } else if (message.method === 'exit') {
-            console.log('LSP: exit');
-          } else if (message.error) {
-            console.log(`LSP Error: ${message.error.code}: '${message.error.message}'`);
-          } else {
-            console.log(`LSP: '${Object.keys(message)}'?; ${message.method}`);
-            console.log(message.params);
-          }
-          this.languageServerBuffer = '';
-          this.languageServerPending = 0;
-        }
-      }
-      next();
-    }
-  });
   
   constructor(private _login: any) {  }
 
@@ -131,35 +61,6 @@ export class Session {
         resolve();
       });
     });
-  }
-
-  async createGemStoneLanguageServer(aContext: vscode.ExtensionContext): Promise<void> {
-    
-    // https://github.com/microsoft/vscode-languageserver-node/blob/2e2658c897fbd20e134076f685da005d173d5e92/client/src/node/main.ts:101
-    let streamInfo: StreamInfo = { writer: this.languageServerWriter, reader: this.languageServerReader};
-    // https://github.com/microsoft/vscode-languageserver-node/blob/2e2658c897fbd20e134076f685da005d173d5e92/client/src/node/main.ts:126
-    let serverOptions: ServerOptions = async () => streamInfo;
-  
-    let clientOptions: LanguageClientOptions = {
-      documentSelector: [
-        { scheme: 'gs', language: 'topaz' },
-      ],
-      synchronize: {
-        // Notify the server about file changes to '.clientrc files contained in the workspace
-        // fileEvents: workspace.createFileSystemWatcher('**/.clientrc')
-      }
-    };
-  
-    // Create the language client and start the client.
-
-    this.languageServer = new LanguageClient(
-      'GemStoneLanguageServer',
-      'GemStone Language Server',
-      serverOptions,
-      clientOptions
-    );
-    this.languageServer.start();
-    aContext.subscriptions.push(this.languageServer);
   }
 
   async getClass(oop: number): Promise<string> {
@@ -268,12 +169,9 @@ export class Session {
       'password': this._login.gemPassword
     });
     this.session = result['result'];
-    await this.createGemStoneLanguageServer(aContext);
   }
 
   async logout(): Promise<void> {
-    this.languageServer!.stop();
-    this.languageServer = null;
     await this.send({ 'session': this.session, 'request': 'logout' });  // send logout request to Gem
     this.subscriptions.forEach((each) => each.dispose());  // dispose of file system provider
   }
