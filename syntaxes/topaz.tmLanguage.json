@@ -1,0 +1,112 @@
+{
+	"name": "Topaz",
+	"scopeName": "source.topaz",
+	"fileTypes": ["gs", "tpz"],
+	"patterns": [
+		{
+			"match": "^!.*$",
+			"name": "meta.topaz.comment"
+		},
+		{
+			"match": "^category:\\s*\\'(.*)\\'",
+			"name": "meta.topaz.category.$1"
+		},
+		{
+			"match": "^set compile_env:\\s*(.*)",
+			"name": "meta.topaz.env.$1"
+		},
+		{
+			"match": "^expectvalue\\s(.*)$",
+			"name": "meta.topaz.expect.$1"
+		},
+		{
+			"begin": "^(doit|print|run)\\b",
+			"end": "^%$",
+			"name": "meta.topaz.run",
+			"patterns": [
+				{ "include": "#statement" }
+			]
+		}
+	],
+	"repository": {
+		"statement": {
+			"patterns": [
+				{ "include": "#comment" },
+				{ "include": "#pragma" },
+				{ "include": "#literal" },
+				{ "include": "#block"}
+			]
+		},
+		"comment": {
+			"begin": "\"",
+			"end": "\"",
+			"name": "comment.block"
+		},
+		"string": {
+			"begin": "'",
+			"end": "'",
+			"name": "string.quoted.single"
+		},
+		"symbol": {
+			"match": "#(([a-zA-Z][a-zA-Z0-9:]*)|[+\\-\\/\\\\*~<>=@%|&?!.,:;^]+)",
+			"name": "constant.language"
+		},
+		"symbol2": {
+			"begin": "#'",
+			"end": "'",
+			"name": "constant.language"
+		},
+		"character": {
+			"match": "\\$(<[0-F]+>|.)",
+			"name": "constants.character"
+		},
+		"number": {
+			"match": "(([0-9]{1,2}r)?[0-9A-F]+)",
+			"name": "constant.numeric"
+		},
+		"special-variable": {
+			"match": "true|false|nil|thisContext",
+			"name": "constant.language"
+		},
+		"variable": {
+			"match": "([a-zA-Z][a-zA-Z0-9]*)",
+			"name": "variable.other"
+		},
+		"selector": {
+			"match": "([a-zA-Z][a-zA-Z0-9]*:)|[+\\-\\/\\\\*~<>=@%|&?!.,:;^]+",
+			"name": "keyword.other"
+		},
+		"literal": {
+			"patterns": [
+				{ "include": "#character" },
+				{ "include": "#special-variable" },
+				{ "include": "#variable" },
+				{ "include": "#number" },
+				{ "include": "#symbol" },
+				{ "include": "#symbol2" },
+				{ "include": "#string" }
+			]
+		},
+		"block": {
+			"begin": "\\[",
+			"end": "\\]",
+			"patterns": [
+				{ "include": "#statement" }
+			]
+		},
+		"pragma": {
+			"match": "<([a-zA-Z][a-zA-Z0-9]*:)>",
+			"name": "meta.topaz.pragma.$1"
+		},
+		"pragma2": {
+			"begin": "<([a-zA-Z][a-zA-Z0-9]*:)",
+			"end": ">",
+			"patterns": [
+				{ "include": "#literal" }
+			],
+			"captures": {
+				"1": { "name": "keyword.other" }
+			}
+		}
+	}
+}

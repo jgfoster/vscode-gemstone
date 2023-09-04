@@ -33,6 +33,11 @@ export function activate(aContext: vscode.ExtensionContext) {
 
 	diagnosticCollection = vscode.languages.createDiagnosticCollection('gs');
 	aContext.subscriptions.push(diagnosticCollection);
+
+	// vscode.workspace.onDidChangeTextDocument((e: vscode.TextDocumentChangeEvent) => {
+	// 	console.log('Document changed.');
+	// 	console.log(e.document.isDirty);
+	// });
 }
 
 // https://code.visualstudio.com/api/references/vscode-api#OutputChannel

@@ -57,12 +57,25 @@
         }
       }
     },
+    "grammars": [
+      {
+        "language": "topaz",
+        "scopeName": "source.topaz",
+        "path": "./syntaxes/topaz.tmLanguage.json"
+      }
+    ],
     "keybindings": [
       {
         "command": "gemstone.displayIt",
         "key": "ctrl+d",
         "mac": "cmd+d",
         "when": "editorTextFocus"
+      }
+    ],
+    "languages": [
+      {
+        "id": "topaz",
+        "extensions": [".gs", ".tpz"]
       }
     ],
 		"viewsContainers": {
