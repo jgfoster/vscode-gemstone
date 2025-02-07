@@ -149,7 +149,7 @@
 		"request": "^2.88.0",
 		"tar": "^6.2.1",
 		"vscode-languageclient": "^8.0.2",
-		"ws": "^8.6.0"
+		"ws": "^8.17.1"
 	},
 	"devDependencies": {
 		"@types/glob": "^7.1.3",
