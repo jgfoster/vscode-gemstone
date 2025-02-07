@@ -167,7 +167,7 @@
 		"tslint": "^5.12.1",
 		"typescript": "^4.0.2",
 		"vscode-test": "^1.4.0",
-		"webpack": "^5.76.0"
+		"webpack": "^5.94.0"
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
