@@ -18,9 +18,4 @@ export class Login extends vscode.TreeItem {
 		this.description = this.tooltip;
 	}
 	return: any;
-
-	iconPath = {
-		light: path.join(__filename, '..', '..', 'resources', 'light', 'Login.svg'),
-		dark: path.join(__filename, '..', '..', 'resources', 'dark', 'Login.svg')
-	};
 }

@@ -325,9 +325,4 @@ export class Session extends vscode.TreeItem {
       }
     });
   }
-
-  iconPath = {
-    light: path.join(__filename, '..', '..', 'resources', 'light', 'Login.svg'),
-    dark: path.join(__filename, '..', '..', 'resources', 'dark', 'Login.svg')
-  };
 }
