@@ -290,7 +290,6 @@ function nextSessionId(): number {
 
 function onSessionSelected(event: vscode.TreeViewSelectionChangeEvent<Session>): void {
 	// this seems to work for manual selections but not for automatic selections
-	// const sessions: Session[] = event.selection;
 	if (event.selection.length === 0) {
 		selectedSession = null;
 		updateStatusBar();

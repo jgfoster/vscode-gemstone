@@ -8,6 +8,5 @@ export class SymbolDictionary extends vscode.TreeItem {
     public readonly size: number
   ) {
     super(name, vscode.TreeItemCollapsibleState.Collapsed);
-    // this.tooltip = this.label;
   }
 }
