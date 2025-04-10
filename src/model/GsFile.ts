@@ -3,7 +3,6 @@ import * as vscode from 'vscode';
 import { Session } from './Session';
 import { assert } from 'console';
 import { SymbolDictionary } from './SymbolDictionary';
-import { urlToOptions } from 'vscode-test/out/util';
 
 export interface GsFile {
 	ctime: number;

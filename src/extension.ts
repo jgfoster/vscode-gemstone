@@ -1,9 +1,6 @@
-/*
- *  gemstone: GemStone/S 64 Bit IDE for Visual Studio Code
- */
-
+// The module 'vscode' contains the VS Code extensibility API
+// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
-
 import { LoginsProvider } from './view/LoginProvider';
 import { Login } from './model/Login';
 import { SessionsProvider } from './view/SessionProvider';
@@ -19,7 +16,8 @@ const sessionsProvider = new SessionsProvider(sessions);
 let sessionsTreeView: vscode.TreeView<Session>;
 const statusBarItem: vscode.StatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 
-// this method is called when the user selects the extension
+// This method is called when your extension is activated
+// Your extension is activated the very first time the command is executed
 export function activate(aContext: vscode.ExtensionContext) {
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	console.log('activate');
@@ -292,12 +290,11 @@ function nextSessionId(): number {
 
 function onSessionSelected(event: vscode.TreeViewSelectionChangeEvent<Session>): void {
 	// this seems to work for manual selections but not for automatic selections
-	const sessions: Session[] = event.selection;
-	if (sessions.length === 0) {
+	if (event.selection.length === 0) {
 		selectedSession = null;
 		updateStatusBar();
 	} else {
-		selectedSession = sessions[0];
+		selectedSession = event.selection[0];
 		updateStatusBar();
 	}
 }
