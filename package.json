@@ -46,7 +46,7 @@
     "server"
   ],
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run bundle",
     "compile": "npm run compile:client && npm run compile:server",
     "compile:client": "tsc -p client/tsconfig.json",
     "compile:server": "tsc -p server/tsconfig.json",

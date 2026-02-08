@@ -1,0 +1,12 @@
+.vscode/**
+node_modules/**
+client/node_modules/**
+server/node_modules/**
+client/src/**
+server/src/**
+docs/**
+tsconfig.base.json
+esbuild.mjs
+package-lock.json
+**/*.ts
+**/*.map
