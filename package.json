@@ -1,9 +1,9 @@
 {
-  "name": "gemstone-smalltalk",
-  "displayName": "GemStone Smalltalk",
-  "description": "Language support for GemStone Smalltalk",
-  "version": "0.1.0",
-  "publisher": "gemstone",
+  "name": "gemstone-topaz",
+  "displayName": "GemStone Smalltalk (Topaz)",
+  "description": "Language support for GemStone's Topaz Files",
+  "version": "1.0.0",
+  "publisher": "gemtalksystems",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
@@ -11,7 +11,7 @@
   "categories": [
     "Programming Languages"
   ],
-  "activationEvents": [],
+  "activationEvents": [ ],
   "main": "./client/out/extension.js",
   "contributes": {
     "languages": [
@@ -42,6 +42,7 @@
     "server"
   ],
   "scripts": {
+    "vscode:prepublish": "npm run compile",
     "compile": "npm run compile:client && npm run compile:server",
     "compile:client": "tsc -p client/tsconfig.json",
     "compile:server": "tsc -p server/tsconfig.json",
