@@ -5,6 +5,10 @@
   "version": "1.0.0",
   "publisher": "gemtalksystems",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jgfoster/vscode_topaz"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
