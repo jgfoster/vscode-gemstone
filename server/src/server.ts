@@ -5,6 +5,7 @@ import {
   InitializeParams,
   InitializeResult,
   TextDocumentSyncKind,
+  DocumentSymbol,
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { DocumentManager } from './utils/documentManager';
@@ -61,7 +62,12 @@ documents.onDidClose((event) => {
 connection.onCompletion((params) => {
   const doc = documentManager.get(params.textDocument.uri);
   if (!doc) return [];
-  return getCompletions(doc, params.position);
+
+  // Find the region at the cursor position
+  const region = documentManager.findRegionAt(doc, params.position.line);
+  if (!region) return []; // Cursor is in Topaz command area
+
+  return getCompletions(doc, params.position, region);
 });
 
 // ── Hover ───────────────────────────────────────────────
@@ -69,7 +75,11 @@ connection.onCompletion((params) => {
 connection.onHover((params) => {
   const doc = documentManager.get(params.textDocument.uri);
   if (!doc) return null;
-  return getHover(doc, params.position);
+
+  const region = documentManager.findRegionAt(doc, params.position.line);
+  if (!region) return null;
+
+  return getHover(doc, params.position, region);
 });
 
 // ── Go to Definition ────────────────────────────────────
@@ -77,15 +87,27 @@ connection.onHover((params) => {
 connection.onDefinition((params) => {
   const doc = documentManager.get(params.textDocument.uri);
   if (!doc) return null;
-  return getDefinition(doc, params.position);
+
+  const region = documentManager.findRegionAt(doc, params.position.line);
+  if (!region) return null;
+
+  return getDefinition(doc, params.position, region);
 });
 
 // ── Document Symbols ────────────────────────────────────
 
 connection.onDocumentSymbol((params) => {
   const doc = documentManager.get(params.textDocument.uri);
-  if (!doc || !doc.ast) return [];
-  return getDocumentSymbols(doc.ast);
+  if (!doc) return [];
+
+  const allSymbols: DocumentSymbol[] = [];
+  for (const pr of doc.parsedRegions) {
+    if (pr.ast) {
+      const symbols = getDocumentSymbols(pr.ast, pr.region);
+      allSymbols.push(...symbols);
+    }
+  }
+  return allSymbols;
 });
 
 // ── Folding Ranges ──────────────────────────────────────

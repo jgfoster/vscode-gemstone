@@ -1,5 +1,5 @@
 import { Hover, Position, MarkupKind } from 'vscode-languageserver';
-import { ParsedDocument } from '../utils/documentManager';
+import { ParsedDocument, ParsedRegion } from '../utils/documentManager';
 import { ScopeAnalyzer } from '../utils/scopeAnalyzer';
 import { Token, TokenType, createPosition } from '../lexer/tokens';
 
@@ -16,8 +16,9 @@ const SPECIAL_LITERAL_DOCS: Record<string, string> = {
   _remoteNil: '**_remoteNil** — Remote nil marker',
 };
 
-export function getHover(doc: ParsedDocument, position: Position): Hover | null {
-  const token = findTokenAt(doc.tokens, position);
+export function getHover(doc: ParsedDocument, position: Position, region?: ParsedRegion): Hover | null {
+  const tokens = region?.tokens ?? doc.tokens;
+  const token = findTokenAt(tokens, position);
   if (!token) return null;
 
   // Pseudo-variables
@@ -41,9 +42,10 @@ export function getHover(doc: ParsedDocument, position: Position): Hover | null 
   }
 
   // Variables in scope
-  if (token.type === TokenType.Identifier && doc.ast) {
+  const ast = region?.ast ?? doc.ast;
+  if (token.type === TokenType.Identifier && ast) {
     const analyzer = new ScopeAnalyzer();
-    const root = analyzer.analyze(doc.ast);
+    const root = analyzer.analyze(ast);
     const pos = createPosition(0, position.line, position.character);
     const varInfo = analyzer.findVariableAt(root, token.text, pos);
     if (varInfo) {

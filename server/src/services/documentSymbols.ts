@@ -1,22 +1,29 @@
 import { DocumentSymbol, SymbolKind } from 'vscode-languageserver';
-import { MethodNode, BlockNode, StatementNode, ExpressionNode, PrimaryNode, MessageNode, VariableNode } from '../parser/ast';
+import { MethodNode, BlockNode, StatementNode, ExpressionNode, PrimaryNode, MessageNode } from '../parser/ast';
 import { SourceRange } from '../lexer/tokens';
+import { TopazRegion } from '../topaz/topazParser';
 
-function toLspRange(range: SourceRange) {
+function toLspRange(range: SourceRange, lineOffset: number) {
   return {
-    start: { line: range.start.line, character: range.start.column },
-    end: { line: range.end.line, character: range.end.column },
+    start: { line: range.start.line + lineOffset, character: range.start.column },
+    end: { line: range.end.line + lineOffset, character: range.end.column },
   };
 }
 
-export function getDocumentSymbols(method: MethodNode): DocumentSymbol[] {
+export function getDocumentSymbols(method: MethodNode, region?: TopazRegion): DocumentSymbol[] {
+  const off = region?.startLine ?? 0;
   const symbols: DocumentSymbol[] = [];
 
+  const className = region?.className;
+  const methodName = className
+    ? `${className} >> ${method.pattern.selector}`
+    : method.pattern.selector;
+
   const methodSymbol: DocumentSymbol = {
-    name: method.pattern.selector,
+    name: methodName,
     kind: SymbolKind.Method,
-    range: toLspRange(method.range),
-    selectionRange: toLspRange(method.pattern.range),
+    range: toLspRange(method.range, off),
+    selectionRange: toLspRange(method.pattern.range, off),
     children: [],
   };
 
@@ -25,8 +32,8 @@ export function getDocumentSymbols(method: MethodNode): DocumentSymbol[] {
     methodSymbol.children!.push({
       name: temp.name,
       kind: SymbolKind.Variable,
-      range: toLspRange(temp.range),
-      selectionRange: toLspRange(temp.range),
+      range: toLspRange(temp.range, off),
+      selectionRange: toLspRange(temp.range, off),
     });
   }
 
@@ -35,8 +42,8 @@ export function getDocumentSymbols(method: MethodNode): DocumentSymbol[] {
     methodSymbol.children!.push({
       name: method.pattern.parameter.name,
       kind: SymbolKind.Variable,
-      range: toLspRange(method.pattern.parameter.range),
-      selectionRange: toLspRange(method.pattern.parameter.range),
+      range: toLspRange(method.pattern.parameter.range, off),
+      selectionRange: toLspRange(method.pattern.parameter.range, off),
       detail: 'argument',
     });
   } else if (method.pattern.kind === 'KeywordPattern') {
@@ -44,61 +51,61 @@ export function getDocumentSymbols(method: MethodNode): DocumentSymbol[] {
       methodSymbol.children!.push({
         name: param.name,
         kind: SymbolKind.Variable,
-        range: toLspRange(param.range),
-        selectionRange: toLspRange(param.range),
+        range: toLspRange(param.range, off),
+        selectionRange: toLspRange(param.range, off),
         detail: 'argument',
       });
     }
   }
 
   // Walk statements for blocks
-  collectBlockSymbols(method.body.statements, methodSymbol.children!);
+  collectBlockSymbols(method.body.statements, methodSymbol.children!, off);
 
   symbols.push(methodSymbol);
   return symbols;
 }
 
-function collectBlockSymbols(statements: StatementNode[], symbols: DocumentSymbol[]): void {
+function collectBlockSymbols(statements: StatementNode[], symbols: DocumentSymbol[], off: number): void {
   for (const stmt of statements) {
-    collectFromStatement(stmt, symbols);
+    collectFromStatement(stmt, symbols, off);
   }
 }
 
-function collectFromStatement(stmt: StatementNode, symbols: DocumentSymbol[]): void {
+function collectFromStatement(stmt: StatementNode, symbols: DocumentSymbol[], off: number): void {
   switch (stmt.kind) {
     case 'Assignment':
-      collectFromStatement(stmt.value, symbols);
+      collectFromStatement(stmt.value, symbols, off);
       break;
     case 'Return':
-      collectFromExpression(stmt.expression, symbols);
+      collectFromExpression(stmt.expression, symbols, off);
       break;
     case 'Expression':
-      collectFromExpression(stmt, symbols);
+      collectFromExpression(stmt, symbols, off);
       break;
   }
 }
 
-function collectFromExpression(expr: ExpressionNode, symbols: DocumentSymbol[]): void {
-  collectFromPrimary(expr.receiver, symbols);
+function collectFromExpression(expr: ExpressionNode, symbols: DocumentSymbol[], off: number): void {
+  collectFromPrimary(expr.receiver, symbols, off);
   for (const msg of expr.messages) {
-    collectFromMessage(msg, symbols);
+    collectFromMessage(msg, symbols, off);
   }
   for (const cascade of expr.cascades) {
-    collectFromMessage(cascade, symbols);
+    collectFromMessage(cascade, symbols, off);
   }
 }
 
-function collectFromMessage(msg: MessageNode, symbols: DocumentSymbol[]): void {
+function collectFromMessage(msg: MessageNode, symbols: DocumentSymbol[], off: number): void {
   if (msg.kind === 'BinaryMessage') {
-    collectFromExpression(msg.argument, symbols);
+    collectFromExpression(msg.argument, symbols, off);
   } else if (msg.kind === 'KeywordMessage') {
     for (const part of msg.parts) {
-      collectFromExpression(part.value, symbols);
+      collectFromExpression(part.value, symbols, off);
     }
   }
 }
 
-function collectFromPrimary(primary: PrimaryNode, symbols: DocumentSymbol[]): void {
+function collectFromPrimary(primary: PrimaryNode, symbols: DocumentSymbol[], off: number): void {
   if (primary.kind === 'Block') {
     const block = primary as BlockNode;
     const blockSymbol: DocumentSymbol = {
@@ -106,8 +113,8 @@ function collectFromPrimary(primary: PrimaryNode, symbols: DocumentSymbol[]): vo
         ? `[:${block.parameters.map((p) => p.name).join(' :')} | ...]`
         : '[...]',
       kind: SymbolKind.Function,
-      range: toLspRange(block.range),
-      selectionRange: toLspRange(block.range),
+      range: toLspRange(block.range, off),
+      selectionRange: toLspRange(block.range, off),
       children: [],
     };
 
@@ -115,8 +122,8 @@ function collectFromPrimary(primary: PrimaryNode, symbols: DocumentSymbol[]): vo
       blockSymbol.children!.push({
         name: param.name,
         kind: SymbolKind.Variable,
-        range: toLspRange(param.range),
-        selectionRange: toLspRange(param.range),
+        range: toLspRange(param.range, off),
+        selectionRange: toLspRange(param.range, off),
         detail: 'block parameter',
       });
     }
@@ -125,19 +132,19 @@ function collectFromPrimary(primary: PrimaryNode, symbols: DocumentSymbol[]): vo
       blockSymbol.children!.push({
         name: temp.name,
         kind: SymbolKind.Variable,
-        range: toLspRange(temp.range),
-        selectionRange: toLspRange(temp.range),
+        range: toLspRange(temp.range, off),
+        selectionRange: toLspRange(temp.range, off),
         detail: 'block temporary',
       });
     }
 
-    collectBlockSymbols(block.statements, blockSymbol.children!);
+    collectBlockSymbols(block.statements, blockSymbol.children!, off);
     symbols.push(blockSymbol);
   } else if (primary.kind === 'ParenExpression') {
-    collectFromStatement(primary.expression, symbols);
+    collectFromStatement(primary.expression, symbols, off);
   } else if (primary.kind === 'CurlyArrayBuilder') {
     for (const expr of primary.expressions) {
-      collectFromExpression(expr, symbols);
+      collectFromExpression(expr, symbols, off);
     }
   }
 }

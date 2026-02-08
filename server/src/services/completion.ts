@@ -3,7 +3,7 @@ import {
   CompletionItemKind,
   Position,
 } from 'vscode-languageserver';
-import { ParsedDocument } from '../utils/documentManager';
+import { ParsedDocument, ParsedRegion } from '../utils/documentManager';
 import { ScopeAnalyzer } from '../utils/scopeAnalyzer';
 import { createPosition } from '../lexer/tokens';
 
@@ -53,13 +53,16 @@ const PRAGMA_KEYWORDS = [
   'primitive:', 'protected', 'unprotected',
 ];
 
-export function getCompletions(doc: ParsedDocument, position: Position): CompletionItem[] {
+export function getCompletions(doc: ParsedDocument, position: Position, region?: ParsedRegion): CompletionItem[] {
   const items: CompletionItem[] = [];
 
+  // Use the region's AST if available, otherwise fall back to doc.ast
+  const ast = region?.ast ?? doc.ast;
+
   // Variables in scope (from AST)
-  if (doc.ast) {
+  if (ast) {
     const analyzer = new ScopeAnalyzer();
-    const root = analyzer.analyze(doc.ast);
+    const root = analyzer.analyze(ast);
     const pos = createPosition(0, position.line, position.character);
     const visibleVars = analyzer.allVisibleVariables(root, pos);
 
