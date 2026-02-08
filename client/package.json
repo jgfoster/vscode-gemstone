@@ -1,0 +1,11 @@
+{
+  "name": "gemstone-smalltalk-client",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "vscode-languageclient": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0"
+  }
+}

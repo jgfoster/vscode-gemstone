@@ -1,0 +1,209 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "GemStone Smalltalk",
+  "scopeName": "source.gemstone-smalltalk",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#string" },
+    { "include": "#symbol-string" },
+    { "include": "#symbol" },
+    { "include": "#character-literal" },
+    { "include": "#byte-array-literal" },
+    { "include": "#array-literal" },
+    { "include": "#number" },
+    { "include": "#return" },
+    { "include": "#assignment" },
+    { "include": "#pragma" },
+    { "include": "#special-literal" },
+    { "include": "#pseudo-variable" },
+    { "include": "#env-specifier" },
+    { "include": "#block-parameter" },
+    { "include": "#temporaries" },
+    { "include": "#keyword-send" },
+    { "include": "#cascade" },
+    { "include": "#binary-selector" },
+    { "include": "#curly-brace" },
+    { "include": "#identifier" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.block.gemstone-smalltalk",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": []
+    },
+    "string": {
+      "name": "string.quoted.single.gemstone-smalltalk",
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        {
+          "name": "constant.character.escape.gemstone-smalltalk",
+          "match": "''"
+        }
+      ]
+    },
+    "symbol-string": {
+      "name": "constant.other.symbol.gemstone-smalltalk",
+      "begin": "#'",
+      "end": "'",
+      "patterns": [
+        {
+          "name": "constant.character.escape.gemstone-smalltalk",
+          "match": "''"
+        }
+      ]
+    },
+    "symbol": {
+      "name": "constant.other.symbol.gemstone-smalltalk",
+      "match": "#[a-zA-Z_][a-zA-Z0-9_:]*"
+    },
+    "character-literal": {
+      "name": "constant.character.gemstone-smalltalk",
+      "match": "\\$."
+    },
+    "number": {
+      "name": "constant.numeric.gemstone-smalltalk",
+      "match": "-?\\b\\d+([rR#][0-9A-Za-z]+|(\\.[0-9]+)?([eEdDqQfFpPsS]-?[0-9]*)?)\\b"
+    },
+    "special-literal": {
+      "name": "constant.language.gemstone-smalltalk",
+      "match": "\\b(true|false|nil|_remoteNil)\\b"
+    },
+    "pseudo-variable": {
+      "name": "variable.language.gemstone-smalltalk",
+      "match": "\\b(self|super|thisContext)\\b"
+    },
+    "return": {
+      "name": "keyword.control.return.gemstone-smalltalk",
+      "match": "\\^"
+    },
+    "assignment": {
+      "name": "keyword.operator.assignment.gemstone-smalltalk",
+      "match": ":=|(?<=\\s)_(?=\\s)"
+    },
+    "env-specifier": {
+      "name": "storage.modifier.env.gemstone-smalltalk",
+      "match": "@env\\d+:"
+    },
+    "block-parameter": {
+      "match": "(:[a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "variable.parameter.block.gemstone-smalltalk" }
+      }
+    },
+    "temporaries": {
+      "begin": "(?<=^|\\[|\\])\\s*(\\|)",
+      "end": "(\\|)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.temporaries.begin.gemstone-smalltalk" }
+      },
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.temporaries.end.gemstone-smalltalk" }
+      },
+      "patterns": [
+        { "include": "#comment" },
+        {
+          "name": "variable.other.temporary.gemstone-smalltalk",
+          "match": "[a-zA-Z_][a-zA-Z0-9_]*"
+        }
+      ]
+    },
+    "keyword-send": {
+      "name": "entity.name.function.keyword.gemstone-smalltalk",
+      "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*:"
+    },
+    "binary-selector": {
+      "name": "keyword.operator.binary.gemstone-smalltalk",
+      "match": "[+\\-\\\\*~<>=|/&@%,?!]{1,2}"
+    },
+    "cascade": {
+      "name": "punctuation.separator.cascade.gemstone-smalltalk",
+      "match": ";"
+    },
+    "pragma": {
+      "name": "meta.pragma.gemstone-smalltalk",
+      "begin": "<",
+      "end": ">",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.pragma.begin.gemstone-smalltalk" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.pragma.end.gemstone-smalltalk" }
+      },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string" },
+        { "include": "#number" },
+        { "include": "#special-literal" },
+        { "include": "#symbol-string" },
+        { "include": "#symbol" },
+        { "include": "#character-literal" },
+        {
+          "name": "keyword.other.pragma.gemstone-smalltalk",
+          "match": "\\b(primitive|protected|unprotected)\\b"
+        },
+        { "include": "#keyword-send" },
+        { "include": "#identifier" }
+      ]
+    },
+    "array-literal": {
+      "name": "meta.array-literal.gemstone-smalltalk",
+      "begin": "#\\(",
+      "end": "\\)",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.array.begin.gemstone-smalltalk" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.array.end.gemstone-smalltalk" }
+      },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string" },
+        { "include": "#symbol-string" },
+        { "include": "#symbol" },
+        { "include": "#character-literal" },
+        { "include": "#number" },
+        { "include": "#special-literal" },
+        { "include": "#array-literal" },
+        { "include": "#byte-array-literal" },
+        {
+          "name": "constant.other.symbol.gemstone-smalltalk",
+          "match": "[a-zA-Z_][a-zA-Z0-9_:]*"
+        }
+      ]
+    },
+    "byte-array-literal": {
+      "name": "meta.byte-array-literal.gemstone-smalltalk",
+      "begin": "#\\[",
+      "end": "\\]",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.byte-array.begin.gemstone-smalltalk" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.byte-array.end.gemstone-smalltalk" }
+      },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#number" }
+      ]
+    },
+    "curly-brace": {
+      "begin": "\\{",
+      "end": "\\}",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.curly.begin.gemstone-smalltalk" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.curly.end.gemstone-smalltalk" }
+      },
+      "patterns": [
+        { "include": "$self" }
+      ]
+    },
+    "identifier": {
+      "name": "variable.other.gemstone-smalltalk",
+      "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b"
+    }
+  }
+}

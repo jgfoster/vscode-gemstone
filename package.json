@@ -1,0 +1,60 @@
+{
+  "name": "gemstone-smalltalk",
+  "displayName": "GemStone Smalltalk",
+  "description": "Language support for GemStone Smalltalk",
+  "version": "0.1.0",
+  "publisher": "gemstone",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [],
+  "main": "./client/out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "gemstone-smalltalk",
+        "aliases": [
+          "GemStone Smalltalk",
+          "Smalltalk"
+        ],
+        "extensions": [
+          ".gs",
+          ".st",
+          ".tpz"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "gemstone-smalltalk",
+        "scopeName": "source.gemstone-smalltalk",
+        "path": "./syntaxes/gemstone-smalltalk.tmLanguage.json"
+      }
+    ]
+  },
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "compile": "npm run compile:client && npm run compile:server",
+    "compile:client": "tsc -p client/tsconfig.json",
+    "compile:server": "tsc -p server/tsconfig.json",
+    "bundle": "node esbuild.mjs",
+    "watch": "tsc -b -w client/tsconfig.json server/tsconfig.json",
+    "test": "npm run test:server",
+    "test:server": "cd server && npx vitest run",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "esbuild": "^0.19.0",
+    "@vscode/vsce": "^2.22.0"
+  }
+}

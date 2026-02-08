@@ -1,0 +1,7 @@
+node_modules/
+out/
+*.js.map
+*.vsix
+.vscode-test/
+.claude/
+.vscode/settings.json
