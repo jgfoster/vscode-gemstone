@@ -80,6 +80,18 @@ describe('Parser', () => {
       expect(ast).not.toBeNull();
     });
 
+    it('parses greater-than as binary message', () => {
+      const { ast, errors } = parse('foo ^(2 + 3 > 4)');
+      expect(errors).toHaveLength(0);
+      expect(ast).not.toBeNull();
+    });
+
+    it('parses less-than as binary message', () => {
+      const { ast, errors } = parse('foo ^(2 + 3 < 4)');
+      expect(errors).toHaveLength(0);
+      expect(ast).not.toBeNull();
+    });
+
     it('parses cascade', () => {
       const { ast } = parse('foo self add: 1; add: 2; yourself');
       expect(ast).not.toBeNull();
@@ -104,6 +116,33 @@ describe('Parser', () => {
     it('parses block with temporaries', () => {
       const { ast } = parse('foo ^[| temp | temp := 1. temp]');
       expect(ast).not.toBeNull();
+    });
+
+    it('parses block with keyword message followed by assignment', () => {
+      const { ast, errors } = parse('foo | i | i timesRepeat: [| x | Array new: i. x := 2]');
+      expect(errors).toHaveLength(0);
+      expect(ast).not.toBeNull();
+    });
+
+    it('treats dot with whitespace as statement separator not path', () => {
+      const { ast, errors } = parse('foo | i x | i. x := 2');
+      expect(errors).toHaveLength(0);
+      expect(ast).not.toBeNull();
+      expect(ast!.body.statements).toHaveLength(2);
+    });
+
+    it('treats dot without whitespace as path separator', () => {
+      const { ast, errors } = parse('foo ^Foo.Bar');
+      expect(errors).toHaveLength(0);
+      expect(ast).not.toBeNull();
+      const ret = ast!.body.statements[0];
+      expect(ret.kind).toBe('Return');
+      if (ret.kind === 'Return') {
+        expect(ret.expression.kind).toBe('Expression');
+        if (ret.expression.kind === 'Expression') {
+          expect(ret.expression.receiver.kind).toBe('Path');
+        }
+      }
     });
   });
 

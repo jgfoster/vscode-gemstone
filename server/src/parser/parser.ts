@@ -624,14 +624,21 @@ export class Parser {
     const id = this.advance();
 
     // Check for path: identifier.identifier...
+    // Only treat dot as a path separator (not a statement separator) when
+    // the dot is immediately adjacent to the following token (no whitespace).
     if (this.check(TokenType.Period) && this.pos + 1 < this.tokens.length) {
+      const dot = this.tokens[this.pos];
       const nextAfterDot = this.tokens[this.pos + 1];
-      if (nextAfterDot.type === TokenType.Identifier || nextAfterDot.type === TokenType.BinarySelector) {
+      const dotAdjacent = id.range.end.offset === dot.range.start.offset &&
+        dot.range.end.offset === nextAfterDot.range.start.offset;
+      if (dotAdjacent && (nextAfterDot.type === TokenType.Identifier || nextAfterDot.type === TokenType.BinarySelector)) {
         const segments = [id.text];
         while (this.check(TokenType.Period) && this.pos + 1 < this.tokens.length) {
+          const thisDot = this.tokens[this.pos];
           const afterDot = this.tokens[this.pos + 1];
-          if (afterDot.type === TokenType.Identifier ||
-              (afterDot.type === TokenType.BinarySelector && afterDot.text === '*')) {
+          const adjacent = thisDot.range.end.offset === afterDot.range.start.offset;
+          if (adjacent && (afterDot.type === TokenType.Identifier ||
+              (afterDot.type === TokenType.BinarySelector && afterDot.text === '*'))) {
             this.advance(); // skip .
             segments.push(this.advance().text);
           } else {
@@ -941,9 +948,11 @@ export class Parser {
     const token = this.peek();
     if (token.type === TokenType.EnvSpecifier) {
       const next = this.pos + 1 < this.tokens.length ? this.tokens[this.pos + 1] : null;
-      return next !== null && (next.type === TokenType.BinarySelector || next.type === TokenType.Minus);
+      return next !== null && (next.type === TokenType.BinarySelector || next.type === TokenType.Minus ||
+        next.type === TokenType.LessThan || next.type === TokenType.GreaterThan);
     }
-    return token.type === TokenType.BinarySelector || token.type === TokenType.Minus;
+    return token.type === TokenType.BinarySelector || token.type === TokenType.Minus ||
+      token.type === TokenType.LessThan || token.type === TokenType.GreaterThan;
   }
 
   private isKeywordMessage(): boolean {
