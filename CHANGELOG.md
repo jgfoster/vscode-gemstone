@@ -2,6 +2,13 @@
 
 All notable changes to the **GemStone Smalltalk (Topaz)** extension will be documented in this file.
 
+## [1.0.1] - 2026-02-10
+
+### Fixed
+
+- Fixed false positive "Expected ']' to close block" errors
+- Fixed false positive "Expected ')' to close parenthesized expression" errors
+
 ## [1.0.0] - 2026-02-08
 
 ### Added
