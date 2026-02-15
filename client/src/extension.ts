@@ -27,6 +27,9 @@ export function activate(context: ExtensionContext) {
     documentSelector: [
       { scheme: 'file', language: 'gemstone-smalltalk' },
     ],
+    synchronize: {
+      configurationSection: 'gemstoneSmalltalk',
+    },
   };
 
   client = new LanguageClient(

@@ -2,7 +2,7 @@
   "name": "gemstone-topaz",
   "displayName": "GemStone Smalltalk (Topaz)",
   "description": "Language support for GemStone's Topaz Files",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "gemtalksystems",
   "license": "MIT",
   "repository": {
@@ -39,7 +39,72 @@
         "scopeName": "source.gemstone-smalltalk",
         "path": "./syntaxes/gemstone-smalltalk.tmLanguage.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "GemStone Smalltalk Formatter",
+      "properties": {
+        "gemstoneSmalltalk.formatter.spacesInsideParens": {
+          "type": "boolean",
+          "default": false,
+          "description": "Add spaces inside parentheses: ( x ) instead of (x)"
+        },
+        "gemstoneSmalltalk.formatter.spacesInsideBrackets": {
+          "type": "boolean",
+          "default": false,
+          "description": "Add spaces inside brackets: [ x ] instead of [x]"
+        },
+        "gemstoneSmalltalk.formatter.spacesInsideBraces": {
+          "type": "boolean",
+          "default": false,
+          "description": "Add spaces inside braces: { x } instead of {x}"
+        },
+        "gemstoneSmalltalk.formatter.spacesAroundAssignment": {
+          "type": "boolean",
+          "default": true,
+          "description": "Add spaces around the assignment operator: x := y instead of x:=y"
+        },
+        "gemstoneSmalltalk.formatter.spacesAroundBinarySelectors": {
+          "type": "boolean",
+          "default": true,
+          "description": "Add spaces around binary selectors: a + b instead of a+b"
+        },
+        "gemstoneSmalltalk.formatter.spaceAfterCaret": {
+          "type": "boolean",
+          "default": false,
+          "description": "Add space after return caret: ^ x instead of ^x"
+        },
+        "gemstoneSmalltalk.formatter.blankLineAfterMethodPattern": {
+          "type": "boolean",
+          "default": true,
+          "description": "Insert a blank line between the method pattern and body"
+        },
+        "gemstoneSmalltalk.formatter.maxLineLength": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Maximum line length for wrapping (0 = no wrapping)"
+        },
+        "gemstoneSmalltalk.formatter.continuationIndent": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 8,
+          "description": "Additional indentation for continuation lines (multi-keyword messages)"
+        },
+        "gemstoneSmalltalk.formatter.multiKeywordThreshold": {
+          "type": "number",
+          "default": 2,
+          "minimum": 2,
+          "maximum": 10,
+          "description": "Split keyword messages to multiple lines when keyword count reaches this threshold"
+        },
+        "gemstoneSmalltalk.formatter.removeUnnecessaryParens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Remove unnecessary parentheses based on Smalltalk message precedence (unary > binary > keyword, left-to-right)"
+        }
+      }
+    }
   },
   "workspaces": [
     "client",
