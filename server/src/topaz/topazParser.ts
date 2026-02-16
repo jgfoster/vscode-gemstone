@@ -9,7 +9,7 @@
  * Topaz commands can be abbreviated (e.g., `method` for `method:`, `run` for `run`).
  */
 
-export type RegionKind = 'topaz' | 'smalltalk-code' | 'smalltalk-method';
+export type RegionKind = 'topaz' | 'smalltalk-code' | 'smalltalk-method' | 'tonel-header';
 
 export interface TopazRegion {
   kind: RegionKind;
@@ -23,6 +23,10 @@ export interface TopazRegion {
   className?: string;
   /** The Topaz command that started this region (for code/method regions) */
   command?: string;
+  /** For Tonel methods: line of the { #category } annotation */
+  annotationStartLine?: number;
+  /** For Tonel methods: line of the closing ] bracket */
+  closingBracketLine?: number;
 }
 
 /** Known Topaz commands that do NOT start Smalltalk blocks */

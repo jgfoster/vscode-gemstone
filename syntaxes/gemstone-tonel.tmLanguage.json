@@ -1,0 +1,89 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "GemStone (Tonel)",
+  "scopeName": "source.gemstone-tonel",
+  "patterns": [
+    { "include": "#tonel-file-comment" },
+    { "include": "#tonel-header" },
+    { "include": "#tonel-method-annotation" },
+    { "include": "#tonel-method" }
+  ],
+  "repository": {
+    "tonel-file-comment": {
+      "name": "comment.block.gemstone-smalltalk",
+      "begin": "^\"",
+      "end": "\"",
+      "comment": "Leading file-level comment in Smalltalk double-quote syntax"
+    },
+    "tonel-header": {
+      "begin": "^(Class|Extension|Package)\\s*(\\{)",
+      "end": "(\\})",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.tonel.gemstone-smalltalk" },
+        "2": { "name": "punctuation.definition.header.begin.gemstone-smalltalk" }
+      },
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.header.end.gemstone-smalltalk" }
+      },
+      "contentName": "meta.header.tonel.gemstone-smalltalk",
+      "patterns": [
+        { "include": "#tonel-ston-symbol" },
+        { "include": "#tonel-ston-string" },
+        { "include": "#tonel-ston-array" }
+      ]
+    },
+    "tonel-method-annotation": {
+      "begin": "^(\\{)",
+      "end": "(\\})",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.annotation.begin.gemstone-smalltalk" }
+      },
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.annotation.end.gemstone-smalltalk" }
+      },
+      "name": "meta.annotation.tonel.gemstone-smalltalk",
+      "patterns": [
+        { "include": "#tonel-ston-symbol" },
+        { "include": "#tonel-ston-string" }
+      ]
+    },
+    "tonel-method": {
+      "begin": "^(\\w+)(\\s+class)?\\s*(>>)\\s*",
+      "end": "^(\\])\\s*$",
+      "beginCaptures": {
+        "1": { "name": "entity.name.type.class.gemstone-smalltalk" },
+        "2": { "name": "storage.modifier.class-side.gemstone-smalltalk" },
+        "3": { "name": "keyword.operator.method-arrow.gemstone-smalltalk" }
+      },
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.method.end.gemstone-smalltalk" }
+      },
+      "contentName": "meta.method.tonel.gemstone-smalltalk",
+      "patterns": [
+        { "include": "source.gemstone-topaz#smalltalk" }
+      ]
+    },
+    "tonel-ston-symbol": {
+      "name": "constant.other.symbol.gemstone-smalltalk",
+      "match": "#[a-zA-Z_][a-zA-Z0-9_]*"
+    },
+    "tonel-ston-string": {
+      "name": "string.quoted.single.gemstone-smalltalk",
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        {
+          "name": "constant.character.escape.gemstone-smalltalk",
+          "match": "''"
+        }
+      ]
+    },
+    "tonel-ston-array": {
+      "begin": "\\[",
+      "end": "\\]",
+      "patterns": [
+        { "include": "#tonel-ston-string" }
+      ]
+    }
+  }
+}

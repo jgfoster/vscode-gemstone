@@ -17,7 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as fs from 'fs';
 import * as path from 'path';
 import { DocumentManager } from './utils/documentManager';
-import { WorkspaceIndex } from './utils/workspaceIndex';
+import { WorkspaceIndex, detectFormat } from './utils/workspaceIndex';
 import { toDiagnostics } from './services/diagnostics';
 import { getDocumentSymbols } from './services/documentSymbols';
 import { getCompletions } from './services/completion';
@@ -148,10 +148,12 @@ function findFiles(dir: string, extensions: string[]): string[] {
 // ── Document Lifecycle ──────────────────────────────────────
 
 documents.onDidChangeContent((change) => {
+  const format = detectFormat(change.document.uri);
   const parsed = documentManager.update(
     change.document.uri,
     change.document.version,
-    change.document.getText()
+    change.document.getText(),
+    format,
   );
   connection.sendDiagnostics({
     uri: parsed.uri,
@@ -307,6 +309,9 @@ connection.onFoldingRanges((params) => {
 connection.onDocumentFormatting((params) => {
   const doc = documentManager.get(params.textDocument.uri);
   if (!doc) return [];
+
+  // Formatting not yet supported for Tonel files
+  if (doc.format === 'tonel') return [];
 
   const settings: FormatterSettings = {
     ...formatterSettings,

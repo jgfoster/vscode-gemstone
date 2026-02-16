@@ -1,8 +1,9 @@
 import { parseTopazDocument } from '../topaz/topazParser';
+import { parseTonelDocument } from '../tonel/tonelParser';
 import { Lexer } from '../lexer/lexer';
 import { Parser } from '../parser/parser';
 import { collectSentSelectors } from './astUtils';
-import { ParsedDocument } from './documentManager';
+import { ParsedDocument, DocumentFormat } from './documentManager';
 
 // ── Data structures ─────────────────────────────────────────
 
@@ -16,10 +17,19 @@ export interface MethodEntry {
   sentSelectors: Set<string>;
 }
 
+/** Detect document format from URI file extension. */
+export function detectFormat(uri: string): DocumentFormat {
+  if (uri.endsWith('.st')) return 'tonel';
+  return 'topaz';
+}
+
 // ── File parsing ────────────────────────────────────────────
 
 export function indexFile(uri: string, text: string): MethodEntry[] {
-  const topazRegions = parseTopazDocument(text);
+  const format = detectFormat(uri);
+  const topazRegions = format === 'tonel'
+    ? parseTonelDocument(text)
+    : parseTopazDocument(text);
   const methods: MethodEntry[] = [];
 
   for (const region of topazRegions) {

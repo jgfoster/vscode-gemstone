@@ -16,6 +16,6 @@ await esbuild.build({
   outfile: 'client/out/extension.js',
   platform: 'node',
   format: 'cjs',
-  external: ['vscode'],
+  external: ['vscode', 'koffi'],
   sourcemap: true,
 });

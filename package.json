@@ -1,8 +1,8 @@
 {
   "name": "gemstone-topaz",
-  "displayName": "GemStone Smalltalk (Topaz)",
-  "description": "Language support for GemStone's Topaz Files",
-  "version": "1.0.2",
+  "displayName": "GemStone Smalltalk",
+  "description": "Language support for GemStone Smalltalk (Topaz and Tonel files)",
+  "version": "1.0.3",
   "publisher": "gemtalksystems",
   "license": "MIT",
   "repository": {
@@ -12,6 +12,7 @@
   "engines": {
     "vscode": "^1.85.0"
   },
+  "icon": "resources/gemstone-icon.png",
   "categories": [
     "Programming Languages"
   ],
@@ -20,91 +21,545 @@
   "contributes": {
     "languages": [
       {
-        "id": "gemstone-smalltalk",
+        "id": "gemstone-topaz",
         "aliases": [
-          "GemStone Smalltalk",
-          "Smalltalk"
+          "GemStone (Topaz)",
+          "Topaz"
         ],
         "extensions": [
           ".gs",
-          ".st",
           ".tpz"
+        ],
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "gemstone-tonel",
+        "aliases": [
+          "GemStone (Tonel)",
+          "Tonel"
+        ],
+        "extensions": [
+          ".st"
+        ],
+        "configuration": "./language-configuration-tonel.json"
+      },
+      {
+        "id": "gemstone-smalltalk",
+        "aliases": [
+          "GemStone (Smalltalk)",
+          "Smalltalk"
+        ],
+        "mimeTypes": [
+          "text/x-gemstone-smalltalk"
         ],
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
+        "language": "gemstone-topaz",
+        "scopeName": "source.gemstone-topaz",
+        "path": "./syntaxes/gemstone-topaz.tmLanguage.json"
+      },
+      {
+        "language": "gemstone-tonel",
+        "scopeName": "source.gemstone-tonel",
+        "path": "./syntaxes/gemstone-tonel.tmLanguage.json"
+      },
+      {
         "language": "gemstone-smalltalk",
         "scopeName": "source.gemstone-smalltalk",
         "path": "./syntaxes/gemstone-smalltalk.tmLanguage.json"
       }
     ],
-    "configuration": {
-      "title": "GemStone Smalltalk Formatter",
-      "properties": {
-        "gemstoneSmalltalk.formatter.spacesInsideParens": {
-          "type": "boolean",
-          "default": false,
-          "description": "Add spaces inside parentheses: ( x ) instead of (x)"
-        },
-        "gemstoneSmalltalk.formatter.spacesInsideBrackets": {
-          "type": "boolean",
-          "default": false,
-          "description": "Add spaces inside brackets: [ x ] instead of [x]"
-        },
-        "gemstoneSmalltalk.formatter.spacesInsideBraces": {
-          "type": "boolean",
-          "default": false,
-          "description": "Add spaces inside braces: { x } instead of {x}"
-        },
-        "gemstoneSmalltalk.formatter.spacesAroundAssignment": {
-          "type": "boolean",
-          "default": true,
-          "description": "Add spaces around the assignment operator: x := y instead of x:=y"
-        },
-        "gemstoneSmalltalk.formatter.spacesAroundBinarySelectors": {
-          "type": "boolean",
-          "default": true,
-          "description": "Add spaces around binary selectors: a + b instead of a+b"
-        },
-        "gemstoneSmalltalk.formatter.spaceAfterCaret": {
-          "type": "boolean",
-          "default": false,
-          "description": "Add space after return caret: ^ x instead of ^x"
-        },
-        "gemstoneSmalltalk.formatter.blankLineAfterMethodPattern": {
-          "type": "boolean",
-          "default": true,
-          "description": "Insert a blank line between the method pattern and body"
-        },
-        "gemstoneSmalltalk.formatter.maxLineLength": {
-          "type": "number",
-          "default": 0,
-          "minimum": 0,
-          "description": "Maximum line length for wrapping (0 = no wrapping)"
-        },
-        "gemstoneSmalltalk.formatter.continuationIndent": {
-          "type": "number",
-          "default": 2,
-          "minimum": 1,
-          "maximum": 8,
-          "description": "Additional indentation for continuation lines (multi-keyword messages)"
-        },
-        "gemstoneSmalltalk.formatter.multiKeywordThreshold": {
-          "type": "number",
-          "default": 2,
-          "minimum": 2,
-          "maximum": 10,
-          "description": "Split keyword messages to multiple lines when keyword count reaches this threshold"
-        },
-        "gemstoneSmalltalk.formatter.removeUnnecessaryParens": {
-          "type": "boolean",
-          "default": true,
-          "description": "Remove unnecessary parentheses based on Smalltalk message precedence (unary > binary > keyword, left-to-right)"
+    "configuration": [
+      {
+        "title": "GemStone",
+        "properties": {
+          "gemstone.gciLibraries": {
+            "type": "object",
+            "default": {},
+            "description": "Paths to GCI libraries, keyed by GemStone version (e.g. \"3.7.4.3\": \"/path/to/libgcirpc-3.7.4.3-64.dylib\")",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "gemstone.logins": {
+            "type": "array",
+            "default": [],
+            "description": "GemStone/S 64 Bit login parameters",
+            "items": {
+              "type": "object",
+              "required": [
+                "label"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "Display name for this login"
+                },
+                "version": {
+                  "type": "string",
+                  "description": "GemStone version (e.g. 3.7.2)"
+                },
+                "gem_host": {
+                  "type": "string",
+                  "description": "Gem host (e.g. localhost)"
+                },
+                "stone": {
+                  "type": "string",
+                  "description": "Stone name (e.g. gs64stone)"
+                },
+                "gs_user": {
+                  "type": "string",
+                  "description": "GemStone username (e.g. DataCurator)"
+                },
+                "gs_password": {
+                  "type": "string",
+                  "description": "GemStone password"
+                },
+                "netldi": {
+                  "type": "string",
+                  "description": "NetLDI name (e.g. gs64ldi)"
+                },
+                "host_user": {
+                  "type": "string",
+                  "description": "Host OS username"
+                },
+                "host_password": {
+                  "type": "string",
+                  "description": "Host OS password"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "title": "GemStone Smalltalk Formatter",
+        "properties": {
+          "gemstoneSmalltalk.formatter.spacesInsideParens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Add spaces inside parentheses: ( x ) instead of (x)"
+          },
+          "gemstoneSmalltalk.formatter.spacesInsideBrackets": {
+            "type": "boolean",
+            "default": false,
+            "description": "Add spaces inside brackets: [ x ] instead of [x]"
+          },
+          "gemstoneSmalltalk.formatter.spacesInsideBraces": {
+            "type": "boolean",
+            "default": false,
+            "description": "Add spaces inside braces: { x } instead of {x}"
+          },
+          "gemstoneSmalltalk.formatter.spacesAroundAssignment": {
+            "type": "boolean",
+            "default": true,
+            "description": "Add spaces around the assignment operator: x := y instead of x:=y"
+          },
+          "gemstoneSmalltalk.formatter.spacesAroundBinarySelectors": {
+            "type": "boolean",
+            "default": true,
+            "description": "Add spaces around binary selectors: a + b instead of a+b"
+          },
+          "gemstoneSmalltalk.formatter.spaceAfterCaret": {
+            "type": "boolean",
+            "default": false,
+            "description": "Add space after return caret: ^ x instead of ^x"
+          },
+          "gemstoneSmalltalk.formatter.blankLineAfterMethodPattern": {
+            "type": "boolean",
+            "default": true,
+            "description": "Insert a blank line between the method pattern and body"
+          },
+          "gemstoneSmalltalk.formatter.maxLineLength": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "description": "Maximum line length for wrapping (0 = no wrapping)"
+          },
+          "gemstoneSmalltalk.formatter.continuationIndent": {
+            "type": "number",
+            "default": 2,
+            "minimum": 1,
+            "maximum": 8,
+            "description": "Additional indentation for continuation lines (multi-keyword messages)"
+          },
+          "gemstoneSmalltalk.formatter.multiKeywordThreshold": {
+            "type": "number",
+            "default": 2,
+            "minimum": 2,
+            "maximum": 10,
+            "description": "Split keyword messages to multiple lines when keyword count reaches this threshold"
+          },
+          "gemstoneSmalltalk.formatter.removeUnnecessaryParens": {
+            "type": "boolean",
+            "default": true,
+            "description": "Remove unnecessary parentheses based on Smalltalk message precedence (unary > binary > keyword, left-to-right)"
+          }
         }
       }
-    }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "gemstone",
+          "title": "GemStone",
+          "icon": "resources/gemstone-sidebar.png"
+        }
+      ]
+    },
+    "views": {
+      "gemstone": [
+        {
+          "id": "gemstoneLogins",
+          "name": "Logins",
+          "type": "tree"
+        },
+        {
+          "id": "gemstoneSessions",
+          "name": "Sessions",
+          "type": "tree"
+        },
+        {
+          "id": "gemstoneBrowser",
+          "name": "Browser",
+          "type": "tree"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "gemstoneBrowser",
+        "contents": "No GemStone session selected.\n[Select a session](command:gemstone.selectSession) to browse classes and methods."
+      }
+    ],
+    "commands": [
+      {
+        "command": "gemstone.addLogin",
+        "title": "Add Login",
+        "category": "GemStone",
+        "icon": "$(add)"
+      },
+      {
+        "command": "gemstone.editLogin",
+        "title": "Edit Login",
+        "category": "GemStone",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "gemstone.deleteLogin",
+        "title": "Delete Login",
+        "category": "GemStone",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "gemstone.duplicateLogin",
+        "title": "Duplicate Login",
+        "category": "GemStone",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "gemstone.login",
+        "title": "Login",
+        "category": "GemStone",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "gemstone.sessionCommit",
+        "title": "Commit",
+        "category": "GemStone",
+        "icon": "$(check)"
+      },
+      {
+        "command": "gemstone.sessionAbort",
+        "title": "Abort",
+        "category": "GemStone",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "gemstone.sessionLogout",
+        "title": "Logout",
+        "category": "GemStone",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "gemstone.selectSession",
+        "title": "Select as Active Session",
+        "category": "GemStone",
+        "icon": "$(target)"
+      },
+      {
+        "command": "gemstone.displayIt",
+        "title": "Display It",
+        "category": "GemStone",
+        "icon": "$(play)"
+      },
+      {
+        "command": "gemstone.executeIt",
+        "title": "Execute It",
+        "category": "GemStone",
+        "icon": "$(run)"
+      },
+      {
+        "command": "gemstone.refreshBrowser",
+        "title": "Refresh Browser",
+        "category": "GemStone",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "gemstone.newClass",
+        "title": "New Class",
+        "category": "GemStone",
+        "icon": "$(add)"
+      },
+      {
+        "command": "gemstone.newMethod",
+        "title": "New Method",
+        "category": "GemStone",
+        "icon": "$(add)"
+      },
+      {
+        "command": "gemstone.deleteMethod",
+        "title": "Delete Method",
+        "category": "GemStone",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "gemstone.recategorizeMethod",
+        "title": "Move to Category...",
+        "category": "GemStone"
+      },
+      {
+        "command": "gemstone.renameCategory",
+        "title": "Rename Category...",
+        "category": "GemStone"
+      },
+      {
+        "command": "gemstone.deleteClass",
+        "title": "Remove from Dictionary",
+        "category": "GemStone",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "gemstone.moveClass",
+        "title": "Move to Dictionary...",
+        "category": "GemStone"
+      },
+      {
+        "command": "gemstone.addDictionary",
+        "title": "Add Dictionary",
+        "category": "GemStone",
+        "icon": "$(add)"
+      },
+      {
+        "command": "gemstone.moveDictionaryUp",
+        "title": "Move Up",
+        "category": "GemStone",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "gemstone.moveDictionaryDown",
+        "title": "Move Down",
+        "category": "GemStone",
+        "icon": "$(arrow-down)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "gemstone.addLogin",
+          "when": "view == gemstoneLogins",
+          "group": "navigation"
+        },
+        {
+          "command": "gemstone.addDictionary",
+          "when": "view == gemstoneBrowser",
+          "group": "navigation"
+        },
+        {
+          "command": "gemstone.refreshBrowser",
+          "when": "view == gemstoneBrowser",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "gemstone.login",
+          "when": "view == gemstoneLogins",
+          "group": "inline@1"
+        },
+        {
+          "command": "gemstone.editLogin",
+          "when": "view == gemstoneLogins",
+          "group": "inline@2"
+        },
+        {
+          "command": "gemstone.deleteLogin",
+          "when": "view == gemstoneLogins",
+          "group": "inline@3"
+        },
+        {
+          "command": "gemstone.duplicateLogin",
+          "when": "view == gemstoneLogins"
+        },
+        {
+          "command": "gemstone.newClass",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneDictionary",
+          "group": "inline@1"
+        },
+        {
+          "command": "gemstone.moveDictionaryUp",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneDictionary",
+          "group": "inline@2"
+        },
+        {
+          "command": "gemstone.moveDictionaryDown",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneDictionary",
+          "group": "inline@3"
+        },
+        {
+          "command": "gemstone.newClass",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneDictionary"
+        },
+        {
+          "command": "gemstone.moveDictionaryUp",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneDictionary"
+        },
+        {
+          "command": "gemstone.moveDictionaryDown",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneDictionary"
+        },
+        {
+          "command": "gemstone.newMethod",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneCategory",
+          "group": "inline@1"
+        },
+        {
+          "command": "gemstone.newMethod",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneCategory"
+        },
+        {
+          "command": "gemstone.newMethod",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneSide",
+          "group": "inline@1"
+        },
+        {
+          "command": "gemstone.newMethod",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneSide"
+        },
+        {
+          "command": "gemstone.deleteMethod",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneMethod",
+          "group": "inline@1"
+        },
+        {
+          "command": "gemstone.deleteMethod",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneMethod"
+        },
+        {
+          "command": "gemstone.recategorizeMethod",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneMethod"
+        },
+        {
+          "command": "gemstone.renameCategory",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneCategory"
+        },
+        {
+          "command": "gemstone.deleteClass",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneClass",
+          "group": "inline@1"
+        },
+        {
+          "command": "gemstone.deleteClass",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneClass"
+        },
+        {
+          "command": "gemstone.moveClass",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneClass"
+        },
+        {
+          "command": "gemstone.sessionCommit",
+          "when": "view == gemstoneSessions && viewItem == gemstoneSession",
+          "group": "inline@1"
+        },
+        {
+          "command": "gemstone.sessionAbort",
+          "when": "view == gemstoneSessions && viewItem == gemstoneSession",
+          "group": "inline@2"
+        },
+        {
+          "command": "gemstone.sessionLogout",
+          "when": "view == gemstoneSessions && viewItem == gemstoneSession",
+          "group": "inline@3"
+        },
+        {
+          "command": "gemstone.selectSession",
+          "when": "view == gemstoneSessions && viewItem == gemstoneSession",
+          "group": "inline@4"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "gemstone.displayIt",
+          "when": "editorTextFocus && gemstone.hasActiveSession",
+          "group": "1_modification@0"
+        },
+        {
+          "command": "gemstone.executeIt",
+          "when": "editorTextFocus && gemstone.hasActiveSession",
+          "group": "1_modification@1"
+        }
+      ]
+    },
+    "debuggers": [
+      {
+        "type": "gemstone",
+        "label": "GemStone",
+        "languages": [
+          "gemstone-smalltalk",
+          "gemstone-topaz",
+          "gemstone-tonel"
+        ],
+        "configurationAttributes": {
+          "attach": {
+            "required": [
+              "sessionId",
+              "gsProcess"
+            ],
+            "properties": {
+              "sessionId": {
+                "type": "number",
+                "description": "GCI session ID"
+              },
+              "gsProcess": {
+                "type": "string",
+                "description": "GsProcess OOP (bigint as string)"
+              },
+              "errorMessage": {
+                "type": "string",
+                "description": "Original error message"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "gemstone.displayIt",
+        "key": "ctrl+d",
+        "mac": "cmd+d",
+        "when": "editorTextFocus && gemstone.hasActiveSession"
+      },
+      {
+        "command": "gemstone.executeIt",
+        "key": "ctrl+e",
+        "mac": "cmd+e",
+        "when": "editorTextFocus && gemstone.hasActiveSession"
+      }
+    ]
   },
   "workspaces": [
     "client",
@@ -117,8 +572,10 @@
     "compile:server": "tsc -p server/tsconfig.json",
     "bundle": "node esbuild.mjs",
     "watch": "tsc -b -w client/tsconfig.json server/tsconfig.json",
-    "test": "npm run test:server",
+    "test": "npm run test:server && npm run test:client",
     "test:server": "cd server && npx vitest run",
+    "test:client": "cd client && npx vitest run",
+    "test:gci": "cd client && npx vitest run --config vitest.gci.config.ts",
     "package": "vsce package"
   },
   "devDependencies": {
@@ -126,5 +583,9 @@
     "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.27.3",
     "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "@vscode/debugadapter": "^1.68.0",
+    "koffi": "^2.15.1"
   }
 }

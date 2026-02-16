@@ -5,6 +5,9 @@ import { ParseError } from '../parser/errors';
 import { MethodNode } from '../parser/ast';
 import { StatementNode } from '../parser/ast';
 import { parseTopazDocument, TopazRegion, findRegionAtLine, toRegionPosition } from '../topaz/topazParser';
+import { parseTonelDocument } from '../tonel/tonelParser';
+
+export type DocumentFormat = 'topaz' | 'tonel';
 
 export interface ParsedRegion {
   region: TopazRegion;
@@ -19,9 +22,11 @@ export interface ParsedDocument {
   uri: string;
   version: number;
   text: string;
+  /** The source format of this file */
+  format: DocumentFormat;
   /** All tokens across all regions (with document-level positions) */
   tokens: Token[];
-  /** All Topaz regions */
+  /** All regions (Topaz or Tonel) */
   topazRegions: TopazRegion[];
   /** Parsed Smalltalk regions (code + method) */
   parsedRegions: ParsedRegion[];
@@ -34,15 +39,17 @@ export interface ParsedDocument {
 export class DocumentManager {
   private documents: Map<string, ParsedDocument> = new Map();
 
-  update(uri: string, version: number, text: string): ParsedDocument {
-    const topazRegions = parseTopazDocument(text);
+  update(uri: string, version: number, text: string, format: DocumentFormat = 'topaz'): ParsedDocument {
+    const topazRegions = format === 'tonel'
+      ? parseTonelDocument(text)
+      : parseTopazDocument(text);
     const parsedRegions: ParsedRegion[] = [];
     const allErrors: ParseError[] = [];
     const allTokens: Token[] = [];
     let firstAst: MethodNode | null = null;
 
     for (const region of topazRegions) {
-      if (region.kind === 'topaz') continue;
+      if (region.kind === 'topaz' || region.kind === 'tonel-header') continue;
 
       const regionText = region.text;
       const lexer = new Lexer(regionText);
@@ -99,6 +106,7 @@ export class DocumentManager {
       uri,
       version,
       text,
+      format,
       tokens: allTokens,
       topazRegions,
       parsedRegions,
