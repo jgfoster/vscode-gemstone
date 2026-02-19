@@ -18,6 +18,9 @@ export const OOP_Two = 0x12n;
 export const OOP_Three = 0x1An;
 export const OOP_Four = 0x22n;
 
+// Perform flags (from gcicmn.ht)
+export const GCI_PERFORM_FLAG_ENABLE_DEBUG = 1;
+
 // Class OOPs (from gcioop.ht)
 export const OOP_CLASS_BOOLEAN = 68097n;
 export const OOP_CLASS_CHARACTER = 68353n;

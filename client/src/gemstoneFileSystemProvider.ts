@@ -18,6 +18,7 @@ interface ParsedMethodUri {
   isMeta: boolean;
   category: string;
   selector: string;
+  environmentId: number;
 }
 
 interface ParsedDefinitionUri {
@@ -38,6 +39,7 @@ interface ParsedNewClassUri {
   kind: 'new-class';
   sessionId: number;
   dictName: string;
+  category?: string;
 }
 
 interface ParsedNewMethodUri {
@@ -47,6 +49,7 @@ interface ParsedNewMethodUri {
   className: string;
   isMeta: boolean;
   category: string;
+  environmentId: number;
 }
 
 type ParsedUri = ParsedMethodUri | ParsedDefinitionUri | ParsedCommentUri | ParsedNewClassUri | ParsedNewMethodUri;
@@ -56,8 +59,14 @@ function parseUri(uri: vscode.Uri): ParsedUri {
   const parts = uri.path.split('/').map(decodeURIComponent);
   // parts[0] is '' (leading /)
 
+  // Parse optional ?env=N from query string
+  const envMatch = uri.query?.match(/env=(\d+)/);
+  const environmentId = envMatch ? parseInt(envMatch[1], 10) : 0;
+
   if (parts.length === 3 && parts[2] === 'new-class') {
-    return { kind: 'new-class', sessionId, dictName: parts[1] };
+    const catMatch = uri.query?.match(/category=([^&]+)/);
+    const category = catMatch ? decodeURIComponent(catMatch[1]) : undefined;
+    return { kind: 'new-class', sessionId, dictName: parts[1], category };
   }
   if (parts.length === 4 && parts[3] === 'definition') {
     return { kind: 'definition', sessionId, dictName: parts[1], className: parts[2] };
@@ -73,6 +82,7 @@ function parseUri(uri: vscode.Uri): ParsedUri {
       className: parts[2],
       isMeta: parts[3] === 'class',
       category: parts[4],
+      environmentId,
     };
   }
   if (parts.length === 6) {
@@ -84,6 +94,7 @@ function parseUri(uri: vscode.Uri): ParsedUri {
       isMeta: parts[3] === 'class',
       category: parts[4],
       selector: parts[5],
+      environmentId,
     };
   }
   throw vscode.FileSystemError.FileNotFound(uri);
@@ -118,13 +129,14 @@ export class GemStoneFileSystemProvider implements vscode.FileSystemProvider {
     const parsed = parseUri(uri);
 
     if (parsed.kind === 'new-class') {
+      const categoryLine = parsed.category ? `\n  category: '${parsed.category}'` : '';
       const template =
 `Object subclass: 'NameOfClass'
   instVarNames: #()
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: ${parsed.dictName}
+  inDictionary: ${parsed.dictName}${categoryLine}
   options: #()`;
       return new TextEncoder().encode(template);
     }
@@ -143,7 +155,7 @@ export class GemStoneFileSystemProvider implements vscode.FileSystemProvider {
     let text: string;
     switch (parsed.kind) {
       case 'method':
-        text = queries.getMethodSource(session, parsed.className, parsed.isMeta, parsed.selector);
+        text = queries.getMethodSource(session, parsed.className, parsed.isMeta, parsed.selector, parsed.environmentId);
         break;
       case 'definition':
         text = queries.getClassDefinition(session, parsed.className);
@@ -169,7 +181,7 @@ export class GemStoneFileSystemProvider implements vscode.FileSystemProvider {
       switch (parsed.kind) {
         case 'method':
           queries.compileMethod(
-            session, parsed.className, parsed.isMeta, parsed.category, source,
+            session, parsed.className, parsed.isMeta, parsed.category, source, parsed.environmentId,
           );
           vscode.window.showInformationMessage(
             `Compiled ${parsed.className}${parsed.isMeta ? ' class' : ''}>>#${parsed.selector}`
@@ -193,7 +205,7 @@ export class GemStoneFileSystemProvider implements vscode.FileSystemProvider {
           break;
         case 'new-method':
           queries.compileMethod(
-            session, parsed.className, parsed.isMeta, parsed.category, source,
+            session, parsed.className, parsed.isMeta, parsed.category, source, parsed.environmentId,
           );
           vscode.window.showInformationMessage(
             `Compiled new method in ${parsed.className}${parsed.isMeta ? ' class' : ''}`

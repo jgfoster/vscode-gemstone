@@ -23,6 +23,7 @@ import { getDocumentSymbols } from './services/documentSymbols';
 import { getCompletions } from './services/completion';
 import { getHover } from './services/hover';
 import { getDefinition, getWorkspaceDefinition, getWorkspaceReferences } from './services/definition';
+import { findSelectorAtPosition } from './utils/astUtils';
 import { getFoldingRanges } from './services/folding';
 import { formatDocument } from './services/formatting';
 import { FormatterSettings, DEFAULT_SETTINGS } from './services/formatterSettings';
@@ -310,8 +311,8 @@ connection.onDocumentFormatting((params) => {
   const doc = documentManager.get(params.textDocument.uri);
   if (!doc) return [];
 
-  // Formatting not yet supported for Tonel files
-  if (doc.format === 'tonel') return [];
+  // Formatting only supported for Topaz files
+  if (doc.format === 'tonel' || doc.format === 'smalltalk') return [];
 
   const settings: FormatterSettings = {
     ...formatterSettings,
@@ -320,6 +321,26 @@ connection.onDocumentFormatting((params) => {
   };
 
   return formatDocument(doc, settings);
+});
+
+// ── Custom: Selector at Position ─────────────────────────
+
+connection.onRequest('gemstone/selectorAtPosition', (params: {
+  textDocument: { uri: string };
+  position: { line: number; character: number };
+}): string | null => {
+  const doc = documentManager.get(params.textDocument.uri);
+  if (!doc) return null;
+
+  const region = documentManager.findRegionAt(doc, params.position.line);
+  if (!region) return null;
+
+  const lineOffset = region.region.startLine
+    - (region.region.kind === 'smalltalk-code' ? 1 : 0);
+
+  return findSelectorAtPosition(
+    region.tokens, region.ast, params.position, lineOffset,
+  );
 });
 
 // ── Start ───────────────────────────────────────────────────

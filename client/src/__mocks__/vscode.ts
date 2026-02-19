@@ -38,6 +38,7 @@ export function __setConfig(section: string, key: string, value: unknown): void 
 
 export class TreeItem {
   label?: string;
+  id?: string;
   description?: string;
   tooltip?: string;
   iconPath?: unknown;
@@ -100,6 +101,21 @@ export const ViewColumn = {
   Three: 3,
 };
 
+// ── OverviewRulerLane mock ────────────────────────────────
+
+export const OverviewRulerLane = {
+  Left: 1,
+  Center: 2,
+  Right: 4,
+  Full: 7,
+};
+
+// ── ThemeColor mock ───────────────────────────────────────
+
+export class ThemeColor {
+  constructor(public readonly id: string) {}
+}
+
 // ── Window mock ────────────────────────────────────────────
 
 function createMockWebview() {
@@ -133,6 +149,9 @@ export const window = {
   showWarningMessage: vi.fn(),
   createTreeView: vi.fn(() => ({ dispose: () => {} })),
   createOutputChannel: vi.fn(() => ({ appendLine: vi.fn(), show: vi.fn(), dispose: vi.fn() })),
+  createTextEditorDecorationType: vi.fn(() => ({ dispose: vi.fn() })),
+  visibleTextEditors: [] as unknown[],
+  onDidChangeVisibleTextEditors: vi.fn(() => ({ dispose: () => {} })),
 };
 
 // ── Workspace mock ─────────────────────────────────────────
@@ -140,6 +159,7 @@ export const window = {
 export const workspace = {
   getConfiguration,
   onDidChangeConfiguration: vi.fn(() => ({ dispose: () => {} })),
+  textDocuments: [] as unknown[],
 };
 
 // ── Commands mock ──────────────────────────────────────────
@@ -190,9 +210,9 @@ export class Uri {
   }
 
   static parse(value: string): Uri {
-    const match = value.match(/^([^:]+):\/\/([^/]*)(.*)$/);
+    const match = value.match(/^([^:]+):\/\/([^/]*)([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/);
     if (match) {
-      return new Uri(match[1], match[2], match[3]);
+      return new Uri(match[1], match[2], match[3], match[4] || '', match[5] || '');
     }
     return new Uri('file', '', value);
   }
@@ -232,6 +252,229 @@ export const FileChangeType = {
   Created: 2,
   Deleted: 3,
 };
+
+// ── Position & Location mock ──────────────────────────────
+
+export class Position {
+  constructor(public readonly line: number, public readonly character: number) {}
+}
+
+export class Range {
+  constructor(
+    public readonly start: Position,
+    public readonly end: Position,
+  ) {}
+}
+
+export class Location {
+  constructor(public readonly uri: Uri, public readonly range: Position | Range) {}
+}
+
+// ── SymbolInformation mock ───────────────────────────────
+
+export const SymbolKind = {
+  File: 0,
+  Module: 1,
+  Namespace: 2,
+  Package: 3,
+  Class: 4,
+  Method: 5,
+  Property: 6,
+  Field: 7,
+  Constructor: 8,
+  Enum: 9,
+  Interface: 10,
+  Function: 11,
+  Variable: 12,
+};
+
+export class SymbolInformation {
+  constructor(
+    public readonly name: string,
+    public readonly kind: number,
+    public readonly containerName: string,
+    public readonly location: Location,
+  ) {}
+}
+
+// ── Languages mock ───────────────────────────────────────
+
+export const languages = {
+  registerWorkspaceSymbolProvider: vi.fn(() => ({ dispose: () => {} })),
+  registerDefinitionProvider: vi.fn(() => ({ dispose: () => {} })),
+  registerHoverProvider: vi.fn(() => ({ dispose: () => {} })),
+  registerCompletionItemProvider: vi.fn(() => ({ dispose: () => {} })),
+  setTextDocumentLanguage: vi.fn(),
+};
+
+// ── MarkdownString mock ──────────────────────────────────
+
+export class MarkdownString {
+  constructor(public value: string = '') {}
+  appendMarkdown(value: string): MarkdownString {
+    this.value += value;
+    return this;
+  }
+  appendCodeblock(code: string, language?: string): MarkdownString {
+    this.value += '\n```' + (language || '') + '\n' + code + '\n```\n';
+    return this;
+  }
+}
+
+// ── Hover mock ───────────────────────────────────────────
+
+export class Hover {
+  constructor(
+    public contents: MarkdownString | MarkdownString[],
+    public range?: Range,
+  ) {}
+}
+
+// ── CompletionItem mock ──────────────────────────────────
+
+export class CompletionItem {
+  detail?: string;
+  documentation?: string;
+  sortText?: string;
+  constructor(public label: string, public kind?: number) {}
+}
+
+export const CompletionItemKind = {
+  Method: 1,
+  Field: 4,
+  Variable: 5,
+  Class: 6,
+  Keyword: 13,
+  Constant: 20,
+};
+
+// ── Debug mock ───────────────────────────────────────────
+
+export const debug = {
+  breakpoints: [] as unknown[],
+  onDidChangeBreakpoints: vi.fn(() => ({ dispose: () => {} })),
+  startDebugging: vi.fn(),
+  registerDebugAdapterDescriptorFactory: vi.fn(() => ({ dispose: () => {} })),
+  registerDebugConfigurationProvider: vi.fn(() => ({ dispose: () => {} })),
+};
+
+export class Breakpoint {
+  id = '';
+  enabled = true;
+  condition?: string;
+  hitCondition?: string;
+  logMessage?: string;
+}
+
+export class SourceBreakpoint extends Breakpoint {
+  constructor(public location: Location, enabled = true) {
+    super();
+    this.enabled = enabled;
+  }
+}
+
+// ── Test API mock ────────────────────────────────────────
+
+export class TestMessage {
+  location?: Location;
+  constructor(public message: string) {}
+}
+
+export const TestRunProfileKind = {
+  Run: 1,
+  Debug: 2,
+  Coverage: 3,
+};
+
+function createMockTestItem(id: string, label: string, uri?: Uri) {
+  const children = new Map<string, unknown>();
+  return {
+    id,
+    label,
+    uri,
+    canResolveChildren: false,
+    children: {
+      get size() { return children.size; },
+      replace(items: Array<{ id: string }>) {
+        children.clear();
+        for (const item of items) children.set(item.id, item);
+      },
+      forEach(cb: (item: unknown) => void) { children.forEach(cb); },
+      get(key: string) { return children.get(key); },
+    },
+    description: undefined as string | undefined,
+    error: undefined as unknown,
+    range: undefined,
+    tags: [] as unknown[],
+  };
+}
+
+function createMockTestRun() {
+  return {
+    started: vi.fn(),
+    passed: vi.fn(),
+    failed: vi.fn(),
+    errored: vi.fn(),
+    skipped: vi.fn(),
+    end: vi.fn(),
+  };
+}
+
+function createMockTestController() {
+  const items = new Map<string, unknown>();
+  const controller = {
+    id: 'gemstone-sunit',
+    label: 'GemStone SUnit Tests',
+    resolveHandler: undefined as ((item?: unknown) => Promise<void>) | undefined,
+    refreshHandler: undefined as (() => Promise<void>) | undefined,
+    createTestItem: vi.fn((id: string, label: string, uri?: Uri) => createMockTestItem(id, label, uri)),
+    createRunProfile: vi.fn(),
+    createTestRun: vi.fn(() => createMockTestRun()),
+    items: {
+      get size() { return items.size; },
+      replace(newItems: Array<{ id: string }>) {
+        items.clear();
+        for (const item of newItems) items.set(item.id, item);
+      },
+      forEach(cb: (item: unknown) => void) { items.forEach(cb); },
+      get(key: string) { return items.get(key); },
+    },
+    dispose: vi.fn(),
+  };
+  return controller;
+}
+
+export const tests = {
+  createTestController: vi.fn((_id: string, _label: string) => createMockTestController()),
+};
+
+// ── DataTransfer mock ─────────────────────────────────────
+
+export class DataTransferItem {
+  constructor(public readonly value: unknown) {}
+  asString(): Thenable<string> { return Promise.resolve(String(this.value)); }
+  asFile(): undefined { return undefined; }
+}
+
+export class DataTransfer {
+  private items = new Map<string, DataTransferItem>();
+
+  get(mimeType: string): DataTransferItem | undefined {
+    return this.items.get(mimeType);
+  }
+
+  set(mimeType: string, value: DataTransferItem): void {
+    this.items.set(mimeType, value);
+  }
+
+  forEach(callbackfn: (item: DataTransferItem, mimeType: string, dataTransfer: DataTransfer) => void, thisArg?: unknown): void {
+    this.items.forEach((item, mime) => callbackfn.call(thisArg, item, mime, this));
+  }
+
+  [Symbol.iterator](): IterableIterator<[mimeType: string, item: DataTransferItem]> {
+    return this.items.entries();
+  }
+}
 
 // ── Disposable mock ───────────────────────────────────────
 

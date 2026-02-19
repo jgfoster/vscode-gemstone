@@ -14,6 +14,8 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import { SessionManager, ActiveSession } from './sessionManager';
 import { OOP_NIL } from './gciConstants';
 import * as debug from './debugQueries';
+import { BreakpointManager, buildLineOffsets, mapLineToStepPoint } from './breakpointManager';
+import * as queries from './browserQueries';
 import { logInfo, logError } from './gciLog';
 
 const THREAD_ID = 1;
@@ -38,8 +40,11 @@ export class GemStoneDebugSession extends DebugSession {
   private methodToSourceRef = new Map<string, number>(); // methodOop.toString() → sourceRef
   private nextSourceRef = 1;
 
-  constructor(private sessionManager: SessionManager) {
+  private breakpointManager?: BreakpointManager;
+
+  constructor(private sessionManager: SessionManager, breakpointManager?: BreakpointManager) {
     super();
+    this.breakpointManager = breakpointManager;
   }
 
   // ── Allocators ──────────────────────────────────────────
@@ -71,8 +76,16 @@ export class GemStoneDebugSession extends DebugSession {
     response.body.supportsEvaluateForHovers = true;
     response.body.supportsTerminateRequest = true;
     response.body.supportsSingleThreadExecutionRequests = true;
+    response.body.supportsConfigurationDoneRequest = true;
     this.sendResponse(response);
     this.sendEvent(new InitializedEvent());
+  }
+
+  protected configurationDoneRequest(
+    response: DebugProtocol.ConfigurationDoneResponse,
+    _args: DebugProtocol.ConfigurationDoneArguments,
+  ): void {
+    this.sendResponse(response);
   }
 
   protected attachRequest(
@@ -122,6 +135,107 @@ export class GemStoneDebugSession extends DebugSession {
     }
     this.sendResponse(response);
     this.sendEvent(new TerminatedEvent());
+  }
+
+  // ── Breakpoints ────────────────────────────────────────
+
+  protected setBreakpointsRequest(
+    response: DebugProtocol.SetBreakpointsResponse,
+    args: DebugProtocol.SetBreakpointsArguments,
+  ): void {
+    const breakpoints: DebugProtocol.Breakpoint[] = [];
+
+    if (!this.session || !args.breakpoints) {
+      response.body = { breakpoints };
+      this.sendResponse(response);
+      return;
+    }
+
+    const requestedLines = args.breakpoints.map(bp => bp.line);
+
+    // Try to resolve from source path (gemstone:// URI) if available
+    if (args.source.path && this.breakpointManager) {
+      try {
+        const uri = { scheme: 'gemstone', path: '', authority: '', query: '', fragment: '', fsPath: '', toString: () => args.source.path!, with: () => uri as any, toJSON: () => ({}) } as any;
+        // Parse the path as a URI
+        const parsed = args.source.path.match(/^gemstone:\/\/(\d+)(\/[^?]*?)(?:\?(.*))?$/);
+        if (parsed) {
+          const actualUri = {
+            scheme: 'gemstone',
+            authority: parsed[1],
+            path: parsed[2],
+            query: parsed[3] || '',
+            toString: () => args.source.path!,
+          } as any;
+          const results = this.breakpointManager.setBreakpointsForSource(
+            this.session, actualUri, requestedLines,
+          );
+          for (let i = 0; i < results.length; i++) {
+            breakpoints.push({
+              verified: results[i].verified,
+              line: results[i].actualLine,
+              id: i + 1,
+            });
+          }
+          response.body = { breakpoints };
+          this.sendResponse(response);
+          return;
+        }
+      } catch (e) {
+        logError(this.session.id, `setBreakpoints path error: ${e}`);
+      }
+    }
+
+    // Try source reference → method OOP
+    if (args.source.sourceReference && args.source.sourceReference > 0) {
+      const methodOop = this.sourceRefMap.get(args.source.sourceReference);
+      if (methodOop) {
+        try {
+          const source = debug.getMethodSource(this.session, methodOop);
+          const lineOffsets = buildLineOffsets(source);
+
+          // Get method info to resolve the class/selector
+          const methodInfo = debug.getMethodInfo(this.session, methodOop);
+          const isMeta = methodInfo.className.endsWith(' class');
+          const className = isMeta
+            ? methodInfo.className.replace(/ class$/, '')
+            : methodInfo.className;
+
+          const sourceOffsets = queries.getSourceOffsets(
+            this.session, className, isMeta, methodInfo.selector,
+          );
+
+          // Clear existing breakpoints on this method
+          try {
+            queries.clearAllBreaks(this.session, className, isMeta, methodInfo.selector);
+          } catch { /* ignore */ }
+
+          for (let i = 0; i < requestedLines.length; i++) {
+            const result = mapLineToStepPoint(requestedLines[i], lineOffsets, sourceOffsets);
+            if (result) {
+              try {
+                queries.setBreakAtStepPoint(
+                  this.session, className, isMeta, methodInfo.selector, result.stepPoint,
+                );
+                breakpoints.push({ verified: true, line: result.actualLine, id: i + 1 });
+              } catch {
+                breakpoints.push({ verified: false, line: requestedLines[i], id: i + 1 });
+              }
+            } else {
+              breakpoints.push({ verified: false, line: requestedLines[i], id: i + 1 });
+            }
+          }
+        } catch (e) {
+          logError(this.session.id, `setBreakpoints sourceRef error: ${e}`);
+          for (let i = 0; i < requestedLines.length; i++) {
+            breakpoints.push({ verified: false, line: requestedLines[i], id: i + 1 });
+          }
+        }
+      }
+    }
+
+    response.body = { breakpoints };
+    this.sendResponse(response);
   }
 
   // ── Threads ─────────────────────────────────────────────
@@ -409,66 +523,55 @@ export class GemStoneDebugSession extends DebugSession {
 
   // ── Stepping ────────────────────────────────────────────
 
-  protected async nextRequest(
+  protected nextRequest(
     response: DebugProtocol.NextResponse,
-    args: DebugProtocol.NextArguments,
-  ): Promise<void> {
+    _args: DebugProtocol.NextArguments,
+  ): void {
     if (!this.session) {
       this.sendResponse(response);
       return;
     }
 
     this.sendResponse(response);
-
-    try {
-      await debug.stepOver(this.session, this.gsProcess, 1);
-      this.clearVarRefs();
-      this.sendEvent(new StoppedEvent('step', THREAD_ID));
-    } catch (e) {
-      logError(this.session.id, `stepOver error: ${e}`);
-      this.sendEvent(new StoppedEvent('exception', THREAD_ID, String(e)));
-    }
+    this.handleStepResult('stepOver', debug.stepOver(this.session, this.gsProcess, 1));
   }
 
-  protected async stepInRequest(
+  protected stepInRequest(
     response: DebugProtocol.StepInResponse,
-    args: DebugProtocol.StepInArguments,
-  ): Promise<void> {
+    _args: DebugProtocol.StepInArguments,
+  ): void {
     if (!this.session) {
       this.sendResponse(response);
       return;
     }
 
     this.sendResponse(response);
-
-    try {
-      await debug.stepInto(this.session, this.gsProcess, 1);
-      this.clearVarRefs();
-      this.sendEvent(new StoppedEvent('step', THREAD_ID));
-    } catch (e) {
-      logError(this.session.id, `stepIn error: ${e}`);
-      this.sendEvent(new StoppedEvent('exception', THREAD_ID, String(e)));
-    }
+    this.handleStepResult('stepIn', debug.stepInto(this.session, this.gsProcess, 1));
   }
 
-  protected async stepOutRequest(
+  protected stepOutRequest(
     response: DebugProtocol.StepOutResponse,
-    args: DebugProtocol.StepOutArguments,
-  ): Promise<void> {
+    _args: DebugProtocol.StepOutArguments,
+  ): void {
     if (!this.session) {
       this.sendResponse(response);
       return;
     }
 
     this.sendResponse(response);
+    this.handleStepResult('stepOut', debug.stepOut(this.session, this.gsProcess, 1));
+  }
 
-    try {
-      await debug.stepOut(this.session, this.gsProcess, 1);
-      this.clearVarRefs();
+  private handleStepResult(
+    label: string,
+    result: { completed: boolean; errorMessage?: string; errorContext?: bigint },
+  ): void {
+    this.clearVarRefs();
+    if (result.completed) {
+      this.gsProcess = 0n;
+      this.sendEvent(new TerminatedEvent());
+    } else {
       this.sendEvent(new StoppedEvent('step', THREAD_ID));
-    } catch (e) {
-      logError(this.session.id, `stepOut error: ${e}`);
-      this.sendEvent(new StoppedEvent('exception', THREAD_ID, String(e)));
     }
   }
 

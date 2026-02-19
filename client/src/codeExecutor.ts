@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { SessionManager, ActiveSession } from './sessionManager';
-import { OOP_ILLEGAL, OOP_NIL } from './gciConstants';
+import { OOP_ILLEGAL, OOP_NIL, GCI_PERFORM_FLAG_ENABLE_DEBUG } from './gciConstants';
 import { logQuery, logResult, logError, logInfo } from './gciLog';
+import { InspectorTreeProvider } from './inspectorTreeProvider';
 
 const BACKOFF_INTERVALS = [10, 10, 20, 40, 80, 160, 320, 500];
 const MAX_INTERVAL = 500;
@@ -93,7 +94,7 @@ export class CodeExecutor {
     try {
       const { success, err: startErr } = session.gci.GciTsNbExecute(
         session.handle, code, oopClassString,
-        OOP_ILLEGAL, OOP_NIL, 0, 0,
+        OOP_ILLEGAL, OOP_NIL, GCI_PERFORM_FLAG_ENABLE_DEBUG, 0,
       );
       if (!success) {
         const msg = `Execution failed to start: ${startErr.message || `error ${startErr.number}`}`;
@@ -206,8 +207,10 @@ export class CodeExecutor {
     return oop;
   }
 
-  private pollForResult(session: ActiveSession): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
+  private pollForCompletion<T>(
+    session: ActiveSession, onReady: () => T,
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
       let pollIndex = 0;
       let elapsedMs = 0;
       let progressShown = false;
@@ -227,11 +230,9 @@ export class CodeExecutor {
         );
 
         if (pollResult === 1) {
-          // Result ready — call NbResult to get the result or error
           finishProgress();
           try {
-            const resultString = this.fetchResultString(session);
-            resolve(resultString);
+            resolve(onReady());
           } catch (e) {
             reject(e);
           }
@@ -239,14 +240,12 @@ export class CodeExecutor {
         }
 
         if (pollResult === -1) {
-          // Infrastructure error (invalid session, peer disconnected)
           finishProgress();
           const msg = pollErr.message || `GemStone poll error ${pollErr.number}`;
           reject(new Error(msg));
           return;
         }
 
-        // Not ready yet — schedule next poll with backoff
         const interval = pollIndex < BACKOFF_INTERVALS.length
           ? BACKOFF_INTERVALS[pollIndex]
           : MAX_INTERVAL;
@@ -288,7 +287,15 @@ export class CodeExecutor {
     });
   }
 
-  private fetchResultString(session: ActiveSession): string {
+  private pollForResult(session: ActiveSession): Promise<string> {
+    return this.pollForCompletion(session, () => this.fetchResultString(session));
+  }
+
+  private pollForResultOop(session: ActiveSession): Promise<bigint> {
+    return this.pollForCompletion(session, () => this.fetchResultOop(session));
+  }
+
+  private fetchResultOop(session: ActiveSession): bigint {
     const { result: resultOop, err: resultErr } = session.gci.GciTsNbResult(
       session.handle,
     );
@@ -301,8 +308,12 @@ export class CodeExecutor {
       }
       throw new Error(msg);
     }
+    return resultOop;
+  }
 
-    // Send printString to the result OOP to get a displayable string
+  private fetchResultString(session: ActiveSession): string {
+    const resultOop = this.fetchResultOop(session);
+
     const { data, err: fetchErr } = session.gci.GciTsPerformFetchBytes(
       session.handle, resultOop, 'printString', [], MAX_RESULT_SIZE,
     );
@@ -311,5 +322,109 @@ export class CodeExecutor {
     }
 
     return data;
+  }
+
+  // ── Inspect ──────────────────────────────────────────
+
+  async inspectIt(inspectorProvider: InspectorTreeProvider): Promise<void> {
+    const session = await this.sessionManager.resolveSession();
+    if (!session) return;
+
+    if (this.executing.has(session.id)) {
+      vscode.window.showWarningMessage(
+        'A GemStone execution is already in progress on this session.'
+      );
+      return;
+    }
+
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      vscode.window.showErrorMessage('No active text editor.');
+      return;
+    }
+
+    let selection = editor.selection;
+    if (selection.isEmpty) {
+      const line = editor.document.lineAt(selection.active.line);
+      selection = new vscode.Selection(line.range.start, line.range.end);
+    }
+
+    const code = editor.document.getText(selection);
+    if (!code.trim()) {
+      vscode.window.showWarningMessage('No code to execute.');
+      return;
+    }
+
+    const label = code.trim().split('\n')[0].slice(0, 40);
+    await this.executeAndInspect(session, code, label, inspectorProvider);
+  }
+
+  async inspectExpression(
+    inspectorProvider: InspectorTreeProvider, code: string, label: string,
+  ): Promise<void> {
+    const session = await this.sessionManager.resolveSession();
+    if (!session) return;
+
+    if (this.executing.has(session.id)) {
+      vscode.window.showWarningMessage(
+        'A GemStone execution is already in progress on this session.'
+      );
+      return;
+    }
+
+    await this.executeAndInspect(session, code, label, inspectorProvider);
+  }
+
+  private async executeAndInspect(
+    session: ActiveSession, code: string, label: string,
+    inspectorProvider: InspectorTreeProvider,
+  ): Promise<void> {
+    const oopClassString = this.resolveOopClassString(session);
+    if (oopClassString === undefined) return;
+
+    this.executing.add(session.id);
+    logQuery(session.id, 'Inspect It', code);
+    try {
+      const { success, err: startErr } = session.gci.GciTsNbExecute(
+        session.handle, code, oopClassString,
+        OOP_ILLEGAL, OOP_NIL, GCI_PERFORM_FLAG_ENABLE_DEBUG, 0,
+      );
+      if (!success) {
+        const msg = `Execution failed to start: ${startErr.message || `error ${startErr.number}`}`;
+        logError(session.id, msg);
+        vscode.window.showErrorMessage(msg);
+        return;
+      }
+
+      const oop = await this.pollForResultOop(session);
+      logResult(session.id, `OOP ${oop}`);
+      inspectorProvider.addRoot(session.id, oop, label);
+    } catch (e: unknown) {
+      if (e instanceof ExecutionCancelledError) return;
+      const msg = e instanceof Error ? e.message : String(e);
+      logError(session.id, msg);
+
+      if (e instanceof DebuggableError) {
+        const choice = await vscode.window.showErrorMessage(
+          `GemStone error: ${msg}`, 'Debug', 'Dismiss',
+        );
+        if (choice === 'Debug') {
+          vscode.debug.startDebugging(undefined, {
+            type: 'gemstone',
+            name: 'GemStone Error',
+            request: 'attach',
+            sessionId: session.id,
+            gsProcess: e.context.toString(),
+            errorMessage: msg,
+          }, { suppressSaveBeforeStart: true });
+        } else {
+          try { session.gci.GciTsClearStack(session.handle, e.context); } catch { /* ignore */ }
+        }
+      } else {
+        vscode.window.showErrorMessage(`GemStone execution error: ${msg}`);
+      }
+    } finally {
+      this.executing.delete(session.id);
+    }
   }
 }

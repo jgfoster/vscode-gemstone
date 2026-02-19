@@ -1,5 +1,27 @@
 import { describe, it, expect } from 'vitest';
-import { indexFile, WorkspaceIndex } from '../workspaceIndex';
+import { indexFile, WorkspaceIndex, detectFormat } from '../workspaceIndex';
+
+describe('detectFormat', () => {
+  it('returns tonel for .st files', () => {
+    expect(detectFormat('file:///path/to/File.st')).toBe('tonel');
+  });
+
+  it('returns smalltalk for gemstone: URIs', () => {
+    expect(detectFormat('gemstone://1/Globals/Array/instance/accessing/size')).toBe('smalltalk');
+  });
+
+  it('returns topaz for .gs files', () => {
+    expect(detectFormat('file:///path/to/File.gs')).toBe('topaz');
+  });
+
+  it('returns topaz for .tpz files', () => {
+    expect(detectFormat('file:///path/to/File.tpz')).toBe('topaz');
+  });
+
+  it('returns topaz as default', () => {
+    expect(detectFormat('file:///path/to/File.txt')).toBe('topaz');
+  });
+});
 
 describe('indexFile', () => {
   it('indexes a unary method', () => {

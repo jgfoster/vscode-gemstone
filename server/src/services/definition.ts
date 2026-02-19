@@ -1,8 +1,8 @@
 import { Location, Position } from 'vscode-languageserver';
 import { ParsedDocument, ParsedRegion } from '../utils/documentManager';
 import { ScopeAnalyzer } from '../utils/scopeAnalyzer';
-import { TokenType, SourceRange, createPosition } from '../lexer/tokens';
-import { findTokenAt, findKeywordSelector, isVariableInAST } from '../utils/astUtils';
+import { TokenType, createPosition } from '../lexer/tokens';
+import { findTokenAt, findSelectorAtPosition } from '../utils/astUtils';
 import { WorkspaceIndex } from '../utils/workspaceIndex';
 
 export function getDefinition(doc: ParsedDocument, position: Position, region?: ParsedRegion): Location | null {
@@ -51,45 +51,11 @@ export function getWorkspaceDefinition(
   if (!ast) return null;
 
   const tokens = region?.tokens ?? doc.tokens;
-  const token = findTokenAt(tokens, position);
-  if (!token) return null;
-
   const lineOffset = region
     ? region.region.startLine - (region.region.kind === 'smalltalk-code' ? 1 : 0)
     : 0;
 
-  let selector: string | null = null;
-
-  // Identifier that isn't a variable in the AST → unary selector
-  if (token.type === TokenType.Identifier) {
-    const astRange: SourceRange = {
-      start: { ...token.range.start, line: token.range.start.line - lineOffset },
-      end: { ...token.range.end, line: token.range.end.line - lineOffset },
-    };
-    if (!isVariableInAST(ast, astRange)) {
-      selector = token.text;
-    }
-  }
-
-  // Keyword → compose full selector from AST
-  if (token.type === TokenType.Keyword) {
-    const astRange: SourceRange = {
-      start: { ...token.range.start, line: token.range.start.line - lineOffset },
-      end: { ...token.range.end, line: token.range.end.line - lineOffset },
-    };
-    selector = findKeywordSelector(ast, astRange);
-  }
-
-  // Binary selector
-  if (
-    token.type === TokenType.BinarySelector ||
-    token.type === TokenType.Minus ||
-    token.type === TokenType.LessThan ||
-    token.type === TokenType.GreaterThan
-  ) {
-    selector = token.text;
-  }
-
+  const selector = findSelectorAtPosition(tokens, ast, position, lineOffset);
   if (!selector) return null;
 
   const implementors = index.findImplementors(selector);
@@ -115,43 +81,11 @@ export function getWorkspaceReferences(
   if (!ast) return null;
 
   const tokens = region?.tokens ?? doc.tokens;
-  const token = findTokenAt(tokens, position);
-  if (!token) return null;
-
   const lineOffset = region
     ? region.region.startLine - (region.region.kind === 'smalltalk-code' ? 1 : 0)
     : 0;
 
-  let selector: string | null = null;
-
-  // Identifier: could be a unary selector (message) or a method pattern name
-  if (token.type === TokenType.Identifier) {
-    const astRange: SourceRange = {
-      start: { ...token.range.start, line: token.range.start.line - lineOffset },
-      end: { ...token.range.end, line: token.range.end.line - lineOffset },
-    };
-    if (!isVariableInAST(ast, astRange)) {
-      selector = token.text;
-    }
-  }
-
-  if (token.type === TokenType.Keyword) {
-    const astRange: SourceRange = {
-      start: { ...token.range.start, line: token.range.start.line - lineOffset },
-      end: { ...token.range.end, line: token.range.end.line - lineOffset },
-    };
-    selector = findKeywordSelector(ast, astRange);
-  }
-
-  if (
-    token.type === TokenType.BinarySelector ||
-    token.type === TokenType.Minus ||
-    token.type === TokenType.LessThan ||
-    token.type === TokenType.GreaterThan
-  ) {
-    selector = token.text;
-  }
-
+  const selector = findSelectorAtPosition(tokens, ast, position, lineOffset);
   if (!selector) return null;
 
   const senders = index.findSenders(selector);

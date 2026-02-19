@@ -1,5 +1,5 @@
 import { ActiveSession } from './sessionManager';
-import { OOP_NIL, OOP_ILLEGAL, OOP_TAG_SMALLINT } from './gciConstants';
+import { OOP_NIL, OOP_ILLEGAL, GCI_PERFORM_FLAG_ENABLE_DEBUG } from './gciConstants';
 import { logInfo, logError } from './gciLog';
 
 const MAX_RESULT = 256 * 1024;
@@ -257,79 +257,50 @@ export function getIndexedOops(
 // ── Stepping ────────────────────────────────────────────
 
 /**
- * Performs a non-blocking step operation and polls for completion.
- * Returns the result OOP (typically the process itself on stop).
- * Throws on error (which indicates the process hit another error — this is expected).
+ * Sends a step message (e.g. gciStepOverFromLevel:) to the GsProcess
+ * via blocking GciTsPerform. The step message both configures and
+ * executes the step — it blocks until the process stops at the next
+ * step point, breakpoint, or error.
  */
-async function nbPerformAndPoll(
-  session: ActiveSession, receiver: bigint, selector: string, args: bigint[],
-): Promise<{ result: bigint; error?: { number: number; message: string; context: bigint } }> {
-  const { success, err: startErr } = session.gci.GciTsNbPerform(
-    session.handle, receiver, OOP_NIL, selector, args, 0, 0,
+function performStep(
+  session: ActiveSession, gsProcess: bigint, selector: string, args: bigint[],
+): { completed: boolean; errorMessage?: string; errorContext?: bigint } {
+  const { err } = session.gci.GciTsPerform(
+    session.handle, gsProcess, OOP_ILLEGAL, selector, args,
+    GCI_PERFORM_FLAG_ENABLE_DEBUG, 0,
   );
-  if (!success) {
-    throw new Error(startErr.message || `Failed to start ${selector}`);
-  }
-
-  // Poll for completion
-  return new Promise((resolve, reject) => {
-    const doPoll = () => {
-      const { result: pollResult } = session.gci.GciTsNbPoll(session.handle, 0);
-
-      if (pollResult === 1) {
-        // Success — process stopped at a step point
-        const { result, err } = session.gci.GciTsNbResult(session.handle);
-        if (err.number !== 0) {
-          // The step resulted in an error (e.g., hit another exception)
-          resolve({
-            result,
-            error: { number: err.number, message: err.message, context: err.context },
-          });
-        } else {
-          resolve({ result });
-        }
-        return;
-      }
-
-      if (pollResult === -1) {
-        // Error during polling
-        const { err } = session.gci.GciTsNbResult(session.handle);
-        resolve({
-          result: 0n,
-          error: { number: err.number, message: err.message, context: err.context },
-        });
-        return;
-      }
-
-      // Still executing — poll again
-      setTimeout(doPoll, 50);
+  if (err.number !== 0) {
+    return {
+      completed: false,
+      errorMessage: err.message || `GemStone error ${err.number}`,
+      errorContext: err.context,
     };
-    doPoll();
-  });
+  }
+  return { completed: true };
 }
 
-export async function stepOver(
+export function stepOver(
   session: ActiveSession, gsProcess: bigint, level: number,
-): Promise<void> {
+): { completed: boolean; errorMessage?: string; errorContext?: bigint } {
   const levelOop = intToOop(session, level);
   logInfo(`[Session ${session.id}] Debug: stepOver from level ${level}`);
-  await nbPerformAndPoll(session, gsProcess, 'gciStepOverFromLevel:', [levelOop]);
+  return performStep(session, gsProcess, 'gciStepOverFromLevel:', [levelOop]);
 }
 
-export async function stepInto(
+export function stepInto(
   session: ActiveSession, gsProcess: bigint, level: number,
-): Promise<void> {
+): { completed: boolean; errorMessage?: string; errorContext?: bigint } {
   const levelOop = intToOop(session, level);
   logInfo(`[Session ${session.id}] Debug: stepInto from level ${level}`);
-  await nbPerformAndPoll(session, gsProcess, 'gciStepIntoFromLevel:', [levelOop]);
+  return performStep(session, gsProcess, 'gciStepIntoFromLevel:', [levelOop]);
 }
 
-export async function stepOut(
+export function stepOut(
   session: ActiveSession, gsProcess: bigint, level: number,
-): Promise<void> {
+): { completed: boolean; errorMessage?: string; errorContext?: bigint } {
   const levelOop = intToOop(session, level);
   logInfo(`[Session ${session.id}] Debug: stepThru from level ${level}`);
-  await nbPerformAndPoll(session, gsProcess, 'gciStepThruFromLevel:', [levelOop]);
+  return performStep(session, gsProcess, 'gciStepThruFromLevel:', [levelOop]);
 }
 
 // ── Continue / Terminate ────────────────────────────────
@@ -345,7 +316,7 @@ export function continueExecution(
 ): { completed: boolean; errorMessage?: string; errorContext?: bigint } {
   logInfo(`[Session ${session.id}] Debug: continue`);
   const { err } = session.gci.GciTsContinueWith(
-    session.handle, gsProcess, OOP_NIL, null, 0,
+    session.handle, gsProcess, OOP_NIL, null, GCI_PERFORM_FLAG_ENABLE_DEBUG,
   );
   if (err.number !== 0) {
     return {

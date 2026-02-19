@@ -36,7 +36,7 @@ const TOPAZ_COMMANDS = [
   'expectvalue', 'fileout', 'filein', 'iferr', 'iferror', 'input',
   'level', 'limit', 'list', 'login', 'logout', 'lookup',
   'method', 'obj', 'object', 'omit', 'output', 'pausealiasing',
-  'print', 'printit', 'protect', 'quit', 'releaseall', 'removeallmethods',
+  'print', 'printit', 'protect', 'quit', 'releaseall', 'removeallclassmethods', 'removeallmethods',
   'run', 'send', 'set', 'shell', 'spawn', 'stack', 'stk',
   'time', 'topaz', 'where',
 ];

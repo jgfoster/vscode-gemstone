@@ -1,21 +1,35 @@
 {
-  "name": "gemstone-topaz",
-  "displayName": "GemStone Smalltalk",
-  "description": "Language support for GemStone Smalltalk (Topaz and Tonel files)",
-  "version": "1.0.3",
+  "name": "gemstone-ide",
+  "displayName": "GemStone Smalltalk IDE",
+	"description": "GemStone/S IDE for Visual Studio Code",
+  "version": "1.0.4",
   "publisher": "gemtalksystems",
   "license": "MIT",
+  "author": "James Foster",
+  "homepage": "https://github.com/jgfoster/vscode-gemstone#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jgfoster/vscode_topaz"
+    "url": "https://github.com/jgfoster/vscode-gemstone"
+  },
+  "bugs": {
+    "url": "https://github.com/jgfoster/vscode-gemstone/issues"
   },
   "engines": {
     "vscode": "^1.85.0"
   },
   "icon": "resources/gemstone-icon.png",
   "categories": [
+		"Debuggers",
     "Programming Languages"
   ],
+	"keywords": [
+		"GemStone",
+		"Smalltalk",
+		"Database",
+		"Object Database",
+		"IDE"
+	],
+  "extensionKind": ["workspace"],
   "activationEvents": [],
   "main": "./client/out/extension.js",
   "contributes": {
@@ -83,6 +97,12 @@
             "additionalProperties": {
               "type": "string"
             }
+          },
+          "gemstone.maxEnvironment": {
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "description": "Maximum method dictionary environment to show in the browser (0 = standard Smalltalk only, 2 = show environments 0–2)"
           },
           "gemstone.logins": {
             "type": "array",
@@ -215,17 +235,26 @@
         {
           "id": "gemstoneLogins",
           "name": "Logins",
-          "type": "tree"
+          "type": "tree",
+          "icon": "$(key)"
         },
         {
           "id": "gemstoneSessions",
           "name": "Sessions",
-          "type": "tree"
+          "type": "tree",
+          "icon": "$(plug)"
         },
         {
           "id": "gemstoneBrowser",
           "name": "Browser",
-          "type": "tree"
+          "type": "tree",
+          "icon": "$(list-tree)"
+        },
+        {
+          "id": "gemstoneInspector",
+          "name": "Inspector",
+          "type": "tree",
+          "icon": "$(eye)"
         }
       ]
     },
@@ -233,6 +262,10 @@
       {
         "view": "gemstoneBrowser",
         "contents": "No GemStone session selected.\n[Select a session](command:gemstone.selectSession) to browse classes and methods."
+      },
+      {
+        "view": "gemstoneInspector",
+        "contents": "No objects inspected yet.\nSelect code and press Cmd+I to inspect."
       }
     ],
     "commands": [
@@ -303,14 +336,55 @@
         "icon": "$(run)"
       },
       {
+        "command": "gemstone.inspectIt",
+        "title": "Inspect It",
+        "category": "GemStone",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "gemstone.inspectGlobal",
+        "title": "Inspect",
+        "category": "GemStone"
+      },
+      {
+        "command": "gemstone.removeInspectorItem",
+        "title": "Remove",
+        "category": "GemStone",
+        "icon": "$(close)"
+      },
+      {
+        "command": "gemstone.clearInspector",
+        "title": "Clear All",
+        "category": "GemStone",
+        "icon": "$(clear-all)"
+      },
+      {
         "command": "gemstone.refreshBrowser",
         "title": "Refresh Browser",
         "category": "GemStone",
         "icon": "$(refresh)"
       },
       {
+        "command": "gemstone.refreshTests",
+        "title": "Refresh SUnit Tests",
+        "category": "GemStone",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "gemstone.runSunitClass",
+        "title": "Run SUnit Tests",
+        "category": "GemStone",
+        "icon": "$(testing-run-icon)"
+      },
+      {
         "command": "gemstone.newClass",
         "title": "New Class",
+        "category": "GemStone",
+        "icon": "$(add)"
+      },
+      {
+        "command": "gemstone.newClassCategory",
+        "title": "New Class Category",
         "category": "GemStone",
         "icon": "$(add)"
       },
@@ -364,6 +438,34 @@
         "title": "Move Down",
         "category": "GemStone",
         "icon": "$(arrow-down)"
+      },
+      {
+        "command": "gemstone.searchMethods",
+        "title": "Search Method Source",
+        "category": "GemStone",
+        "icon": "$(search)"
+      },
+      {
+        "command": "gemstone.sendersOf",
+        "title": "Senders Of...",
+        "category": "GemStone"
+      },
+      {
+        "command": "gemstone.implementorsOf",
+        "title": "Implementors Of...",
+        "category": "GemStone"
+      },
+      {
+        "command": "gemstone.classHierarchy",
+        "title": "Class Hierarchy",
+        "category": "GemStone",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "gemstone.toggleSelectorBreakpoint",
+        "title": "Toggle Selector Breakpoint",
+        "category": "GemStone",
+        "icon": "$(debug-breakpoint)"
       }
     ],
     "menus": {
@@ -374,6 +476,11 @@
           "group": "navigation"
         },
         {
+          "command": "gemstone.searchMethods",
+          "when": "view == gemstoneBrowser",
+          "group": "navigation"
+        },
+        {
           "command": "gemstone.addDictionary",
           "when": "view == gemstoneBrowser",
           "group": "navigation"
@@ -381,6 +488,11 @@
         {
           "command": "gemstone.refreshBrowser",
           "when": "view == gemstoneBrowser",
+          "group": "navigation"
+        },
+        {
+          "command": "gemstone.clearInspector",
+          "when": "view == gemstoneInspector",
           "group": "navigation"
         }
       ],
@@ -405,7 +517,7 @@
           "when": "view == gemstoneLogins"
         },
         {
-          "command": "gemstone.newClass",
+          "command": "gemstone.newClassCategory",
           "when": "view == gemstoneBrowser && viewItem == gemstoneDictionary",
           "group": "inline@1"
         },
@@ -420,7 +532,7 @@
           "group": "inline@3"
         },
         {
-          "command": "gemstone.newClass",
+          "command": "gemstone.newClassCategory",
           "when": "view == gemstoneBrowser && viewItem == gemstoneDictionary"
         },
         {
@@ -430,6 +542,15 @@
         {
           "command": "gemstone.moveDictionaryDown",
           "when": "view == gemstoneBrowser && viewItem == gemstoneDictionary"
+        },
+        {
+          "command": "gemstone.newClass",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneClassCategoryNamed",
+          "group": "inline@1"
+        },
+        {
+          "command": "gemstone.newClass",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneClassCategoryNamed"
         },
         {
           "command": "gemstone.newMethod",
@@ -463,6 +584,14 @@
           "when": "view == gemstoneBrowser && viewItem == gemstoneMethod"
         },
         {
+          "command": "gemstone.sendersOf",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneMethod"
+        },
+        {
+          "command": "gemstone.implementorsOf",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneMethod"
+        },
+        {
           "command": "gemstone.renameCategory",
           "when": "view == gemstoneBrowser && viewItem == gemstoneCategory"
         },
@@ -478,6 +607,15 @@
         {
           "command": "gemstone.moveClass",
           "when": "view == gemstoneBrowser && viewItem == gemstoneClass"
+        },
+        {
+          "command": "gemstone.classHierarchy",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneClass"
+        },
+        {
+          "command": "gemstone.runSunitClass",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneClass",
+          "group": "2_test"
         },
         {
           "command": "gemstone.sessionCommit",
@@ -498,6 +636,15 @@
           "command": "gemstone.selectSession",
           "when": "view == gemstoneSessions && viewItem == gemstoneSession",
           "group": "inline@4"
+        },
+        {
+          "command": "gemstone.removeInspectorItem",
+          "when": "view == gemstoneInspector && viewItem == gemstoneInspectorRoot",
+          "group": "inline@1"
+        },
+        {
+          "command": "gemstone.inspectGlobal",
+          "when": "view == gemstoneBrowser && viewItem == gemstoneGlobal"
         }
       ],
       "editor/context": [
@@ -507,9 +654,29 @@
           "group": "1_modification@0"
         },
         {
-          "command": "gemstone.executeIt",
+          "command": "gemstone.inspectIt",
           "when": "editorTextFocus && gemstone.hasActiveSession",
           "group": "1_modification@1"
+        },
+        {
+          "command": "gemstone.executeIt",
+          "when": "editorTextFocus && gemstone.hasActiveSession",
+          "group": "1_modification@2"
+        },
+        {
+          "command": "gemstone.sendersOf",
+          "when": "editorTextFocus && gemstone.hasActiveSession",
+          "group": "2_navigation@0"
+        },
+        {
+          "command": "gemstone.implementorsOf",
+          "when": "editorTextFocus && gemstone.hasActiveSession",
+          "group": "2_navigation@1"
+        },
+        {
+          "command": "gemstone.toggleSelectorBreakpoint",
+          "when": "editorTextFocus && gemstone.hasActiveSession && resourceScheme == gemstone",
+          "group": "3_gemstoneBreakpoints@0"
         }
       ]
     },
@@ -546,6 +713,11 @@
         }
       }
     ],
+    "breakpoints": [
+      {
+        "language": "gemstone-smalltalk"
+      }
+    ],
     "keybindings": [
       {
         "command": "gemstone.displayIt",
@@ -557,6 +729,12 @@
         "command": "gemstone.executeIt",
         "key": "ctrl+e",
         "mac": "cmd+e",
+        "when": "editorTextFocus && gemstone.hasActiveSession"
+      },
+      {
+        "command": "gemstone.inspectIt",
+        "key": "ctrl+i",
+        "mac": "cmd+i",
         "when": "editorTextFocus && gemstone.hasActiveSession"
       }
     ]

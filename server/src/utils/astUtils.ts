@@ -153,6 +153,58 @@ function isVarInMessage(msg: MessageNode, range: SourceRange): boolean {
   return false;
 }
 
+// ── Selector at position (for definition, references, custom LSP) ──
+
+/**
+ * Find the selector at a given document position.
+ * Returns the composed selector string (e.g. 'at:put:') or null
+ * if the token at the position is not a selector (e.g. it's a variable or literal).
+ */
+export function findSelectorAtPosition(
+  tokens: Token[],
+  ast: MethodNode | null,
+  position: Position,
+  lineOffset: number,
+): string | null {
+  const token = findTokenAt(tokens, position);
+  if (!token || !ast) return null;
+
+  // Identifier that isn't a variable in the AST → unary selector
+  if (token.type === TokenType.Identifier) {
+    const astRange = offsetRangeBack(token.range, lineOffset);
+    if (!isVariableInAST(ast, astRange)) {
+      return token.text;
+    }
+    return null;
+  }
+
+  // Keyword → compose full selector from AST
+  if (token.type === TokenType.Keyword) {
+    const astRange = offsetRangeBack(token.range, lineOffset);
+    return findKeywordSelector(ast, astRange);
+  }
+
+  // Binary selector
+  if (
+    token.type === TokenType.BinarySelector ||
+    token.type === TokenType.Minus ||
+    token.type === TokenType.LessThan ||
+    token.type === TokenType.GreaterThan
+  ) {
+    return token.text;
+  }
+
+  return null;
+}
+
+/** Shift a document-level range back to AST-local coordinates. */
+function offsetRangeBack(range: SourceRange, lineOffset: number): SourceRange {
+  return {
+    start: { ...range.start, line: range.start.line - lineOffset },
+    end: { ...range.end, line: range.end.line - lineOffset },
+  };
+}
+
 // ── Sent selector collection (for workspace index) ──────────
 
 export function collectSentSelectors(method: MethodNode): Set<string> {

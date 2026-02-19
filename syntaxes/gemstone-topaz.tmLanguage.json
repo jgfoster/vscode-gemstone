@@ -48,7 +48,7 @@
       "match": "^\\s*!.*$"
     },
     "topaz-command": {
-      "match": "^\\s*(?i)(abort|begin|category|commit|display|edit|errorcount|exec|exit|expecterror|expectvalue|fileout|filein|iferr(?:or)?|input|level|limit|list|login|logout|lookup|obj(?:ect)?|omit|output|pausealiasing|protect|quit|releaseall|removeallmethods|send|set|shell|spawn|stack|stk|time|topaz|where)\\b(.*)?$",
+      "match": "^\\s*(?i)(abort|begin|category|commit|display|edit|errorcount|exec|exit|expecterror|expectvalue|fileout|filein|iferr(?:or)?|input|level|limit|list|login|logout|lookup|obj(?:ect)?|omit|output|pausealiasing|protect|quit|releaseall|removeall(?:class)?methods|send|set|shell|spawn|stack|stk|time|topaz|where)\\b(.*)?$",
       "captures": {
         "1": { "name": "keyword.other.topaz.gemstone-smalltalk" },
         "2": { "name": "string.unquoted.topaz-args.gemstone-smalltalk" }

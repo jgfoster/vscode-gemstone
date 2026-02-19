@@ -2,6 +2,13 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 vi.mock('vscode', () => import('../__mocks__/vscode'));
 
+vi.mock('../browserQueries', () => ({
+  getSourceOffsets: vi.fn(() => [0, 12]),
+  setBreakAtStepPoint: vi.fn(),
+  clearBreakAtStepPoint: vi.fn(),
+  clearAllBreaks: vi.fn(),
+}));
+
 vi.mock('../debugQueries', () => ({
   getStackDepth: vi.fn(() => 3),
   getFrameInfo: vi.fn((session: unknown, gsProcess: bigint, level: number) => ({
@@ -39,16 +46,18 @@ vi.mock('../debugQueries', () => ({
   getIndexedOops: vi.fn(() => []),
   clearStack: vi.fn(),
   continueExecution: vi.fn(() => ({ completed: true })),
-  stepOver: vi.fn(),
-  stepInto: vi.fn(),
-  stepOut: vi.fn(),
+  stepOver: vi.fn(() => ({ completed: false })),
+  stepInto: vi.fn(() => ({ completed: false })),
+  stepOut: vi.fn(() => ({ completed: false })),
   trimStackToLevel: vi.fn(),
   evaluateInFrame: vi.fn(() => '42'),
 }));
 
 import { GemStoneDebugSession } from '../gemstoneDebugSession';
 import { SessionManager } from '../sessionManager';
+import { BreakpointManager } from '../breakpointManager';
 import * as debugQueries from '../debugQueries';
+import * as browserQueries from '../browserQueries';
 
 // Capture DAP messages sent by the debug session
 interface DapMessage {
@@ -60,7 +69,7 @@ interface DapMessage {
   message?: string;
 }
 
-function createTestSession() {
+function createTestSession(breakpointManager?: BreakpointManager) {
   const sent: DapMessage[] = [];
 
   const mockSessionManager = {
@@ -71,7 +80,7 @@ function createTestSession() {
     onDidChangeSelection: vi.fn(() => ({ dispose: () => {} })),
   } as unknown as SessionManager;
 
-  const session = new GemStoneDebugSession(mockSessionManager);
+  const session = new GemStoneDebugSession(mockSessionManager, breakpointManager);
 
   // Intercept DAP output by overriding sendResponse and sendEvent
   (session as unknown as Record<string, unknown>).sendResponse = vi.fn((resp: DapMessage) => {
@@ -528,6 +537,187 @@ describe('GemStoneDebugSession', () => {
 
       expect(debugQueries.clearStack).toHaveBeenCalled();
       expect(sent).toContainEqual(expect.objectContaining({ type: 'event', event: 'terminated' }));
+    });
+  });
+
+  describe('configurationDoneRequest', () => {
+    it('sends response without error', () => {
+      const { session, sent } = createTestSession();
+      const response = makeResponse('configurationDone');
+      callRequest(session, 'configurationDoneRequest', response, {});
+
+      expect(sent).toContainEqual(expect.objectContaining({ type: 'response', command: 'configurationDone' }));
+    });
+  });
+
+  describe('initializeRequest capabilities', () => {
+    it('reports supportsConfigurationDoneRequest', () => {
+      const { session } = createTestSession();
+      const response = makeResponse('initialize');
+      callRequest(session, 'initializeRequest', response, { adapterID: 'gemstone' });
+
+      expect(response.body).toMatchObject({
+        supportsConfigurationDoneRequest: true,
+      });
+    });
+  });
+
+  describe('setBreakpointsRequest', () => {
+    beforeEach(() => {
+      vi.mocked(browserQueries.getSourceOffsets).mockReset();
+      vi.mocked(browserQueries.setBreakAtStepPoint).mockReset();
+      vi.mocked(browserQueries.clearAllBreaks).mockReset();
+      vi.mocked(browserQueries.getSourceOffsets).mockReturnValue([0, 12]);
+    });
+
+    it('returns empty breakpoints when no session is attached', () => {
+      const { session } = createTestSession();
+      const response = makeResponse('setBreakpoints');
+      callRequest(session, 'setBreakpointsRequest', response, {
+        source: { path: 'gemstone://1/Globals/Array/instance/accessing/at%3A' },
+        breakpoints: [{ line: 1 }],
+      });
+
+      const body = response.body as { breakpoints: unknown[] };
+      expect(body.breakpoints).toHaveLength(0);
+    });
+
+    it('sets breakpoints via sourceReference path', () => {
+      // getMethodSource returns two-line method, getMethodInfo provides class/selector
+      vi.mocked(debugQueries.getMethodSource).mockReturnValue('at: index\n  ^ self basicAt: index');
+      vi.mocked(debugQueries.getMethodInfo).mockReturnValue({
+        className: 'Array',
+        selector: 'at:',
+      });
+
+      const { session } = createTestSession();
+      callRequest(session, 'attachRequest', makeResponse('attach'), {
+        sessionId: 1, gsProcess: '12345',
+      });
+      // Trigger stackTrace to populate sourceRefMap
+      callRequest(session, 'stackTraceRequest', makeResponse('stackTrace'), { threadId: 1 });
+
+      const response = makeResponse('setBreakpoints');
+      callRequest(session, 'setBreakpointsRequest', response, {
+        source: { sourceReference: 1 },
+        breakpoints: [{ line: 1 }, { line: 2 }],
+      });
+
+      const body = response.body as { breakpoints: Array<{ verified: boolean; line: number }> };
+      expect(body.breakpoints).toHaveLength(2);
+      expect(body.breakpoints[0].verified).toBe(true);
+      expect(body.breakpoints[0].line).toBe(1);
+      expect(body.breakpoints[1].verified).toBe(true);
+      expect(body.breakpoints[1].line).toBe(2);
+
+      expect(browserQueries.clearAllBreaks).toHaveBeenCalledTimes(1);
+      expect(browserQueries.setBreakAtStepPoint).toHaveBeenCalledTimes(2);
+    });
+
+    it('returns unverified when setBreakAtStepPoint fails via sourceReference', () => {
+      vi.mocked(debugQueries.getMethodSource).mockReturnValue('foo\n  ^ 1');
+      vi.mocked(debugQueries.getMethodInfo).mockReturnValue({
+        className: 'Foo',
+        selector: 'foo',
+      });
+      vi.mocked(browserQueries.setBreakAtStepPoint).mockImplementation(() => {
+        throw new Error('GCI error');
+      });
+
+      const { session } = createTestSession();
+      callRequest(session, 'attachRequest', makeResponse('attach'), {
+        sessionId: 1, gsProcess: '12345',
+      });
+      callRequest(session, 'stackTraceRequest', makeResponse('stackTrace'), { threadId: 1 });
+
+      const response = makeResponse('setBreakpoints');
+      callRequest(session, 'setBreakpointsRequest', response, {
+        source: { sourceReference: 1 },
+        breakpoints: [{ line: 1 }],
+      });
+
+      const body = response.body as { breakpoints: Array<{ verified: boolean }> };
+      expect(body.breakpoints).toHaveLength(1);
+      expect(body.breakpoints[0].verified).toBe(false);
+    });
+
+    it('returns unverified for all lines when getMethodSource throws via sourceReference', () => {
+      const { session } = createTestSession();
+      callRequest(session, 'attachRequest', makeResponse('attach'), {
+        sessionId: 1, gsProcess: '12345',
+      });
+      // stackTraceRequest populates sourceRefMap (doesn't call getMethodSource)
+      callRequest(session, 'stackTraceRequest', makeResponse('stackTrace'), { threadId: 1 });
+
+      // Now make getMethodSource throw for setBreakpointsRequest
+      vi.mocked(debugQueries.getMethodSource).mockImplementation(() => {
+        throw new Error('source not available');
+      });
+
+      const response = makeResponse('setBreakpoints');
+      callRequest(session, 'setBreakpointsRequest', response, {
+        source: { sourceReference: 1 },
+        breakpoints: [{ line: 1 }, { line: 2 }],
+      });
+
+      const body = response.body as { breakpoints: Array<{ verified: boolean }> };
+      expect(body.breakpoints).toHaveLength(2);
+      expect(body.breakpoints[0].verified).toBe(false);
+      expect(body.breakpoints[1].verified).toBe(false);
+    });
+
+    it('delegates to breakpointManager for gemstone:// path', () => {
+      const mockBPManager = {
+        setBreakpointsForSource: vi.fn(() => [
+          { stepPoint: 1, actualLine: 1, verified: true },
+          { stepPoint: 2, actualLine: 3, verified: true },
+        ]),
+      } as unknown as BreakpointManager;
+
+      const { session } = createTestSession(mockBPManager);
+      callRequest(session, 'attachRequest', makeResponse('attach'), {
+        sessionId: 1, gsProcess: '12345',
+      });
+
+      const response = makeResponse('setBreakpoints');
+      callRequest(session, 'setBreakpointsRequest', response, {
+        source: { path: 'gemstone://1/Globals/Array/instance/accessing/at%3A' },
+        breakpoints: [{ line: 1 }, { line: 2 }],
+      });
+
+      const body = response.body as { breakpoints: Array<{ verified: boolean; line: number }> };
+      expect(body.breakpoints).toHaveLength(2);
+      expect(body.breakpoints[0]).toMatchObject({ verified: true, line: 1 });
+      expect(body.breakpoints[1]).toMatchObject({ verified: true, line: 3 });
+      expect(mockBPManager.setBreakpointsForSource).toHaveBeenCalledTimes(1);
+    });
+
+    it('handles class-side methods via sourceReference', () => {
+      vi.mocked(debugQueries.getMethodSource).mockReturnValue('new\n  ^ super new');
+      vi.mocked(debugQueries.getMethodInfo).mockReturnValue({
+        className: 'Array class',
+        selector: 'new',
+      });
+      vi.mocked(browserQueries.getSourceOffsets).mockReturnValue([0, 6]);
+
+      const { session } = createTestSession();
+      callRequest(session, 'attachRequest', makeResponse('attach'), {
+        sessionId: 1, gsProcess: '12345',
+      });
+      callRequest(session, 'stackTraceRequest', makeResponse('stackTrace'), { threadId: 1 });
+
+      const response = makeResponse('setBreakpoints');
+      callRequest(session, 'setBreakpointsRequest', response, {
+        source: { sourceReference: 1 },
+        breakpoints: [{ line: 1 }],
+      });
+
+      expect(browserQueries.getSourceOffsets).toHaveBeenCalledWith(
+        expect.anything(), 'Array', true, 'new',
+      );
+      expect(browserQueries.clearAllBreaks).toHaveBeenCalledWith(
+        expect.anything(), 'Array', true, 'new',
+      );
     });
   });
 });

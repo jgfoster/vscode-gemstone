@@ -4,10 +4,10 @@ import { Parser } from '../parser/parser';
 import { ParseError } from '../parser/errors';
 import { MethodNode } from '../parser/ast';
 import { StatementNode } from '../parser/ast';
-import { parseTopazDocument, TopazRegion, findRegionAtLine, toRegionPosition } from '../topaz/topazParser';
+import { parseTopazDocument, TopazRegion, RegionKind, findRegionAtLine, toRegionPosition } from '../topaz/topazParser';
 import { parseTonelDocument } from '../tonel/tonelParser';
 
-export type DocumentFormat = 'topaz' | 'tonel';
+export type DocumentFormat = 'topaz' | 'tonel' | 'smalltalk';
 
 export interface ParsedRegion {
   region: TopazRegion;
@@ -42,7 +42,9 @@ export class DocumentManager {
   update(uri: string, version: number, text: string, format: DocumentFormat = 'topaz'): ParsedDocument {
     const topazRegions = format === 'tonel'
       ? parseTonelDocument(text)
-      : parseTopazDocument(text);
+      : format === 'smalltalk'
+        ? parseSmalltalkRegions(uri, text)
+        : parseTopazDocument(text);
     const parsedRegions: ParsedRegion[] = [];
     const allErrors: ParseError[] = [];
     const allTokens: Token[] = [];
@@ -155,4 +157,44 @@ function offsetRange(range: SourceRange, lineOffset: number): SourceRange {
     createPosition(range.start.offset, range.start.line + lineOffset, range.start.column),
     createPosition(range.end.offset, range.end.line + lineOffset, range.end.column),
   );
+}
+
+/**
+ * Create a single region for a raw Smalltalk document (gemstone:// URI).
+ * Determines method vs code based on the URI path structure.
+ */
+function parseSmalltalkRegions(uri: string, text: string): TopazRegion[] {
+  const lines = text.split('\n');
+  const endLine = Math.max(0, lines.length - 1);
+
+  let kind: RegionKind = 'smalltalk-method';
+  let className: string | undefined;
+  let command: string | undefined;
+
+  try {
+    const url = new URL(uri);
+    const parts = url.pathname.split('/').map(decodeURIComponent);
+    // parts[0] = '' (leading slash)
+    // Method: /dict/class/side/category/selector (6 parts)
+    // Definition: /dict/class/definition (4 parts)
+    if (parts.length === 6) {
+      kind = 'smalltalk-method';
+      className = parts[2];
+      command = parts[3] === 'class' ? 'classmethod' : 'method';
+    } else {
+      kind = 'smalltalk-code';
+      if (parts.length >= 3) className = parts[2];
+    }
+  } catch {
+    // If URI parsing fails, default to method
+  }
+
+  return [{
+    kind,
+    startLine: 0,
+    endLine,
+    text,
+    className,
+    command,
+  }];
 }

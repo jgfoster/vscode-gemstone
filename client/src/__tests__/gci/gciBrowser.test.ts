@@ -64,7 +64,8 @@ describe('Browser Queries (integration)', () => {
 
   describe('getClassNames', () => {
     it('returns class names from Globals', () => {
-      const names = queries.getClassNames(session, 'Globals');
+      const globalsIndex = queries.getDictionaryNames(session).indexOf('Globals') + 1;
+      const names = queries.getClassNames(session, globalsIndex);
       expect(Array.isArray(names)).toBe(true);
       expect(names.length).toBeGreaterThan(0);
       // Array and String should be in Globals
@@ -73,7 +74,8 @@ describe('Browser Queries (integration)', () => {
     });
 
     it('returns sorted names', () => {
-      const names = queries.getClassNames(session, 'Globals');
+      const globalsIndex = queries.getDictionaryNames(session).indexOf('Globals') + 1;
+      const names = queries.getClassNames(session, globalsIndex);
       const sorted = [...names].sort();
       expect(names).toEqual(sorted);
     });
@@ -171,7 +173,8 @@ describe('Browser Queries (integration)', () => {
         // ignore if not there
       }
       try {
-        queries.deleteClass(session, 'UserGlobals', testClass);
+        const ugIndex = queries.getDictionaryNames(session).indexOf('UserGlobals') + 1;
+        queries.deleteClass(session, ugIndex, testClass);
       } catch {
         // ignore
       }

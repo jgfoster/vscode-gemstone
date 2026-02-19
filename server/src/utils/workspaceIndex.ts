@@ -17,9 +17,10 @@ export interface MethodEntry {
   sentSelectors: Set<string>;
 }
 
-/** Detect document format from URI file extension. */
+/** Detect document format from URI file extension or scheme. */
 export function detectFormat(uri: string): DocumentFormat {
   if (uri.endsWith('.st')) return 'tonel';
+  if (uri.startsWith('gemstone:')) return 'smalltalk';
   return 'topaz';
 }
 

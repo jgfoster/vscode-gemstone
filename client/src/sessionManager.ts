@@ -32,6 +32,10 @@ export class SessionManager {
     vscode.commands.executeCommand('setContext', 'gemstone.hasActiveSession', true);
   }
 
+  getSession(id: number): ActiveSession | undefined {
+    return this.sessions.get(id);
+  }
+
   getSelectedSession(): ActiveSession | undefined {
     if (this._selectedId !== null) {
       return this.sessions.get(this._selectedId);
