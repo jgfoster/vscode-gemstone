@@ -240,6 +240,19 @@ export class SystemBrowser {
         case 'ctxImplementorsOf':
           this.handleImplementorsOf();
           break;
+        // Drag-and-drop commands
+        case 'dropMethodOnCategory':
+          this.handleDropMethodOnCategory(
+            message.selector as string,
+            message.category as string,
+          );
+          break;
+        case 'dropClassOnDictionary':
+          this.handleDropClassOnDictionary(
+            message.className as string,
+            message.dictName as string,
+          );
+          break;
       }
     } catch (e: unknown) {
       this.postError(e);
@@ -739,6 +752,43 @@ export class SystemBrowser {
     });
   }
 
+  // ── Drag-and-drop handlers ──────────────────────
+
+  private handleDropMethodOnCategory(selector: string, category: string): void {
+    const className = this.state.selectedClass;
+    if (!className) return;
+
+    queries.recategorizeMethod(this.session, className, this.state.isMeta, selector, category);
+    const dictIndex = this.state.selectedDictIndex;
+    if (dictIndex) {
+      this.envCache.delete(`${dictIndex}/${className}`);
+    }
+    this.loadMethodCategories();
+    if (this.state.selectedMethodCategory) {
+      this.handleSelectMethodCategory(this.state.selectedMethodCategory);
+    }
+  }
+
+  private handleDropClassOnDictionary(className: string, dictName: string): void {
+    const srcIndex = this.state.selectedDictIndex;
+    if (!srcIndex) return;
+
+    const destIndex = this.state.dictionaries.indexOf(dictName) + 1;
+    if (destIndex < 1 || destIndex === srcIndex) return;
+
+    queries.moveClass(this.session, srcIndex, destIndex, className);
+    this.dictEntryCache.delete(srcIndex);
+    this.dictEntryCache.delete(destIndex);
+    this.envCache.clear();
+    this.state.selectedClass = null;
+    this.state.selectedMethodCategory = null;
+    this.state.selectedMethod = null;
+    this.clearDimming();
+
+    this.handleSelectCategory(this.state.selectedCategory || '** ALL CLASSES **');
+    vscode.window.showInformationMessage(`Moved ${className} to ${dictName}.`);
+  }
+
   // ── Data helpers ──────────────────────────────────────────
 
   private getCachedDictEntries(dictIndex: number): queries.DictEntry[] {
@@ -1106,6 +1156,20 @@ export class SystemBrowser {
       background: var(--vscode-menu-separatorBackground, var(--vscode-panel-border));
     }
 
+    .column-list .item.drag-over {
+      outline: 1px solid var(--vscode-focusBorder);
+      outline-offset: -1px;
+      background-color: var(--vscode-list-hoverBackground);
+    }
+
+    .column-list .item[draggable="true"] {
+      cursor: grab;
+    }
+
+    .column-list .item.dragging {
+      opacity: 0.4;
+    }
+
     .loading {
       padding: 8px;
       color: var(--vscode-descriptionForeground);
@@ -1191,7 +1255,7 @@ export class SystemBrowser {
     const errorBanner = document.getElementById('errorBanner');
 
     // ── Populate a column with items ───────────────
-    function populateColumn(listEl, items, virtualItems) {
+    function populateColumn(listEl, items, virtualItems, draggable) {
       listEl.innerHTML = '';
       const virtualSet = new Set(virtualItems || []);
       for (const item of items) {
@@ -1199,6 +1263,9 @@ export class SystemBrowser {
         div.className = 'item' + (virtualSet.has(item) ? ' virtual' : '');
         div.textContent = item;
         div.dataset.value = item;
+        if (draggable && !virtualSet.has(item)) {
+          div.draggable = true;
+        }
         listEl.appendChild(div);
       }
     }
@@ -1302,6 +1369,63 @@ export class SystemBrowser {
           r.checked = (r.value === e.target.value);
         });
       });
+    });
+
+    // ── Drag-and-drop ───────────────────────────────
+    let dragSource = null;  // { type: 'method'|'class', value: string }
+
+    function setupDragSource(listEl, type) {
+      listEl.addEventListener('dragstart', (e) => {
+        const item = e.target.closest('.item');
+        if (!item || !item.draggable) return;
+        dragSource = { type, value: item.dataset.value };
+        item.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', item.dataset.value);
+      });
+      listEl.addEventListener('dragend', (e) => {
+        const item = e.target.closest('.item');
+        if (item) item.classList.remove('dragging');
+        dragSource = null;
+      });
+    }
+
+    function setupDropTarget(listEl, acceptType, onDrop) {
+      listEl.addEventListener('dragover', (e) => {
+        if (!dragSource || dragSource.type !== acceptType) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const item = e.target.closest('.item');
+        // Clear previous drag-over highlights
+        listEl.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+        if (item) item.classList.add('drag-over');
+      });
+      listEl.addEventListener('dragleave', (e) => {
+        const item = e.target.closest('.item');
+        if (item) item.classList.remove('drag-over');
+      });
+      listEl.addEventListener('drop', (e) => {
+        e.preventDefault();
+        listEl.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+        if (!dragSource || dragSource.type !== acceptType) return;
+        const item = e.target.closest('.item');
+        if (!item) return;
+        onDrop(dragSource.value, item.dataset.value);
+        dragSource = null;
+      });
+    }
+
+    // Methods can be dragged onto method categories
+    setupDragSource(cols.methods, 'method');
+    setupDropTarget(cols.methodCats, 'method', (selector, category) => {
+      if (category === '** ALL METHODS **') return;
+      vscode.postMessage({ command: 'dropMethodOnCategory', selector, category });
+    });
+
+    // Classes can be dragged onto dictionaries
+    setupDragSource(cols.classes, 'class');
+    setupDropTarget(cols.dicts, 'class', (className, dictName) => {
+      vscode.postMessage({ command: 'dropClassOnDictionary', className, dictName });
     });
 
     // ── Context menu ────────────────────────────────
@@ -1447,7 +1571,7 @@ export class SystemBrowser {
           break;
         case 'loadClasses':
           clearFrom('classes');
-          populateColumn(cols.classes, msg.items, []);
+          populateColumn(cols.classes, msg.items, [], true);
           break;
         case 'loadMethodCategories':
           clearFrom('methodCats');
@@ -1455,7 +1579,7 @@ export class SystemBrowser {
           break;
         case 'loadMethods':
           cols.methods.innerHTML = '';
-          populateColumn(cols.methods, msg.items, []);
+          populateColumn(cols.methods, msg.items, [], true);
           break;
         case 'setViewMode':
           if (msg.mode === 'hierarchy') {

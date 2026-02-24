@@ -13,10 +13,6 @@
 
 ## System Browser
 
-### Drag-and-Drop in Webview
-- Drag methods between categories to recategorize
-- Drag classes between dictionaries to move
-
 ### Multiple Environments
 When `gemstone.maxEnvironment > 0`, show environment tabs or a selector in the method categories column to browse methods in environments 0 through N.
 

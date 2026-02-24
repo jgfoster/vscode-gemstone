@@ -774,4 +774,71 @@ describe('SystemBrowser', () => {
       );
     });
   });
+
+  describe('drag-and-drop', () => {
+    beforeEach(() => {
+      SystemBrowser.show(session, exportManager);
+      messageHandler({ command: 'ready' });
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      messageHandler({ command: 'selectCategory', name: '** ALL CLASSES **' });
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      messageHandler({ command: 'selectClass', name: 'Array' });
+      messageHandler({ command: 'selectMethodCategory', name: 'Accessing' });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+    });
+
+    it('recategorizes method when dropped on a category', () => {
+      messageHandler({ command: 'dropMethodOnCategory', selector: 'name', category: 'Comparing' });
+
+      expect(queries.recategorizeMethod).toHaveBeenCalledWith(
+        session, 'Array', false, 'name', 'Comparing',
+      );
+    });
+
+    it('reloads method categories after drop', () => {
+      messageHandler({ command: 'dropMethodOnCategory', selector: 'name', category: 'Comparing' });
+
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ command: 'loadMethodCategories' }),
+      );
+    });
+
+    it('does nothing when no class is selected for method drop', () => {
+      // Deselect class by selecting a new dictionary
+      messageHandler({ command: 'selectDictionary', index: 2 });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      messageHandler({ command: 'dropMethodOnCategory', selector: 'name', category: 'Comparing' });
+
+      expect(queries.recategorizeMethod).not.toHaveBeenCalled();
+    });
+
+    it('moves class when dropped on a different dictionary', () => {
+      messageHandler({ command: 'dropClassOnDictionary', className: 'Array', dictName: 'Globals' });
+
+      expect(queries.moveClass).toHaveBeenCalledWith(session, 1, 2, 'Array');
+    });
+
+    it('shows info message after moving class', () => {
+      messageHandler({ command: 'dropClassOnDictionary', className: 'Array', dictName: 'Globals' });
+
+      expect(window.showInformationMessage).toHaveBeenCalledWith('Moved Array to Globals.');
+    });
+
+    it('does not move class to the same dictionary', () => {
+      messageHandler({ command: 'dropClassOnDictionary', className: 'Array', dictName: 'UserGlobals' });
+
+      expect(queries.moveClass).not.toHaveBeenCalled();
+    });
+
+    it('does not move class when no dictionary is selected', () => {
+      // Reset state — no dictionary selected
+      messageHandler({ command: 'refresh' });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      messageHandler({ command: 'dropClassOnDictionary', className: 'Array', dictName: 'Globals' });
+
+      expect(queries.moveClass).not.toHaveBeenCalled();
+    });
+  });
 });
