@@ -13,15 +13,6 @@
 
 ## System Browser
 
-### Context Menus in Webview Columns
-Re-add mutation commands as context menus on the webview columns:
-
-- **Dictionary column**: Add Dictionary, Move Up, Move Down
-- **Class Category column**: New Class Category
-- **Class column**: Delete Class, Move to Dictionary, Run SUnit Tests, Inspect Global, New Class
-- **Method Category column**: New Method, Rename Category
-- **Method column**: Delete Method, Move to Category, Senders Of, Implementors Of, New Method
-
 ### Drag-and-Drop in Webview
 - Drag methods between categories to recategorize
 - Drag classes between dictionaries to move

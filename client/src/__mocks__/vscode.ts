@@ -165,6 +165,7 @@ export const window = {
   visibleTextEditors: [] as unknown[],
   onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: () => {} })),
   onDidChangeVisibleTextEditors: vi.fn(() => ({ dispose: () => {} })),
+  showInputBox: vi.fn(),
   showQuickPick: vi.fn(),
   withProgress: vi.fn(async (_opts: unknown, task: (progress: unknown, token: unknown) => Promise<unknown>) => {
     const progress = { report: vi.fn() };

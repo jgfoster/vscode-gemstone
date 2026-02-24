@@ -194,11 +194,61 @@ export class SystemBrowser {
         case 'selectHierarchyClass':
           this.handleSelectHierarchyClass(message.className as string);
           break;
+        // Context menu commands
+        case 'ctxAddDictionary':
+          this.handleAddDictionary().catch(e => this.postError(e));
+          break;
+        case 'ctxMoveDictUp':
+          this.handleMoveDictUp();
+          break;
+        case 'ctxMoveDictDown':
+          this.handleMoveDictDown();
+          break;
+        case 'ctxNewClassCategory':
+          this.handleNewClassCategory().catch(e => this.postError(e));
+          break;
+        case 'ctxNewClass':
+          this.handleNewClass();
+          break;
+        case 'ctxDeleteClass':
+          this.handleDeleteClass().catch(e => this.postError(e));
+          break;
+        case 'ctxMoveClass':
+          this.handleMoveClass().catch(e => this.postError(e));
+          break;
+        case 'ctxRunTests':
+          this.handleRunTests();
+          break;
+        case 'ctxInspectGlobal':
+          this.handleInspectGlobal();
+          break;
+        case 'ctxNewMethod':
+          this.handleNewMethod();
+          break;
+        case 'ctxRenameCategory':
+          this.handleRenameCategory().catch(e => this.postError(e));
+          break;
+        case 'ctxDeleteMethod':
+          this.handleDeleteMethod().catch(e => this.postError(e));
+          break;
+        case 'ctxMoveToCategory':
+          this.handleMoveToCategory().catch(e => this.postError(e));
+          break;
+        case 'ctxSendersOf':
+          this.handleSendersOf();
+          break;
+        case 'ctxImplementorsOf':
+          this.handleImplementorsOf();
+          break;
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      this.panel.webview.postMessage({ command: 'showError', message: msg });
+      this.postError(e);
     }
+  }
+
+  private postError(e: unknown): void {
+    const msg = e instanceof Error ? e.message : String(e);
+    this.panel.webview.postMessage({ command: 'showError', message: msg });
   }
 
   // ── Handlers ──────────────────────────────────────────────
@@ -399,6 +449,294 @@ export class SystemBrowser {
 
     this.loadMethodCategories();
     this.openClassFile(className);
+  }
+
+  // ── Context menu handlers ────────────────────────────────
+
+  private async handleAddDictionary(): Promise<void> {
+    const name = await vscode.window.showInputBox({
+      prompt: 'New dictionary name',
+      placeHolder: 'e.g. MyProject',
+    });
+    if (!name) return;
+
+    queries.addDictionary(this.session, name);
+    this.dictEntryCache.clear();
+    this.state.dictionaries = queries.getDictionaryNames(this.session);
+    this.panel.webview.postMessage({
+      command: 'loadDictionaries',
+      items: this.state.dictionaries,
+    });
+  }
+
+  private handleMoveDictUp(): void {
+    const idx = this.state.selectedDictIndex;
+    if (!idx || idx <= 1) return;
+
+    queries.moveDictionaryUp(this.session, idx);
+    const dicts = this.state.dictionaries;
+    [dicts[idx - 1], dicts[idx - 2]] = [dicts[idx - 2], dicts[idx - 1]];
+    this.state.selectedDictIndex = idx - 1;
+    this.dictEntryCache.delete(idx);
+    this.dictEntryCache.delete(idx - 1);
+
+    this.panel.webview.postMessage({
+      command: 'loadDictionaries',
+      items: this.state.dictionaries,
+    });
+    this.panel.webview.postMessage({
+      command: 'selectDictionaryItem',
+      index: idx - 1,
+    });
+  }
+
+  private handleMoveDictDown(): void {
+    const idx = this.state.selectedDictIndex;
+    if (!idx || idx >= this.state.dictionaries.length) return;
+
+    queries.moveDictionaryDown(this.session, idx);
+    const dicts = this.state.dictionaries;
+    [dicts[idx - 1], dicts[idx]] = [dicts[idx], dicts[idx - 1]];
+    this.state.selectedDictIndex = idx + 1;
+    this.dictEntryCache.delete(idx);
+    this.dictEntryCache.delete(idx + 1);
+
+    this.panel.webview.postMessage({
+      command: 'loadDictionaries',
+      items: this.state.dictionaries,
+    });
+    this.panel.webview.postMessage({
+      command: 'selectDictionaryItem',
+      index: idx + 1,
+    });
+  }
+
+  private async handleNewClassCategory(): Promise<void> {
+    const dictIndex = this.state.selectedDictIndex;
+    if (!dictIndex) {
+      vscode.window.showWarningMessage('Select a dictionary first.');
+      return;
+    }
+
+    const name = await vscode.window.showInputBox({
+      prompt: 'New class category name',
+      placeHolder: 'e.g. Model',
+    });
+    if (!name) return;
+
+    if (!this.state.classCategories.includes(name)) {
+      // Insert sorted, keeping "** ALL CLASSES **" at front
+      const rest = this.state.classCategories.slice(1);
+      rest.push(name);
+      rest.sort();
+      this.state.classCategories = ['** ALL CLASSES **', ...rest];
+    }
+    this.panel.webview.postMessage({
+      command: 'loadClassCategories',
+      items: this.state.classCategories,
+    });
+    this.handleSelectCategory(name);
+  }
+
+  private handleNewClass(): void {
+    const dictIndex = this.state.selectedDictIndex;
+    if (!dictIndex) {
+      vscode.window.showWarningMessage('Select a dictionary first.');
+      return;
+    }
+
+    const dictName = this.state.dictionaries[dictIndex - 1];
+    const category = (this.state.selectedCategory && this.state.selectedCategory !== '** ALL CLASSES **')
+      ? this.state.selectedCategory : undefined;
+    const categoryQuery = category ? `?category=${encodeURIComponent(category)}` : '';
+    const uri = vscode.Uri.parse(
+      `gemstone://${this.session.id}/${encodeURIComponent(dictName)}/new-class${categoryQuery}`,
+    );
+    vscode.commands.executeCommand('gemstone.openDocument', uri);
+  }
+
+  private async handleDeleteClass(): Promise<void> {
+    const dictIndex = this.state.selectedDictIndex;
+    const className = this.state.selectedClass;
+    if (!dictIndex || !className) return;
+
+    const confirmed = await vscode.window.showWarningMessage(
+      `Delete class "${className}" from dictionary?`,
+      { modal: true },
+      'Delete',
+    );
+    if (confirmed !== 'Delete') return;
+
+    queries.deleteClass(this.session, dictIndex, className);
+    this.dictEntryCache.delete(dictIndex);
+    this.envCache.clear();
+    this.state.selectedClass = null;
+    this.state.selectedMethodCategory = null;
+    this.state.selectedMethod = null;
+    this.clearDimming();
+
+    const entries = this.getCachedDictEntries(dictIndex);
+    const category = this.state.selectedCategory;
+    let classes: string[];
+    if (!category || category === '** ALL CLASSES **') {
+      classes = entries.filter(e => e.isClass).map(e => e.name);
+    } else {
+      classes = entries
+        .filter(e => e.isClass && (e.category || '') === category)
+        .map(e => e.name);
+    }
+    this.state.classes = classes.sort();
+
+    this.panel.webview.postMessage({ command: 'loadClasses', items: this.state.classes });
+    this.panel.webview.postMessage({ command: 'loadMethodCategories', items: [] });
+    this.panel.webview.postMessage({ command: 'loadMethods', items: [] });
+  }
+
+  private async handleMoveClass(): Promise<void> {
+    const srcIndex = this.state.selectedDictIndex;
+    const className = this.state.selectedClass;
+    if (!srcIndex || !className) return;
+
+    const items = this.state.dictionaries
+      .map((name, i) => ({ label: name, index: i + 1 }))
+      .filter(item => item.index !== srcIndex);
+
+    const picked = await vscode.window.showQuickPick(items, {
+      placeHolder: `Move ${className} to which dictionary?`,
+    });
+    if (!picked) return;
+
+    queries.moveClass(this.session, srcIndex, picked.index, className);
+    this.dictEntryCache.delete(srcIndex);
+    this.dictEntryCache.delete(picked.index);
+    this.envCache.clear();
+    this.state.selectedClass = null;
+    this.state.selectedMethodCategory = null;
+    this.state.selectedMethod = null;
+    this.clearDimming();
+
+    this.handleSelectCategory(this.state.selectedCategory || '** ALL CLASSES **');
+    vscode.window.showInformationMessage(`Moved ${className} to ${picked.label}.`);
+  }
+
+  private handleRunTests(): void {
+    const className = this.state.selectedClass;
+    if (!className) return;
+    vscode.commands.executeCommand('gemstone.runSunitClass', { className });
+  }
+
+  private handleInspectGlobal(): void {
+    const className = this.state.selectedClass;
+    if (!className) return;
+    vscode.commands.executeCommand('gemstone.inspectGlobal', { className });
+  }
+
+  private handleNewMethod(): void {
+    const dictIndex = this.state.selectedDictIndex;
+    const className = this.state.selectedClass;
+    if (!dictIndex || !className) {
+      vscode.window.showWarningMessage('Select a class first.');
+      return;
+    }
+
+    const dictName = this.state.dictionaries[dictIndex - 1];
+    const side = this.state.isMeta ? 'class' : 'instance';
+    const category = (this.state.selectedMethodCategory && this.state.selectedMethodCategory !== '** ALL METHODS **')
+      ? this.state.selectedMethodCategory : 'as yet unclassified';
+    const uri = vscode.Uri.parse(
+      `gemstone://${this.session.id}` +
+      `/${encodeURIComponent(dictName)}` +
+      `/${encodeURIComponent(className)}` +
+      `/${side}` +
+      `/${encodeURIComponent(category)}` +
+      `/new-method`,
+    );
+    vscode.commands.executeCommand('gemstone.openDocument', uri);
+  }
+
+  private async handleRenameCategory(): Promise<void> {
+    const className = this.state.selectedClass;
+    const oldCategory = this.state.selectedMethodCategory;
+    if (!className || !oldCategory || oldCategory === '** ALL METHODS **') return;
+
+    const newName = await vscode.window.showInputBox({
+      prompt: `Rename category "${oldCategory}" to:`,
+      value: oldCategory,
+    });
+    if (!newName || newName === oldCategory) return;
+
+    queries.renameCategory(this.session, className, this.state.isMeta, oldCategory, newName);
+    const dictIndex = this.state.selectedDictIndex;
+    if (dictIndex) {
+      this.envCache.delete(`${dictIndex}/${className}`);
+    }
+    this.state.selectedMethodCategory = newName;
+    this.loadMethodCategories();
+  }
+
+  private async handleDeleteMethod(): Promise<void> {
+    const className = this.state.selectedClass;
+    const selector = this.state.selectedMethod;
+    if (!className || !selector) return;
+
+    const confirmed = await vscode.window.showWarningMessage(
+      `Delete method #${selector} from ${className}?`,
+      { modal: true },
+      'Delete',
+    );
+    if (confirmed !== 'Delete') return;
+
+    queries.deleteMethod(this.session, className, this.state.isMeta, selector);
+    const dictIndex = this.state.selectedDictIndex;
+    if (dictIndex) {
+      this.envCache.delete(`${dictIndex}/${className}`);
+    }
+    this.state.selectedMethod = null;
+    this.clearDimming();
+    this.loadMethodCategories();
+    if (this.state.selectedMethodCategory) {
+      this.handleSelectMethodCategory(this.state.selectedMethodCategory);
+    }
+  }
+
+  private async handleMoveToCategory(): Promise<void> {
+    const className = this.state.selectedClass;
+    const selector = this.state.selectedMethod;
+    if (!className || !selector) return;
+
+    const categories = queries.getMethodCategories(this.session, className, this.state.isMeta);
+    const picked = await vscode.window.showQuickPick(categories, {
+      placeHolder: `Move #${selector} to which category?`,
+    });
+    if (!picked) return;
+
+    queries.recategorizeMethod(this.session, className, this.state.isMeta, selector, picked);
+    const dictIndex = this.state.selectedDictIndex;
+    if (dictIndex) {
+      this.envCache.delete(`${dictIndex}/${className}`);
+    }
+    this.loadMethodCategories();
+    if (this.state.selectedMethodCategory) {
+      this.handleSelectMethodCategory(this.state.selectedMethodCategory);
+    }
+  }
+
+  private handleSendersOf(): void {
+    const selector = this.state.selectedMethod;
+    if (!selector) return;
+    vscode.commands.executeCommand('gemstone.sendersOfSelector', {
+      selector,
+      sessionId: this.session.id,
+    });
+  }
+
+  private handleImplementorsOf(): void {
+    const selector = this.state.selectedMethod;
+    if (!selector) return;
+    vscode.commands.executeCommand('gemstone.implementorsOfSelector', {
+      selector,
+      sessionId: this.session.id,
+    });
   }
 
   // ── Data helpers ──────────────────────────────────────────
@@ -737,6 +1075,37 @@ export class SystemBrowser {
       color: var(--vscode-focusBorder);
     }
 
+    .context-menu {
+      position: fixed;
+      z-index: 1000;
+      background: var(--vscode-menu-background, var(--vscode-editor-background));
+      color: var(--vscode-menu-foreground, var(--vscode-foreground));
+      border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
+      border-radius: 4px;
+      padding: 4px 0;
+      min-width: 160px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      display: none;
+    }
+
+    .ctx-item {
+      padding: 4px 12px;
+      cursor: pointer;
+      white-space: nowrap;
+      font-size: var(--vscode-font-size);
+    }
+
+    .ctx-item:hover {
+      background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+      color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+    }
+
+    .ctx-separator {
+      height: 1px;
+      margin: 4px 0;
+      background: var(--vscode-menu-separatorBackground, var(--vscode-panel-border));
+    }
+
     .loading {
       padding: 8px;
       color: var(--vscode-descriptionForeground);
@@ -797,6 +1166,8 @@ export class SystemBrowser {
       <div class="column-list" id="list-methods"></div>
     </div>
   </div>
+
+  <div class="context-menu" id="contextMenu"></div>
 
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
@@ -933,6 +1304,135 @@ export class SystemBrowser {
       });
     });
 
+    // ── Context menu ────────────────────────────────
+    const contextMenu = document.getElementById('contextMenu');
+
+    function showContextMenu(x, y, items) {
+      contextMenu.innerHTML = '';
+      for (const item of items) {
+        if (item.separator) {
+          const sep = document.createElement('div');
+          sep.className = 'ctx-separator';
+          contextMenu.appendChild(sep);
+        } else {
+          const div = document.createElement('div');
+          div.className = 'ctx-item';
+          div.textContent = item.label;
+          div.addEventListener('click', () => {
+            hideContextMenu();
+            item.action();
+          });
+          contextMenu.appendChild(div);
+        }
+      }
+      contextMenu.style.display = 'block';
+      const rect = contextMenu.getBoundingClientRect();
+      const maxX = window.innerWidth - rect.width;
+      const maxY = window.innerHeight - rect.height;
+      contextMenu.style.left = Math.min(x, Math.max(0, maxX)) + 'px';
+      contextMenu.style.top = Math.min(y, Math.max(0, maxY)) + 'px';
+    }
+
+    function hideContextMenu() {
+      contextMenu.style.display = 'none';
+    }
+
+    document.addEventListener('click', (e) => {
+      if (!contextMenu.contains(e.target)) hideContextMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') hideContextMenu();
+    });
+
+    cols.dicts.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const item = e.target.closest('.item');
+      if (item) {
+        const prev = cols.dicts.querySelector('.item.selected');
+        if (prev) prev.classList.remove('selected');
+        item.classList.add('selected');
+        const idx = Array.from(cols.dicts.children).indexOf(item) + 1;
+        vscode.postMessage({ command: 'selectDictionary', index: idx });
+      }
+      showContextMenu(e.clientX, e.clientY, [
+        { label: 'Add Dictionary\\u2026', action: () => vscode.postMessage({ command: 'ctxAddDictionary' }) },
+        ...(item ? [
+          { separator: true },
+          { label: 'Move Up', action: () => vscode.postMessage({ command: 'ctxMoveDictUp' }) },
+          { label: 'Move Down', action: () => vscode.postMessage({ command: 'ctxMoveDictDown' }) },
+        ] : []),
+      ]);
+    });
+
+    cols.categories.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showContextMenu(e.clientX, e.clientY, [
+        { label: 'New Class Category\\u2026', action: () => vscode.postMessage({ command: 'ctxNewClassCategory' }) },
+      ]);
+    });
+
+    cols.classes.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const item = e.target.closest('.item');
+      if (item) {
+        const prev = cols.classes.querySelector('.item.selected');
+        if (prev) prev.classList.remove('selected');
+        item.classList.add('selected');
+        vscode.postMessage({ command: 'selectClass', name: item.dataset.value });
+      }
+      showContextMenu(e.clientX, e.clientY, [
+        { label: 'New Class\\u2026', action: () => vscode.postMessage({ command: 'ctxNewClass' }) },
+        ...(item ? [
+          { separator: true },
+          { label: 'Delete Class', action: () => vscode.postMessage({ command: 'ctxDeleteClass' }) },
+          { label: 'Move to Dictionary\\u2026', action: () => vscode.postMessage({ command: 'ctxMoveClass' }) },
+          { separator: true },
+          { label: 'Run SUnit Tests', action: () => vscode.postMessage({ command: 'ctxRunTests' }) },
+          { label: 'Inspect Global', action: () => vscode.postMessage({ command: 'ctxInspectGlobal' }) },
+        ] : []),
+      ]);
+    });
+
+    cols.methodCats.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const item = e.target.closest('.item');
+      if (item && !item.classList.contains('virtual')) {
+        const prev = cols.methodCats.querySelector('.item.selected');
+        if (prev) prev.classList.remove('selected');
+        item.classList.add('selected');
+        vscode.postMessage({ command: 'selectMethodCategory', name: item.dataset.value });
+      }
+      showContextMenu(e.clientX, e.clientY, [
+        { label: 'New Method', action: () => vscode.postMessage({ command: 'ctxNewMethod' }) },
+        ...((item && !item.classList.contains('virtual')) ? [
+          { separator: true },
+          { label: 'Rename Category\\u2026', action: () => vscode.postMessage({ command: 'ctxRenameCategory' }) },
+        ] : []),
+      ]);
+    });
+
+    cols.methods.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const item = e.target.closest('.item');
+      if (item) {
+        const prev = cols.methods.querySelector('.item.selected');
+        if (prev) prev.classList.remove('selected');
+        item.classList.add('selected');
+        vscode.postMessage({ command: 'selectMethod', selector: item.dataset.value });
+      }
+      showContextMenu(e.clientX, e.clientY, [
+        { label: 'New Method', action: () => vscode.postMessage({ command: 'ctxNewMethod' }) },
+        ...(item ? [
+          { separator: true },
+          { label: 'Delete Method', action: () => vscode.postMessage({ command: 'ctxDeleteMethod' }) },
+          { label: 'Move to Category\\u2026', action: () => vscode.postMessage({ command: 'ctxMoveToCategory' }) },
+          { separator: true },
+          { label: 'Senders Of', action: () => vscode.postMessage({ command: 'ctxSendersOf' }) },
+          { label: 'Implementors Of', action: () => vscode.postMessage({ command: 'ctxImplementorsOf' }) },
+        ] : []),
+      ]);
+    });
+
     // ── Message receiver ───────────────────────────
     window.addEventListener('message', (event) => {
       const msg = event.data;
@@ -987,6 +1487,13 @@ export class SystemBrowser {
               div.classList.add('selected');
             }
             cols.hierarchy.appendChild(div);
+          }
+          break;
+        }
+        case 'selectDictionaryItem': {
+          const children = cols.dicts.children;
+          for (let i = 0; i < children.length; i++) {
+            children[i].classList.toggle('selected', i === msg.index - 1);
           }
           break;
         }

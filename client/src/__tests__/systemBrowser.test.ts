@@ -7,6 +7,15 @@ vi.mock('../browserQueries', () => ({
   getDictionaryEntries: vi.fn(),
   getClassEnvironments: vi.fn(),
   getClassHierarchy: vi.fn(),
+  addDictionary: vi.fn(),
+  moveDictionaryUp: vi.fn(),
+  moveDictionaryDown: vi.fn(),
+  deleteClass: vi.fn(),
+  moveClass: vi.fn(),
+  deleteMethod: vi.fn(),
+  recategorizeMethod: vi.fn(),
+  renameCategory: vi.fn(),
+  getMethodCategories: vi.fn(),
 }));
 
 vi.mock('fs', async () => {
@@ -20,7 +29,7 @@ vi.mock('fs', async () => {
 
 import * as fs from 'fs';
 
-import { window, ViewColumn } from '../__mocks__/vscode';
+import { window, ViewColumn, commands } from '../__mocks__/vscode';
 import { SystemBrowser, extractSelector } from '../systemBrowser';
 import * as queries from '../browserQueries';
 import type { ActiveSession } from '../sessionManager';
@@ -548,6 +557,221 @@ describe('SystemBrowser', () => {
         command: 'setViewMode',
         mode: 'category',
       });
+    });
+  });
+
+  describe('dictionary context menu', () => {
+    beforeEach(() => {
+      SystemBrowser.show(session, exportManager);
+      messageHandler({ command: 'ready' });
+    });
+
+    it('adds a dictionary after input', async () => {
+      vi.mocked(window.showInputBox).mockResolvedValue('NewDict');
+      // After addDictionary, getDictionaryNames will be called again — return updated list
+      vi.mocked(queries.getDictionaryNames).mockReturnValue(['UserGlobals', 'Globals', 'NewDict']);
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      await messageHandler({ command: 'ctxAddDictionary' });
+
+      expect(queries.addDictionary).toHaveBeenCalledWith(session, 'NewDict');
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadDictionaries',
+        items: ['UserGlobals', 'Globals', 'NewDict'],
+      });
+    });
+
+    it('does nothing when user cancels add dictionary', async () => {
+      vi.mocked(window.showInputBox).mockResolvedValue(undefined);
+      await messageHandler({ command: 'ctxAddDictionary' });
+      expect(queries.addDictionary).not.toHaveBeenCalled();
+    });
+
+    it('moves dictionary up', () => {
+      messageHandler({ command: 'selectDictionary', index: 2 });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      messageHandler({ command: 'ctxMoveDictUp' });
+
+      expect(queries.moveDictionaryUp).toHaveBeenCalledWith(session, 2);
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadDictionaries',
+        items: ['Globals', 'UserGlobals'],
+      });
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'selectDictionaryItem',
+        index: 1,
+      });
+    });
+
+    it('does not move first dictionary up', () => {
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      messageHandler({ command: 'ctxMoveDictUp' });
+      expect(queries.moveDictionaryUp).not.toHaveBeenCalled();
+    });
+
+    it('moves dictionary down', () => {
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      messageHandler({ command: 'ctxMoveDictDown' });
+
+      expect(queries.moveDictionaryDown).toHaveBeenCalledWith(session, 1);
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadDictionaries',
+        items: ['Globals', 'UserGlobals'],
+      });
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'selectDictionaryItem',
+        index: 2,
+      });
+    });
+
+    it('does not move last dictionary down', () => {
+      messageHandler({ command: 'selectDictionary', index: 2 });
+      messageHandler({ command: 'ctxMoveDictDown' });
+      expect(queries.moveDictionaryDown).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('class context menu', () => {
+    beforeEach(() => {
+      SystemBrowser.show(session, exportManager);
+      messageHandler({ command: 'ready' });
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      messageHandler({ command: 'selectCategory', name: '** ALL CLASSES **' });
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      messageHandler({ command: 'selectClass', name: 'Array' });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+    });
+
+    it('deletes class after confirmation', async () => {
+      vi.mocked(window.showWarningMessage).mockResolvedValue('Delete' as never);
+
+      await messageHandler({ command: 'ctxDeleteClass' });
+
+      expect(queries.deleteClass).toHaveBeenCalledWith(session, 1, 'Array');
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ command: 'loadClasses' }),
+      );
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadMethodCategories',
+        items: [],
+      });
+    });
+
+    it('does not delete class when user cancels', async () => {
+      vi.mocked(window.showWarningMessage).mockResolvedValue(undefined as never);
+      await messageHandler({ command: 'ctxDeleteClass' });
+      expect(queries.deleteClass).not.toHaveBeenCalled();
+    });
+
+    it('moves class to another dictionary', async () => {
+      vi.mocked(window.showQuickPick).mockResolvedValue({ label: 'Globals', index: 2 } as never);
+
+      await messageHandler({ command: 'ctxMoveClass' });
+
+      expect(queries.moveClass).toHaveBeenCalledWith(session, 1, 2, 'Array');
+    });
+
+    it('delegates run tests to command', () => {
+      messageHandler({ command: 'ctxRunTests' });
+      expect(commands.executeCommand).toHaveBeenCalledWith(
+        'gemstone.runSunitClass',
+        { className: 'Array' },
+      );
+    });
+
+    it('delegates inspect to command', () => {
+      messageHandler({ command: 'ctxInspectGlobal' });
+      expect(commands.executeCommand).toHaveBeenCalledWith(
+        'gemstone.inspectGlobal',
+        { className: 'Array' },
+      );
+    });
+  });
+
+  describe('method category context menu', () => {
+    beforeEach(() => {
+      SystemBrowser.show(session, exportManager);
+      messageHandler({ command: 'ready' });
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      messageHandler({ command: 'selectCategory', name: '** ALL CLASSES **' });
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      messageHandler({ command: 'selectClass', name: 'Array' });
+      messageHandler({ command: 'selectMethodCategory', name: 'Accessing' });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+    });
+
+    it('renames method category', async () => {
+      vi.mocked(window.showInputBox).mockResolvedValue('Getters');
+
+      await messageHandler({ command: 'ctxRenameCategory' });
+
+      expect(queries.renameCategory).toHaveBeenCalledWith(
+        session, 'Array', false, 'Accessing', 'Getters',
+      );
+    });
+
+    it('does not rename when user cancels', async () => {
+      vi.mocked(window.showInputBox).mockResolvedValue(undefined);
+      await messageHandler({ command: 'ctxRenameCategory' });
+      expect(queries.renameCategory).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('method context menu', () => {
+    beforeEach(() => {
+      SystemBrowser.show(session, exportManager);
+      messageHandler({ command: 'ready' });
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      messageHandler({ command: 'selectCategory', name: '** ALL CLASSES **' });
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      messageHandler({ command: 'selectClass', name: 'Array' });
+      messageHandler({ command: 'selectMethodCategory', name: 'Accessing' });
+      messageHandler({ command: 'selectMethod', selector: 'name' });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+    });
+
+    it('deletes method after confirmation', async () => {
+      vi.mocked(window.showWarningMessage).mockResolvedValue('Delete' as never);
+
+      await messageHandler({ command: 'ctxDeleteMethod' });
+
+      expect(queries.deleteMethod).toHaveBeenCalledWith(session, 'Array', false, 'name');
+    });
+
+    it('does not delete method when user cancels', async () => {
+      vi.mocked(window.showWarningMessage).mockResolvedValue(undefined as never);
+      await messageHandler({ command: 'ctxDeleteMethod' });
+      expect(queries.deleteMethod).not.toHaveBeenCalled();
+    });
+
+    it('moves method to category', async () => {
+      vi.mocked(queries.getMethodCategories).mockReturnValue(['Accessing', 'Comparing', 'Printing']);
+      vi.mocked(window.showQuickPick).mockResolvedValue('Printing' as never);
+
+      await messageHandler({ command: 'ctxMoveToCategory' });
+
+      expect(queries.recategorizeMethod).toHaveBeenCalledWith(
+        session, 'Array', false, 'name', 'Printing',
+      );
+    });
+
+    it('delegates senders to command', () => {
+      messageHandler({ command: 'ctxSendersOf' });
+      expect(commands.executeCommand).toHaveBeenCalledWith(
+        'gemstone.sendersOfSelector',
+        { selector: 'name', sessionId: 1 },
+      );
+    });
+
+    it('delegates implementors to command', () => {
+      messageHandler({ command: 'ctxImplementorsOf' });
+      expect(commands.executeCommand).toHaveBeenCalledWith(
+        'gemstone.implementorsOfSelector',
+        { selector: 'name', sessionId: 1 },
+      );
     });
   });
 });
