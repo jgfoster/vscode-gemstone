@@ -343,6 +343,12 @@
         "icon": "$(eye)"
       },
       {
+        "command": "gemstone.showTranscript",
+        "title": "Show Transcript",
+        "category": "GemStone",
+        "icon": "$(output)"
+      },
+      {
         "command": "gemstone.removeInspectorItem",
         "title": "Remove",
         "category": "GemStone",

@@ -26,6 +26,8 @@ import { SunitTestController } from './sunitTestController';
 import { ExportManager } from './exportManager';
 import { FileInManager } from './fileInManager';
 import { ReconcileManager } from './reconcileManager';
+import { showTranscript } from './transcriptChannel';
+import { GemStoneCodeLensProvider } from './gemstoneCodeLensProvider';
 import * as queries from './browserQueries';
 
 let client: LanguageClient;
@@ -153,10 +155,12 @@ export function activate(context: vscode.ExtensionContext) {
   const definitionProvider = new GemStoneDefinitionProvider(sessionManager, selectorResolver);
   const hoverProvider = new GemStoneHoverProvider(sessionManager, selectorResolver);
   const completionProvider = new GemStoneCompletionProvider(sessionManager);
+  const codeLensProvider = new GemStoneCodeLensProvider(sessionManager);
   context.subscriptions.push(
     vscode.languages.registerDefinitionProvider(providerSelectors, definitionProvider),
     vscode.languages.registerHoverProvider(providerSelectors, hoverProvider),
     vscode.languages.registerCompletionItemProvider(providerSelectors, completionProvider),
+    vscode.languages.registerCodeLensProvider(providerSelectors, codeLensProvider),
   );
 
   // ── Breakpoints + Debugger ───────────────────────────────
@@ -512,6 +516,10 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand('gemstone.inspectIt', () => {
       codeExecutor.inspectIt(inspectorProvider);
+    }),
+
+    vscode.commands.registerCommand('gemstone.showTranscript', () => {
+      showTranscript();
     }),
 
     vscode.commands.registerCommand('gemstone.runSunitClass', async (args: { className: string }) => {

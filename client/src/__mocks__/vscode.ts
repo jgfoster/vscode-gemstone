@@ -290,6 +290,16 @@ export class Range {
   ) {}
 }
 
+export class CodeLens {
+  command?: { title: string; command: string; arguments?: unknown[] };
+  constructor(public readonly range: Range, command?: { title: string; command: string; arguments?: unknown[] }) {
+    this.command = command;
+  }
+  get isResolved(): boolean {
+    return this.command !== undefined;
+  }
+}
+
 export class Selection extends Range {
   anchor: Position;
   active: Position;
@@ -354,6 +364,7 @@ export const languages = {
   registerDefinitionProvider: vi.fn(() => ({ dispose: () => {} })),
   registerHoverProvider: vi.fn(() => ({ dispose: () => {} })),
   registerCompletionItemProvider: vi.fn(() => ({ dispose: () => {} })),
+  registerCodeLensProvider: vi.fn(() => ({ dispose: () => {} })),
   setTextDocumentLanguage: vi.fn(),
   createDiagnosticCollection: vi.fn((_name?: string) => createMockDiagnosticCollection()),
 };
