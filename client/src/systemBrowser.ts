@@ -292,7 +292,12 @@ export class SystemBrowser {
       }
     }
     const sorted = [...categorySet].sort();
-    this.state.classCategories = ['** ALL CLASSES **', ...sorted];
+    const hasGlobals = entries.some(e => !e.isClass);
+    this.state.classCategories = [
+      '** ALL CLASSES **',
+      ...sorted,
+      ...(hasGlobals ? ['** GLOBALS **'] : []),
+    ];
 
     this.panel.webview.postMessage({
       command: 'loadClassCategories',
@@ -311,15 +316,17 @@ export class SystemBrowser {
     if (!dictIndex) return;
 
     const entries = this.getCachedDictEntries(dictIndex);
-    let classes: string[];
-    if (category === '** ALL CLASSES **') {
-      classes = entries.filter(e => e.isClass).map(e => e.name);
+    let names: string[];
+    if (category === '** GLOBALS **') {
+      names = entries.filter(e => !e.isClass).map(e => e.name);
+    } else if (category === '** ALL CLASSES **') {
+      names = entries.filter(e => e.isClass).map(e => e.name);
     } else {
-      classes = entries
+      names = entries
         .filter(e => e.isClass && (e.category || '') === category)
         .map(e => e.name);
     }
-    this.state.classes = classes.sort();
+    this.state.classes = names.sort();
 
     this.panel.webview.postMessage({
       command: 'loadClasses',
@@ -331,6 +338,14 @@ export class SystemBrowser {
     this.state.selectedClass = className;
     this.state.selectedMethodCategory = null;
     this.state.selectedMethod = null;
+
+    if (this.state.selectedCategory === '** GLOBALS **') {
+      // Non-class global — inspect it instead of browsing methods
+      vscode.commands.executeCommand('gemstone.inspectGlobal', { className });
+      this.panel.webview.postMessage({ command: 'loadMethodCategories', items: [] });
+      this.panel.webview.postMessage({ command: 'loadMethods', items: [] });
+      return;
+    }
 
     this.loadMethodCategories();
     this.openClassFile(className);
@@ -1567,7 +1582,7 @@ export class SystemBrowser {
           break;
         case 'loadClassCategories':
           clearFrom('categories');
-          populateColumn(cols.categories, msg.items, ['** ALL CLASSES **']);
+          populateColumn(cols.categories, msg.items, ['** ALL CLASSES **', '** GLOBALS **']);
           break;
         case 'loadClasses':
           clearFrom('classes');

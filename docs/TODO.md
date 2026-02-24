@@ -16,7 +16,3 @@
 ### Multiple Environments
 When `gemstone.maxEnvironment > 0`, show environment tabs or a selector in the method categories column to browse methods in environments 0 through N.
 
-## Inspector
-
-### Non-Class Globals
-Display non-class globals (from `getDictionaryEntries()` where `isClass: false`) in the Inspector tree view. This would provide a way to navigate and inspect global objects that are not classes (e.g., `AllUsers`, `UserProfile`).

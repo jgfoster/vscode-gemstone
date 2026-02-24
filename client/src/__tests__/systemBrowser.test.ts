@@ -220,7 +220,7 @@ describe('SystemBrowser', () => {
       expect(queries.getDictionaryEntries).toHaveBeenCalledWith(session, 1);
       expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
         command: 'loadClassCategories',
-        items: ['** ALL CLASSES **', 'Collections', 'Kernel'],
+        items: ['** ALL CLASSES **', 'Collections', 'Kernel', '** GLOBALS **'],
       });
     });
 
@@ -485,7 +485,7 @@ describe('SystemBrowser', () => {
       });
       expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
         command: 'loadClassCategories',
-        items: ['** ALL CLASSES **', 'Collections', 'Kernel'],
+        items: ['** ALL CLASSES **', 'Collections', 'Kernel', '** GLOBALS **'],
       });
       expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
         command: 'loadClasses',
@@ -839,6 +839,82 @@ describe('SystemBrowser', () => {
       messageHandler({ command: 'dropClassOnDictionary', className: 'Array', dictName: 'Globals' });
 
       expect(queries.moveClass).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('non-class globals', () => {
+    beforeEach(() => {
+      SystemBrowser.show(session, exportManager);
+      messageHandler({ command: 'ready' });
+      messageHandler({ command: 'selectDictionary', index: 1 });
+    });
+
+    it('shows GLOBALS category when dictionary has non-class entries', () => {
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadClassCategories',
+        items: ['** ALL CLASSES **', 'Collections', 'Kernel', '** GLOBALS **'],
+      });
+    });
+
+    it('does not show GLOBALS category when no non-class entries exist', () => {
+      vi.mocked(queries.getDictionaryEntries).mockReturnValue([
+        { isClass: true, category: 'Kernel', name: 'Array' },
+      ]);
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      messageHandler({ command: 'selectDictionary', index: 2 });
+
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadClassCategories',
+        items: ['** ALL CLASSES **', 'Kernel'],
+      });
+    });
+
+    it('lists non-class globals when GLOBALS is selected', () => {
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+      messageHandler({ command: 'selectCategory', name: '** GLOBALS **' });
+
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadClasses',
+        items: ['AllUsers'],
+      });
+    });
+
+    it('inspects global on selectClass when GLOBALS category is active', () => {
+      messageHandler({ command: 'selectCategory', name: '** GLOBALS **' });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      messageHandler({ command: 'selectClass', name: 'AllUsers' });
+
+      expect(commands.executeCommand).toHaveBeenCalledWith(
+        'gemstone.inspectGlobal',
+        { className: 'AllUsers' },
+      );
+    });
+
+    it('clears method columns when selecting a global', () => {
+      messageHandler({ command: 'selectCategory', name: '** GLOBALS **' });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      messageHandler({ command: 'selectClass', name: 'AllUsers' });
+
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadMethodCategories',
+        items: [],
+      });
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadMethods',
+        items: [],
+      });
+    });
+
+    it('does not load environments when selecting a global', () => {
+      messageHandler({ command: 'selectCategory', name: '** GLOBALS **' });
+      vi.mocked(queries.getClassEnvironments).mockClear();
+
+      messageHandler({ command: 'selectClass', name: 'AllUsers' });
+
+      expect(queries.getClassEnvironments).not.toHaveBeenCalled();
     });
   });
 });
