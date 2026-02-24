@@ -23,11 +23,13 @@ import { GemStoneCompletionProvider } from './gemstoneCompletionProvider';
 import { BreakpointManager } from './breakpointManager';
 import { SelectorBreakpointManager } from './selectorBreakpointManager';
 import { SunitTestController } from './sunitTestController';
+import { ExportManager } from './exportManager';
 import * as queries from './browserQueries';
 import { getGciLog } from './gciLog';
 
 let client: LanguageClient;
 let sessionManager: SessionManager;
+let exportManager: ExportManager;
 
 export function activate(context: vscode.ExtensionContext) {
   // ── LSP Client ───────────────────────────────────────────
@@ -87,6 +89,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // ── Session Management ───────────────────────────────────
   sessionManager = new SessionManager();
+  exportManager = new ExportManager();
   const sessionTreeProvider = new SessionTreeProvider(sessionManager);
 
   const sessionTreeView = vscode.window.createTreeView('gemstoneSessions', {
@@ -413,19 +416,21 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage(
           `Connected to ${login.stone} (${session.stoneVersion}) on ${login.gem_host} as ${login.gs_user}`
         );
+        exportManager.exportSession(session, true);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         vscode.window.showErrorMessage(`Login failed: ${msg}`);
       }
     }),
 
-    vscode.commands.registerCommand('gemstone.sessionCommit', (item: GemStoneSessionItem) => {
+    vscode.commands.registerCommand('gemstone.sessionCommit', async (item: GemStoneSessionItem) => {
       try {
         const { success, err } = sessionManager.commit(item.activeSession.id);
         if (success) {
           vscode.window.showInformationMessage(
             `Session ${item.activeSession.id}: Commit succeeded.`
           );
+          await exportManager.refreshSession(item.activeSession);
         } else {
           vscode.window.showErrorMessage(
             `Session ${item.activeSession.id}: Commit failed — ${err.message || `error ${err.number}`}`
@@ -437,13 +442,14 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }),
 
-    vscode.commands.registerCommand('gemstone.sessionAbort', (item: GemStoneSessionItem) => {
+    vscode.commands.registerCommand('gemstone.sessionAbort', async (item: GemStoneSessionItem) => {
       try {
         const { success, err } = sessionManager.abort(item.activeSession.id);
         if (success) {
           vscode.window.showInformationMessage(
             `Session ${item.activeSession.id}: Abort succeeded.`
           );
+          await exportManager.refreshSession(item.activeSession);
         } else {
           vscode.window.showErrorMessage(
             `Session ${item.activeSession.id}: Abort failed — ${err.message || `error ${err.number}`}`
@@ -456,13 +462,14 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('gemstone.sessionLogout', (item: GemStoneSessionItem) => {
-      const { id } = item.activeSession;
-      sessionManager.logout(id);
+      const session = item.activeSession;
+      exportManager.markReadOnly(session);
+      sessionManager.logout(session.id);
       sessionTreeProvider.refresh();
-      inspectorProvider.removeSessionItems(id);
-      breakpointManager.clearAllForSession(id);
-      selectorBreakpointManager.clearAllForSession(id);
-      vscode.window.showInformationMessage(`Session ${id}: Logged out.`);
+      inspectorProvider.removeSessionItems(session.id);
+      breakpointManager.clearAllForSession(session.id);
+      selectorBreakpointManager.clearAllForSession(session.id);
+      vscode.window.showInformationMessage(`Session ${session.id}: Logged out.`);
     }),
 
     vscode.commands.registerCommand('gemstone.selectSession', async (item?: GemStoneSessionItem) => {
@@ -474,10 +481,22 @@ export function activate(context: vscode.ExtensionContext) {
       sessionTreeProvider.refresh();
     }),
 
-    vscode.commands.registerCommand('gemstone.refreshBrowser', () => {
+    vscode.commands.registerCommand('gemstone.exportClasses', async (item?: GemStoneSessionItem) => {
+      const session = item
+        ? item.activeSession
+        : await sessionManager.resolveSession();
+      if (!session) return;
+      await exportManager.exportSession(session);
+    }),
+
+    vscode.commands.registerCommand('gemstone.refreshBrowser', async () => {
       browserTreeProvider.refresh();
       symbolProvider.invalidateCache();
       completionProvider.invalidateCache();
+      const session = sessionManager.getSelectedSession();
+      if (session) {
+        await exportManager.refreshSession(session);
+      }
     }),
 
     vscode.commands.registerCommand('gemstone.refreshTests', () => {
@@ -962,6 +981,9 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate(): Thenable<void> | undefined {
+  if (exportManager) {
+    exportManager.dispose();
+  }
   if (sessionManager) {
     sessionManager.dispose();
   }

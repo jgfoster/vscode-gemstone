@@ -104,6 +104,11 @@
             "minimum": 0,
             "description": "Maximum method dictionary environment to show in the browser (0 = standard Smalltalk only, 2 = show environments 0–2)"
           },
+          "gemstone.exportPath": {
+            "type": "string",
+            "default": "",
+            "description": "Root path for exported class files. Defaults to {workspaceRoot}/gemstone/"
+          },
           "gemstone.logins": {
             "type": "array",
             "default": [],
@@ -322,6 +327,12 @@
         "title": "Select as Active Session",
         "category": "GemStone",
         "icon": "$(target)"
+      },
+      {
+        "command": "gemstone.exportClasses",
+        "title": "Export Classes to Files",
+        "category": "GemStone",
+        "icon": "$(cloud-download)"
       },
       {
         "command": "gemstone.displayIt",
@@ -636,6 +647,10 @@
           "command": "gemstone.selectSession",
           "when": "view == gemstoneSessions && viewItem == gemstoneSession",
           "group": "inline@4"
+        },
+        {
+          "command": "gemstone.exportClasses",
+          "when": "view == gemstoneSessions && viewItem == gemstoneSession"
         },
         {
           "command": "gemstone.removeInspectorItem",

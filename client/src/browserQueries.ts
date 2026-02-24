@@ -531,6 +531,13 @@ stream contents`;
   return results;
 }
 
+export function fileOutClass(
+  session: ActiveSession, dictIndex: number, className: string,
+): string {
+  const code = `((System myUserProfile symbolList at: ${dictIndex}) at: #'${escapeString(className)}') fileOutClass`;
+  return executeFetchString(session, `fileOutClass(${className})`, code);
+}
+
 export function getInstVarNames(
   session: ActiveSession, className: string,
 ): string[] {

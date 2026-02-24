@@ -162,6 +162,37 @@ describe('browserQueries', () => {
     });
   });
 
+  describe('fileOutClass', () => {
+    it('returns Topaz file-out string for a class', () => {
+      const topazSource = "! Class definition\nObject subclass: 'MyClass'\n";
+      const session = createMockSession(topazSource);
+
+      const result = queries.fileOutClass(session, 1, 'MyClass');
+
+      expect(result).toBe(topazSource);
+    });
+
+    it('sends correct Smalltalk code with dictionary index and class name', () => {
+      const session = createMockSession('');
+      queries.fileOutClass(session, 3, 'MyClass');
+
+      const mockExec = session.gci.GciTsExecuteFetchBytes as ReturnType<typeof vi.fn>;
+      const code = mockExec.mock.calls[0][1] as string;
+      expect(code).toContain('symbolList at: 3');
+      expect(code).toContain("#'MyClass'");
+      expect(code).toContain('fileOutClass');
+    });
+
+    it('escapes single quotes in class names', () => {
+      const session = createMockSession('');
+      queries.fileOutClass(session, 1, "Class'Name");
+
+      const mockExec = session.gci.GciTsExecuteFetchBytes as ReturnType<typeof vi.fn>;
+      const code = mockExec.mock.calls[0][1] as string;
+      expect(code).toContain("#'Class''Name'");
+    });
+  });
+
   describe('searchMethodSource', () => {
     it('parses tab-separated method results', () => {
       const payload = 'Globals\tString\t0\tsubarray\taccessing\n';
