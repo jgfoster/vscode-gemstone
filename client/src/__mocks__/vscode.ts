@@ -166,6 +166,7 @@ export const workspace = {
   getConfiguration,
   onDidChangeConfiguration: vi.fn(() => ({ dispose: () => {} })),
   onDidSaveTextDocument: vi.fn(() => ({ dispose: () => {} })),
+  onDidCreateFiles: vi.fn(() => ({ dispose: () => {} })),
   registerTextDocumentContentProvider: vi.fn(() => ({ dispose: () => {} })),
   textDocuments: [] as unknown[],
 };

@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 vi.mock('vscode', () => import('../__mocks__/vscode'));
@@ -13,7 +15,7 @@ vi.mock('../topazFileIn', () => ({
 }));
 
 import * as vscode from 'vscode';
-import { FileInManager } from '../fileInManager';
+import { FileInManager, newClassTemplate } from '../fileInManager';
 import { SessionManager, ActiveSession } from '../sessionManager';
 import { ExportManager } from '../exportManager';
 import { GemStoneLogin } from '../loginTypes';
@@ -296,6 +298,191 @@ describe('FileInManager', () => {
       expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
         expect.stringContaining('No active GemStone session'),
       );
+    });
+  });
+
+  describe('newClassTemplate', () => {
+    it('includes class definition with Object superclass', () => {
+      const template = newClassTemplate('MyClass', 'UserGlobals');
+      expect(template).toContain("Object subclass: 'MyClass'");
+    });
+
+    it('uses the given dictionary name in inDictionary:', () => {
+      const template = newClassTemplate('MyClass', 'UserGlobals');
+      expect(template).toContain('inDictionary: UserGlobals');
+    });
+
+    it('includes a comment template', () => {
+      const template = newClassTemplate('MyClass', 'UserGlobals');
+      expect(template).toContain("MyClass comment: 'A brief description of MyClass.'");
+    });
+
+    it('includes class-side new method with instance creation category', () => {
+      const template = newClassTemplate('MyClass', 'UserGlobals');
+      expect(template).toContain("category: 'instance creation'");
+      expect(template).toContain('classmethod: MyClass');
+      expect(template).toContain('new');
+      expect(template).toContain('self basicNew');
+      expect(template).toContain('initialize');
+      expect(template).toContain('yourself');
+    });
+
+    it('includes instance-side initialize method with initialization category', () => {
+      const template = newClassTemplate('MyClass', 'UserGlobals');
+      expect(template).toContain("category: 'initialization'");
+      expect(template).toContain('method: MyClass');
+      expect(template).toContain('super initialize.');
+    });
+
+    it('uses class name and dictionary name in all appropriate places', () => {
+      const template = newClassTemplate('Account', 'Published');
+      expect(template).toContain("Object subclass: 'Account'");
+      expect(template).toContain('inDictionary: Published');
+      expect(template).toContain('classmethod: Account');
+      expect(template).toContain('method: Account');
+      expect(template).toContain("Account comment: 'A brief description of Account.'");
+    });
+
+    it('includes standard class definition fields', () => {
+      const template = newClassTemplate('MyClass', 'UserGlobals');
+      expect(template).toContain('instVarNames: #()');
+      expect(template).toContain('classVars: #()');
+      expect(template).toContain('classInstVars: #()');
+      expect(template).toContain('poolDictionaries: #()');
+      expect(template).toContain('options: #()');
+    });
+  });
+
+  describe('handleFileCreate', () => {
+    let tmpDir: string;
+    let exportRoot: string;
+    let createHandler: (e: { files: vscode.Uri[] }) => void;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filein-test-'));
+      exportRoot = tmpDir;
+      mockExportManager = createMockExportManager({ exportRoot });
+      manager = new FileInManager(mockSessionManager, mockExportManager);
+
+      (vscode.workspace.onDidCreateFiles as ReturnType<typeof vi.fn>).mockImplementation(
+        (handler: (e: { files: vscode.Uri[] }) => void) => {
+          createHandler = handler;
+          return { dispose: () => {} };
+        },
+      );
+      const context = { subscriptions: [] } as unknown as vscode.ExtensionContext;
+      manager.register(context);
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    function createUri(fsPath: string): vscode.Uri {
+      return { scheme: 'file', fsPath } as unknown as vscode.Uri;
+    }
+
+    it('populates an empty .gs file with template', () => {
+      const dictDir = path.join(exportRoot, '1. UserGlobals');
+      fs.mkdirSync(dictDir, { recursive: true });
+      const filePath = path.join(dictDir, 'MyClass.gs');
+      fs.writeFileSync(filePath, '', 'utf-8');
+
+      createHandler({ files: [createUri(filePath)] });
+
+      const content = fs.readFileSync(filePath, 'utf-8');
+      expect(content).toContain("Object subclass: 'MyClass'");
+      expect(content).toContain('inDictionary: UserGlobals');
+    });
+
+    it('extracts dictionary name from numbered directory', () => {
+      const dictDir = path.join(exportRoot, '3. Published');
+      fs.mkdirSync(dictDir, { recursive: true });
+      const filePath = path.join(dictDir, 'Account.gs');
+      fs.writeFileSync(filePath, '', 'utf-8');
+
+      createHandler({ files: [createUri(filePath)] });
+
+      const content = fs.readFileSync(filePath, 'utf-8');
+      expect(content).toContain('inDictionary: Published');
+      expect(content).toContain("Object subclass: 'Account'");
+    });
+
+    it('skips non-empty files', () => {
+      const dictDir = path.join(exportRoot, '1. UserGlobals');
+      fs.mkdirSync(dictDir, { recursive: true });
+      const filePath = path.join(dictDir, 'MyClass.gs');
+      fs.writeFileSync(filePath, 'existing content', 'utf-8');
+
+      createHandler({ files: [createUri(filePath)] });
+
+      const content = fs.readFileSync(filePath, 'utf-8');
+      expect(content).toBe('existing content');
+    });
+
+    it('skips non-.gs files', () => {
+      const dictDir = path.join(exportRoot, '1. UserGlobals');
+      fs.mkdirSync(dictDir, { recursive: true });
+      const filePath = path.join(dictDir, 'notes.txt');
+      fs.writeFileSync(filePath, '', 'utf-8');
+
+      createHandler({ files: [createUri(filePath)] });
+
+      const content = fs.readFileSync(filePath, 'utf-8');
+      expect(content).toBe('');
+    });
+
+    it('skips files outside export root', () => {
+      const otherDir = fs.mkdtempSync(path.join(os.tmpdir(), 'other-'));
+      const dictDir = path.join(otherDir, '1. UserGlobals');
+      fs.mkdirSync(dictDir, { recursive: true });
+      const filePath = path.join(dictDir, 'MyClass.gs');
+      fs.writeFileSync(filePath, '', 'utf-8');
+
+      createHandler({ files: [createUri(filePath)] });
+
+      const content = fs.readFileSync(filePath, 'utf-8');
+      expect(content).toBe('');
+      fs.rmSync(otherDir, { recursive: true, force: true });
+    });
+
+    it('skips directories without numeric prefix', () => {
+      const dictDir = path.join(exportRoot, 'notes');
+      fs.mkdirSync(dictDir, { recursive: true });
+      const filePath = path.join(dictDir, 'MyClass.gs');
+      fs.writeFileSync(filePath, '', 'utf-8');
+
+      createHandler({ files: [createUri(filePath)] });
+
+      const content = fs.readFileSync(filePath, 'utf-8');
+      expect(content).toBe('');
+    });
+
+    it('skips when isWriting is true', () => {
+      Object.defineProperty(mockExportManager, 'isWriting', { get: () => true, configurable: true });
+
+      const dictDir = path.join(exportRoot, '1. UserGlobals');
+      fs.mkdirSync(dictDir, { recursive: true });
+      const filePath = path.join(dictDir, 'MyClass.gs');
+      fs.writeFileSync(filePath, '', 'utf-8');
+
+      createHandler({ files: [createUri(filePath)] });
+
+      const content = fs.readFileSync(filePath, 'utf-8');
+      expect(content).toBe('');
+    });
+
+    it('skips non-file scheme URIs', () => {
+      const dictDir = path.join(exportRoot, '1. UserGlobals');
+      fs.mkdirSync(dictDir, { recursive: true });
+      const filePath = path.join(dictDir, 'MyClass.gs');
+      fs.writeFileSync(filePath, '', 'utf-8');
+
+      const uri = { scheme: 'gemstone', fsPath: filePath } as unknown as vscode.Uri;
+      createHandler({ files: [uri] });
+
+      const content = fs.readFileSync(filePath, 'utf-8');
+      expect(content).toBe('');
     });
   });
 });

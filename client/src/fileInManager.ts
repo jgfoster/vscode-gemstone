@@ -1,8 +1,51 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { SessionManager, ActiveSession } from './sessionManager';
 import { ExportManager } from './exportManager';
 import { fileInClass } from './topazFileIn';
+
+/**
+ * Generate a Topaz file-out template for a new class.
+ */
+export function newClassTemplate(className: string, dictName: string): string {
+  return `! Class definition for ${className}
+run
+Object subclass: '${className}'
+  instVarNames: #()
+  classVars: #()
+  classInstVars: #()
+  poolDictionaries: #()
+  inDictionary: ${dictName}
+  category: ''
+  options: #()
+%
+
+doit
+${className} comment: 'A brief description of ${className}.'
+%
+
+! ------------------- Class methods for ${className}
+
+category: 'instance creation'
+classmethod: ${className}
+new
+
+\t^ self basicNew
+\t\tinitialize;
+\t\tyourself
+%
+
+! ------------------- Instance methods for ${className}
+
+category: 'initialization'
+method: ${className}
+initialize
+
+\tsuper initialize.
+%
+`;
+}
 
 /**
  * Manages compiling .gs files back into GemStone on save.
@@ -23,13 +66,18 @@ export class FileInManager {
   }
 
   register(context: vscode.ExtensionContext): void {
-    const sub = vscode.workspace.onDidSaveTextDocument((doc) => {
+    const saveSub = vscode.workspace.onDidSaveTextDocument((doc) => {
       if (this.shouldHandle(doc)) {
         this.handleSave(doc);
       }
     });
-    this.disposables.push(sub);
-    context.subscriptions.push(sub, this.diagnostics);
+    const createSub = vscode.workspace.onDidCreateFiles((e) => {
+      for (const file of e.files) {
+        this.handleFileCreate(file);
+      }
+    });
+    this.disposables.push(saveSub, createSub);
+    context.subscriptions.push(saveSub, createSub, this.diagnostics);
   }
 
   private shouldHandle(document: vscode.TextDocument): boolean {
@@ -43,6 +91,36 @@ export class FileInManager {
     // Only handle files under the export root
     const relative = path.relative(exportRoot, document.uri.fsPath);
     return !relative.startsWith('..') && !path.isAbsolute(relative);
+  }
+
+  private handleFileCreate(uri: vscode.Uri): void {
+    if (uri.scheme !== 'file') return;
+    if (!uri.fsPath.endsWith('.gs')) return;
+    if (this.exportManager.isWriting) return;
+
+    const exportRoot = this.exportManager.getExportRoot();
+    if (!exportRoot) return;
+
+    const relative = path.relative(exportRoot, uri.fsPath);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) return;
+
+    // Check the file is empty (newly created)
+    try {
+      const stat = fs.statSync(uri.fsPath);
+      if (stat.size > 0) return;
+    } catch {
+      return;
+    }
+
+    // Extract class name from filename and dictionary name from parent dir
+    const className = path.basename(uri.fsPath, '.gs');
+    const dictDir = path.basename(path.dirname(uri.fsPath));
+    const dictNameMatch = dictDir.match(/^\d+\.\s+(.*)/);
+    if (!dictNameMatch) return;
+    const dictName = dictNameMatch[1];
+
+    const template = newClassTemplate(className, dictName);
+    fs.writeFileSync(uri.fsPath, template, 'utf-8');
   }
 
   private handleSave(document: vscode.TextDocument): void {
