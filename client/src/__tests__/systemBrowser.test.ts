@@ -29,7 +29,7 @@ vi.mock('fs', async () => {
 
 import * as fs from 'fs';
 
-import { window, ViewColumn, commands } from '../__mocks__/vscode';
+import { window, ViewColumn, commands, __setConfig, __resetConfig } from '../__mocks__/vscode';
 import { SystemBrowser, extractSelector } from '../systemBrowser';
 import * as queries from '../browserQueries';
 import type { ActiveSession } from '../sessionManager';
@@ -915,6 +915,114 @@ describe('SystemBrowser', () => {
       messageHandler({ command: 'selectClass', name: 'AllUsers' });
 
       expect(queries.getClassEnvironments).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('multi-environment', () => {
+    beforeEach(() => {
+      __setConfig('gemstone', 'maxEnvironment', 2);
+      vi.mocked(queries.getClassEnvironments).mockReturnValue([
+        { isMeta: false, envId: 0, category: 'Accessing', selectors: ['name', 'name:'] },
+        { isMeta: false, envId: 0, category: 'Comparing', selectors: ['=', 'hash'] },
+        { isMeta: false, envId: 1, category: 'Ruby', selectors: ['rb_name'] },
+        { isMeta: true, envId: 0, category: 'Instance Creation', selectors: ['new', 'new:'] },
+      ]);
+      SystemBrowser.show(session, exportManager);
+      messageHandler({ command: 'ready' });
+    });
+
+    afterEach(() => {
+      __resetConfig();
+    });
+
+    it('sends setMaxEnvironment on ready when maxEnvironment > 0', () => {
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'setMaxEnvironment',
+        maxEnv: 2,
+      });
+    });
+
+    it('does not send setMaxEnvironment when maxEnvironment is 0', () => {
+      __setConfig('gemstone', 'maxEnvironment', 0);
+      (SystemBrowser as unknown as { panels: Map<number, unknown> }).panels = new Map();
+      SystemBrowser.show(makeSession(2, 'other'), exportManager);
+      const otherHandler = vi.mocked(window.createWebviewPanel).mock.results.at(-1)!
+        .value.webview.onDidReceiveMessage.mock.calls[0][0];
+      otherHandler({ command: 'ready' });
+
+      const calls = vi.mocked(window.createWebviewPanel).mock.results.at(-1)!
+        .value.webview.postMessage.mock.calls;
+      expect(calls.some((c: unknown[]) => (c[0] as { command: string }).command === 'setMaxEnvironment')).toBe(false);
+    });
+
+    it('passes maxEnvironment to getClassEnvironments', () => {
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      messageHandler({ command: 'selectCategory', name: '** ALL CLASSES **' });
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      messageHandler({ command: 'selectClass', name: 'Array' });
+
+      expect(queries.getClassEnvironments).toHaveBeenCalledWith(session, 1, 'Array', 2);
+    });
+
+    it('shows env 0 method categories by default', () => {
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      messageHandler({ command: 'selectCategory', name: '** ALL CLASSES **' });
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      messageHandler({ command: 'selectClass', name: 'Array' });
+
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadMethodCategories',
+        items: ['** ALL METHODS **', 'Accessing', 'Comparing'],
+      });
+    });
+
+    it('switches to env 1 method categories on toggleEnvironment', () => {
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      messageHandler({ command: 'selectCategory', name: '** ALL CLASSES **' });
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      messageHandler({ command: 'selectClass', name: 'Array' });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      messageHandler({ command: 'toggleEnvironment', envId: 1 });
+
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadMethodCategories',
+        items: ['** ALL METHODS **', 'Ruby'],
+      });
+    });
+
+    it('shows empty categories for environment with no methods', () => {
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      messageHandler({ command: 'selectCategory', name: '** ALL CLASSES **' });
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      messageHandler({ command: 'selectClass', name: 'Array' });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      messageHandler({ command: 'toggleEnvironment', envId: 2 });
+
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadMethodCategories',
+        items: ['** ALL METHODS **'],
+      });
+    });
+
+    it('resets env to 0 on refresh', () => {
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      messageHandler({ command: 'selectCategory', name: '** ALL CLASSES **' });
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      messageHandler({ command: 'selectClass', name: 'Array' });
+      messageHandler({ command: 'toggleEnvironment', envId: 1 });
+
+      messageHandler({ command: 'refresh' });
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      messageHandler({ command: 'selectCategory', name: '** ALL CLASSES **' });
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      messageHandler({ command: 'selectClass', name: 'Array' });
+
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadMethodCategories',
+        items: ['** ALL METHODS **', 'Accessing', 'Comparing'],
+      });
     });
   });
 });

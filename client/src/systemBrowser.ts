@@ -17,6 +17,7 @@ interface BrowserState {
   classes: string[];
   selectedClass: string | null;
   isMeta: boolean;
+  selectedEnvId: number;
   methodCategories: string[];
   selectedMethodCategory: string | null;
   methods: string[];
@@ -121,6 +122,7 @@ export class SystemBrowser {
       classes: [],
       selectedClass: null,
       isMeta: false,
+      selectedEnvId: 0,
       methodCategories: [],
       selectedMethodCategory: null,
       methods: [],
@@ -193,6 +195,9 @@ export class SystemBrowser {
           break;
         case 'selectHierarchyClass':
           this.handleSelectHierarchyClass(message.className as string);
+          break;
+        case 'toggleEnvironment':
+          this.handleToggleEnvironment(message.envId as number);
           break;
         // Context menu commands
         case 'ctxAddDictionary':
@@ -267,6 +272,13 @@ export class SystemBrowser {
   // ── Handlers ──────────────────────────────────────────────
 
   private handleReady(): void {
+    const maxEnv = this.getMaxEnvironment();
+    if (maxEnv > 0) {
+      this.panel.webview.postMessage({
+        command: 'setMaxEnvironment',
+        maxEnv,
+      });
+    }
     this.state.dictionaries = queries.getDictionaryNames(this.session);
     this.panel.webview.postMessage({
       command: 'loadDictionaries',
@@ -372,7 +384,7 @@ export class SystemBrowser {
 
     const envData = this.getCachedEnvData(dictIndex, className);
     const filtered = envData.filter(
-      e => e.isMeta === this.state.isMeta && e.envId === 0,
+      e => e.isMeta === this.state.isMeta && e.envId === this.state.selectedEnvId,
     );
 
     let methods: string[];
@@ -417,6 +429,7 @@ export class SystemBrowser {
       classes: [],
       selectedClass: null,
       isMeta: false,
+      selectedEnvId: 0,
       methodCategories: [],
       selectedMethodCategory: null,
       methods: [],
@@ -477,6 +490,16 @@ export class SystemBrowser {
 
     this.loadMethodCategories();
     this.openClassFile(className);
+  }
+
+  private handleToggleEnvironment(envId: number): void {
+    this.state.selectedEnvId = envId;
+    this.state.selectedMethodCategory = null;
+    this.state.selectedMethod = null;
+
+    if (this.state.selectedClass) {
+      this.loadMethodCategories();
+    }
   }
 
   // ── Context menu handlers ────────────────────────────────
@@ -815,11 +838,17 @@ export class SystemBrowser {
     return entries;
   }
 
+  private getMaxEnvironment(): number {
+    return vscode.workspace.getConfiguration('gemstone').get<number>('maxEnvironment', 0);
+  }
+
   private getCachedEnvData(dictIndex: number, className: string): queries.EnvCategoryLine[] {
     const key = `${dictIndex}/${className}`;
     let data = this.envCache.get(key);
     if (!data) {
-      data = queries.getClassEnvironments(this.session, dictIndex, className, 0);
+      data = queries.getClassEnvironments(
+        this.session, dictIndex, className, this.getMaxEnvironment(),
+      );
       this.envCache.set(key, data);
     }
     return data;
@@ -832,7 +861,7 @@ export class SystemBrowser {
 
     const envData = this.getCachedEnvData(dictIndex, className);
     const filtered = envData.filter(
-      e => e.isMeta === this.state.isMeta && e.envId === 0,
+      e => e.isMeta === this.state.isMeta && e.envId === this.state.selectedEnvId,
     );
 
     const categories = filtered.map(e => e.category).sort();
@@ -1239,6 +1268,7 @@ export class SystemBrowser {
     <div class="column">
       <div class="column-header">Method Categories</div>
       <div class="column-list" id="list-method-cats"></div>
+      <div class="column-footer hidden" id="envFooter"></div>
     </div>
     <div class="column">
       <div class="column-header">Methods</div>
@@ -1641,6 +1671,26 @@ export class SystemBrowser {
           errorBanner.style.display = 'block';
           setTimeout(() => { errorBanner.style.display = 'none'; }, 5000);
           break;
+        case 'setMaxEnvironment': {
+          const footer = document.getElementById('envFooter');
+          footer.innerHTML = '';
+          for (let i = 0; i <= msg.maxEnv; i++) {
+            const label = document.createElement('label');
+            const radio = document.createElement('input');
+            radio.type = 'radio';
+            radio.name = 'env';
+            radio.value = String(i);
+            if (i === 0) radio.checked = true;
+            radio.addEventListener('change', () => {
+              vscode.postMessage({ command: 'toggleEnvironment', envId: i });
+            });
+            label.appendChild(radio);
+            label.appendChild(document.createTextNode(' Env ' + i));
+            footer.appendChild(label);
+          }
+          footer.classList.remove('hidden');
+          break;
+        }
         case 'setSessionLabel':
           document.getElementById('sessionLabel').textContent = msg.label;
           break;

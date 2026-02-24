@@ -11,8 +11,3 @@
 
 - **Method-level diffing**: Instead of filing in the entire class on save, diff against the previous version and only compile changed methods. Defer until whole-class file-in proves too slow.
 
-## System Browser
-
-### Multiple Environments
-When `gemstone.maxEnvironment > 0`, show environment tabs or a selector in the method categories column to browse methods in environments 0 through N.
-
