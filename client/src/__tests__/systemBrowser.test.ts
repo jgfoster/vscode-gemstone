@@ -6,6 +6,7 @@ vi.mock('../browserQueries', () => ({
   getDictionaryNames: vi.fn(),
   getDictionaryEntries: vi.fn(),
   getClassEnvironments: vi.fn(),
+  getClassHierarchy: vi.fn(),
 }));
 
 vi.mock('fs', async () => {
@@ -400,6 +401,153 @@ describe('SystemBrowser', () => {
       // Try to open a method that doesn't exist in the file
       messageHandler({ command: 'selectMethod', selector: 'nonExistentMethod' });
       expect(window.showTextDocument).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('hierarchy view', () => {
+    const hierarchyData: queries.ClassHierarchyEntry[] = [
+      { className: 'Object', dictName: 'Globals', kind: 'superclass' },
+      { className: 'Collection', dictName: 'Globals', kind: 'superclass' },
+      { className: 'SequenceableCollection', dictName: 'Globals', kind: 'superclass' },
+      { className: 'Array', dictName: 'UserGlobals', kind: 'self' },
+      { className: 'SmallArray', dictName: 'UserGlobals', kind: 'subclass' },
+    ];
+
+    beforeEach(() => {
+      SystemBrowser.show(session, exportManager);
+      messageHandler({ command: 'ready' });
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      messageHandler({ command: 'selectCategory', name: '** ALL CLASSES **' });
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      messageHandler({ command: 'selectClass', name: 'Array' });
+      vi.mocked(queries.getClassHierarchy).mockReturnValue(hierarchyData);
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+    });
+
+    it('fetches hierarchy and posts data when toggling to hierarchy mode', () => {
+      messageHandler({ command: 'toggleViewMode', mode: 'hierarchy' });
+
+      expect(queries.getClassHierarchy).toHaveBeenCalledWith(session, 'Array');
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'setViewMode',
+        mode: 'hierarchy',
+      });
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadHierarchy',
+        items: [
+          { className: 'Object', dictName: 'Globals', kind: 'superclass', indent: 0 },
+          { className: 'Collection', dictName: 'Globals', kind: 'superclass', indent: 1 },
+          { className: 'SequenceableCollection', dictName: 'Globals', kind: 'superclass', indent: 2 },
+          { className: 'Array', dictName: 'UserGlobals', kind: 'self', indent: 3 },
+          { className: 'SmallArray', dictName: 'UserGlobals', kind: 'subclass', indent: 4 },
+        ],
+        selectedClass: 'Array',
+      });
+    });
+
+    it('posts empty hierarchy when no class is selected', () => {
+      // Deselect class by selecting a new dictionary
+      messageHandler({ command: 'selectDictionary', index: 2 });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      messageHandler({ command: 'toggleViewMode', mode: 'hierarchy' });
+
+      expect(queries.getClassHierarchy).not.toHaveBeenCalled();
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'setViewMode',
+        mode: 'hierarchy',
+      });
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadHierarchy',
+        items: [],
+        selectedClass: null,
+      });
+    });
+
+    it('restores category data when toggling back to category mode', () => {
+      messageHandler({ command: 'toggleViewMode', mode: 'hierarchy' });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      messageHandler({ command: 'toggleViewMode', mode: 'category' });
+
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'setViewMode',
+        mode: 'category',
+      });
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadClassCategories',
+        items: ['** ALL CLASSES **', 'Collections', 'Kernel'],
+      });
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadClasses',
+        items: ['Array', 'Bag', 'Set'],
+      });
+    });
+
+    it('loads method categories when selecting a hierarchy class', () => {
+      messageHandler({ command: 'toggleViewMode', mode: 'hierarchy' });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      messageHandler({ command: 'selectHierarchyClass', className: 'Array' });
+
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadMethodCategories',
+        items: ['** ALL METHODS **', 'Accessing', 'Comparing'],
+      });
+    });
+
+    it('resolves correct dictionary for hierarchy class from different dict', () => {
+      messageHandler({ command: 'toggleViewMode', mode: 'hierarchy' });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      // Select 'Collection' which is in 'Globals' (index 2)
+      messageHandler({ command: 'selectHierarchyClass', className: 'Collection' });
+
+      expect(queries.getClassEnvironments).toHaveBeenCalledWith(session, 2, 'Collection', 0);
+    });
+
+    it('ignores selectHierarchyClass for unknown class', () => {
+      messageHandler({ command: 'toggleViewMode', mode: 'hierarchy' });
+      vi.mocked(queries.getClassEnvironments).mockClear();
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      messageHandler({ command: 'selectHierarchyClass', className: 'NoSuchClass' });
+
+      expect(queries.getClassEnvironments).not.toHaveBeenCalled();
+    });
+
+    it('caches hierarchy data per class', () => {
+      messageHandler({ command: 'toggleViewMode', mode: 'hierarchy' });
+      messageHandler({ command: 'toggleViewMode', mode: 'category' });
+      messageHandler({ command: 'toggleViewMode', mode: 'hierarchy' });
+
+      expect(queries.getClassHierarchy).toHaveBeenCalledTimes(1);
+    });
+
+    it('clears hierarchy cache on refresh', () => {
+      messageHandler({ command: 'toggleViewMode', mode: 'hierarchy' });
+      messageHandler({ command: 'refresh' });
+
+      // Re-navigate to a class and toggle to hierarchy
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      messageHandler({ command: 'selectCategory', name: '** ALL CLASSES **' });
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      messageHandler({ command: 'selectClass', name: 'Array' });
+      messageHandler({ command: 'toggleViewMode', mode: 'hierarchy' });
+
+      expect(queries.getClassHierarchy).toHaveBeenCalledTimes(2);
+    });
+
+    it('refresh resets view mode to category', () => {
+      messageHandler({ command: 'toggleViewMode', mode: 'hierarchy' });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      messageHandler({ command: 'refresh' });
+
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'setViewMode',
+        mode: 'category',
+      });
     });
   });
 });

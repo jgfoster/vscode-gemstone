@@ -21,6 +21,9 @@ interface BrowserState {
   selectedMethodCategory: string | null;
   methods: string[];
   selectedMethod: string | null;
+  viewMode: 'category' | 'hierarchy';
+  hierarchyEntries: queries.ClassHierarchyEntry[];
+  hierarchyClassName: string | null;
 }
 
 // ── Selector extraction ──────────────────────────────────────
@@ -63,6 +66,7 @@ export class SystemBrowser {
   // Caches
   private dictEntryCache = new Map<number, queries.DictEntry[]>();
   private envCache = new Map<string, queries.EnvCategoryLine[]>();
+  private hierarchyCache = new Map<string, queries.ClassHierarchyEntry[]>();
 
   // Dimming
   private dimDecorationType: vscode.TextEditorDecorationType;
@@ -121,6 +125,9 @@ export class SystemBrowser {
       selectedMethodCategory: null,
       methods: [],
       selectedMethod: null,
+      viewMode: 'category',
+      hierarchyEntries: [],
+      hierarchyClassName: null,
     };
 
     this.dimDecorationType = vscode.window.createTextEditorDecorationType({
@@ -180,6 +187,12 @@ export class SystemBrowser {
           break;
         case 'refresh':
           this.handleRefresh();
+          break;
+        case 'toggleViewMode':
+          this.handleToggleViewMode(message.mode as string);
+          break;
+        case 'selectHierarchyClass':
+          this.handleSelectHierarchyClass(message.className as string);
           break;
       }
     } catch (e: unknown) {
@@ -315,6 +328,7 @@ export class SystemBrowser {
   private handleRefresh(): void {
     this.dictEntryCache.clear();
     this.envCache.clear();
+    this.hierarchyCache.clear();
     this.clearDimming();
 
     this.state = {
@@ -329,9 +343,62 @@ export class SystemBrowser {
       selectedMethodCategory: null,
       methods: [],
       selectedMethod: null,
+      viewMode: 'category',
+      hierarchyEntries: [],
+      hierarchyClassName: null,
     };
 
+    this.panel.webview.postMessage({ command: 'setViewMode', mode: 'category' });
     this.handleReady();
+  }
+
+  private handleToggleViewMode(mode: string): void {
+    this.state.viewMode = mode as 'category' | 'hierarchy';
+
+    if (mode === 'hierarchy') {
+      if (this.state.selectedClass) {
+        this.sendHierarchy(this.state.selectedClass);
+      } else {
+        this.panel.webview.postMessage({ command: 'setViewMode', mode: 'hierarchy' });
+        this.panel.webview.postMessage({
+          command: 'loadHierarchy',
+          items: [],
+          selectedClass: null,
+        });
+      }
+    } else {
+      this.panel.webview.postMessage({ command: 'setViewMode', mode: 'category' });
+      // Re-send category data so the columns are populated
+      if (this.state.selectedDictIndex) {
+        this.panel.webview.postMessage({
+          command: 'loadClassCategories',
+          items: this.state.classCategories,
+        });
+        if (this.state.selectedCategory) {
+          this.panel.webview.postMessage({
+            command: 'loadClasses',
+            items: this.state.classes,
+          });
+        }
+      }
+    }
+  }
+
+  private handleSelectHierarchyClass(className: string): void {
+    // Find which dictionary contains this class from the hierarchy entries
+    const entry = this.state.hierarchyEntries.find(e => e.className === className);
+    if (!entry) return;
+
+    const dictIndex = this.state.dictionaries.indexOf(entry.dictName) + 1;
+    if (dictIndex < 1) return;
+
+    this.state.selectedDictIndex = dictIndex;
+    this.state.selectedClass = className;
+    this.state.selectedMethodCategory = null;
+    this.state.selectedMethod = null;
+
+    this.loadMethodCategories();
+    this.openClassFile(className);
   }
 
   // ── Data helpers ──────────────────────────────────────────
@@ -371,6 +438,31 @@ export class SystemBrowser {
     this.panel.webview.postMessage({
       command: 'loadMethodCategories',
       items: this.state.methodCategories,
+    });
+  }
+
+  private sendHierarchy(className: string): void {
+    let entries = this.hierarchyCache.get(className);
+    if (!entries) {
+      entries = queries.getClassHierarchy(this.session, className);
+      this.hierarchyCache.set(className, entries);
+    }
+    this.state.hierarchyEntries = entries;
+    this.state.hierarchyClassName = className;
+
+    const superCount = entries.filter(e => e.kind === 'superclass').length;
+    const items = entries.map((e, i) => ({
+      className: e.className,
+      dictName: e.dictName,
+      kind: e.kind,
+      indent: e.kind === 'superclass' ? i : e.kind === 'self' ? superCount : superCount + 1,
+    }));
+
+    this.panel.webview.postMessage({ command: 'setViewMode', mode: 'hierarchy' });
+    this.panel.webview.postMessage({
+      command: 'loadHierarchy',
+      items,
+      selectedClass: className,
     });
   }
 
@@ -602,6 +694,49 @@ export class SystemBrowser {
       accent-color: var(--vscode-focusBorder);
     }
 
+    .mode-toggle {
+      display: inline-flex;
+      border-radius: 3px;
+      overflow: hidden;
+      border: 1px solid var(--vscode-panel-border);
+    }
+
+    .mode-btn {
+      padding: 2px 8px !important;
+      border-radius: 0 !important;
+      border: none !important;
+      background: transparent !important;
+      color: var(--vscode-descriptionForeground) !important;
+      cursor: pointer;
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-font-size);
+    }
+
+    .mode-btn:hover {
+      background: var(--vscode-list-hoverBackground) !important;
+    }
+
+    .mode-btn.active {
+      background: var(--vscode-button-secondaryBackground) !important;
+      color: var(--vscode-button-secondaryForeground) !important;
+    }
+
+    .hidden { display: none !important; }
+
+    .hierarchy-item-text {
+      white-space: pre;
+    }
+
+    .hierarchy-dict {
+      color: var(--vscode-descriptionForeground);
+      font-size: 0.85em;
+      margin-left: 8px;
+    }
+
+    .hierarchy-self-marker {
+      color: var(--vscode-focusBorder);
+    }
+
     .loading {
       padding: 8px;
       color: var(--vscode-descriptionForeground);
@@ -622,6 +757,10 @@ export class SystemBrowser {
   <div class="error-banner" id="errorBanner"></div>
   <div class="toolbar">
     <button id="refreshBtn" title="Refresh">&#x21bb; Refresh</button>
+    <span class="mode-toggle">
+      <button id="catBtn" class="mode-btn active" title="Category view">Category</button>
+      <button id="hierBtn" class="mode-btn" title="Hierarchy view">Hierarchy</button>
+    </span>
     <span class="session-label" id="sessionLabel"></span>
   </div>
   <div class="columns">
@@ -629,16 +768,24 @@ export class SystemBrowser {
       <div class="column-header">Dictionaries</div>
       <div class="column-list" id="list-dicts"></div>
     </div>
-    <div class="column">
+    <div class="column" id="col-categories">
       <div class="column-header">Class Categories</div>
       <div class="column-list" id="list-categories"></div>
     </div>
-    <div class="column">
+    <div class="column" id="col-classes">
       <div class="column-header">Classes</div>
       <div class="column-list" id="list-classes"></div>
       <div class="column-footer">
         <label><input type="radio" name="side" value="instance" checked> Instance</label>
         <label><input type="radio" name="side" value="class"> Class</label>
+      </div>
+    </div>
+    <div class="column hidden" id="col-hierarchy" style="flex:2">
+      <div class="column-header">Hierarchy</div>
+      <div class="column-list" id="list-hierarchy"></div>
+      <div class="column-footer">
+        <label><input type="radio" name="hier-side" value="instance" checked> Instance</label>
+        <label><input type="radio" name="hier-side" value="class"> Class</label>
       </div>
     </div>
     <div class="column">
@@ -661,7 +808,14 @@ export class SystemBrowser {
       classes:    document.getElementById('list-classes'),
       methodCats: document.getElementById('list-method-cats'),
       methods:    document.getElementById('list-methods'),
+      hierarchy:  document.getElementById('list-hierarchy'),
     };
+
+    const colCategories = document.getElementById('col-categories');
+    const colClasses = document.getElementById('col-classes');
+    const colHierarchy = document.getElementById('col-hierarchy');
+    const catBtn = document.getElementById('catBtn');
+    const hierBtn = document.getElementById('hierBtn');
 
     const errorBanner = document.getElementById('errorBanner');
 
@@ -738,6 +892,47 @@ export class SystemBrowser {
       vscode.postMessage({ command: 'refresh' });
     });
 
+    // ── Category / Hierarchy toggle ─────────────────
+    catBtn.addEventListener('click', () => {
+      vscode.postMessage({ command: 'toggleViewMode', mode: 'category' });
+    });
+    hierBtn.addEventListener('click', () => {
+      vscode.postMessage({ command: 'toggleViewMode', mode: 'hierarchy' });
+    });
+
+    // ── Hierarchy column click ──────────────────────
+    cols.hierarchy.addEventListener('click', (e) => {
+      const item = e.target.closest('.item');
+      if (!item) return;
+      const prev = cols.hierarchy.querySelector('.item.selected');
+      if (prev) prev.classList.remove('selected');
+      item.classList.add('selected');
+      vscode.postMessage({ command: 'selectHierarchyClass', className: item.dataset.className });
+    });
+
+    // ── Hierarchy Instance/Class toggle ─────────────
+    document.querySelectorAll('input[name="hier-side"]').forEach((radio) => {
+      radio.addEventListener('change', (e) => {
+        // Sync the category-mode radios to match
+        document.querySelectorAll('input[name="side"]').forEach((r) => {
+          r.checked = (r.value === e.target.value);
+        });
+        vscode.postMessage({
+          command: 'toggleSide',
+          isMeta: e.target.value === 'class',
+        });
+      });
+    });
+
+    // Sync hierarchy radios when category radios change
+    document.querySelectorAll('input[name="side"]').forEach((radio) => {
+      radio.addEventListener('change', (e) => {
+        document.querySelectorAll('input[name="hier-side"]').forEach((r) => {
+          r.checked = (r.value === e.target.value);
+        });
+      });
+    });
+
     // ── Message receiver ───────────────────────────
     window.addEventListener('message', (event) => {
       const msg = event.data;
@@ -762,6 +957,39 @@ export class SystemBrowser {
           cols.methods.innerHTML = '';
           populateColumn(cols.methods, msg.items, []);
           break;
+        case 'setViewMode':
+          if (msg.mode === 'hierarchy') {
+            colCategories.classList.add('hidden');
+            colClasses.classList.add('hidden');
+            colHierarchy.classList.remove('hidden');
+            catBtn.classList.remove('active');
+            hierBtn.classList.add('active');
+          } else {
+            colCategories.classList.remove('hidden');
+            colClasses.classList.remove('hidden');
+            colHierarchy.classList.add('hidden');
+            catBtn.classList.add('active');
+            hierBtn.classList.remove('active');
+          }
+          break;
+        case 'loadHierarchy': {
+          cols.hierarchy.innerHTML = '';
+          for (const entry of msg.items) {
+            const div = document.createElement('div');
+            div.className = 'item';
+            div.dataset.className = entry.className;
+            const indent = '\\u00a0\\u00a0'.repeat(entry.indent);
+            let text = indent + entry.className;
+            if (entry.kind === 'self') text += ' \\u25c0';
+            div.innerHTML = '<span class="hierarchy-item-text">' + text + '</span>'
+              + '<span class="hierarchy-dict">' + entry.dictName + '</span>';
+            if (entry.className === msg.selectedClass) {
+              div.classList.add('selected');
+            }
+            cols.hierarchy.appendChild(div);
+          }
+          break;
+        }
         case 'showError':
           errorBanner.textContent = msg.message;
           errorBanner.style.display = 'block';
