@@ -99,6 +99,7 @@ export const ViewColumn = {
   One: 1,
   Two: 2,
   Three: 3,
+  Beside: -2,
 };
 
 // ── OverviewRulerLane mock ────────────────────────────────
@@ -137,6 +138,16 @@ function createMockPanel() {
   };
 }
 
+function createMockTextEditor() {
+  return {
+    document: { uri: Uri.file(''), languageId: '', getText: vi.fn(() => ''), lineAt: vi.fn(), lineCount: 0 },
+    selection: new Selection(new Position(0, 0), new Position(0, 0)),
+    selections: [],
+    setDecorations: vi.fn(),
+    revealRange: vi.fn(),
+  };
+}
+
 export const window = {
   activeTextEditor: undefined as unknown,
   createWebviewPanel: vi.fn((_viewType: string, title: string) => {
@@ -144,6 +155,7 @@ export const window = {
     panel.title = title;
     return panel;
   }),
+  showTextDocument: vi.fn(async () => createMockTextEditor()),
   showErrorMessage: vi.fn(),
   showInformationMessage: vi.fn(),
   showWarningMessage: vi.fn(),
@@ -151,6 +163,7 @@ export const window = {
   createOutputChannel: vi.fn(() => ({ appendLine: vi.fn(), show: vi.fn(), dispose: vi.fn() })),
   createTextEditorDecorationType: vi.fn(() => ({ dispose: vi.fn() })),
   visibleTextEditors: [] as unknown[],
+  onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: () => {} })),
   onDidChangeVisibleTextEditors: vi.fn(() => ({ dispose: () => {} })),
   showQuickPick: vi.fn(),
   withProgress: vi.fn(async (_opts: unknown, task: (progress: unknown, token: unknown) => Promise<unknown>) => {
@@ -274,6 +287,16 @@ export class Range {
     public readonly start: Position,
     public readonly end: Position,
   ) {}
+}
+
+export class Selection extends Range {
+  anchor: Position;
+  active: Position;
+  constructor(anchor: Position, active: Position) {
+    super(anchor, active);
+    this.anchor = anchor;
+    this.active = active;
+  }
 }
 
 export class Location {
