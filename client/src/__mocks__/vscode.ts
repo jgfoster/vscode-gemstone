@@ -152,6 +152,12 @@ export const window = {
   createTextEditorDecorationType: vi.fn(() => ({ dispose: vi.fn() })),
   visibleTextEditors: [] as unknown[],
   onDidChangeVisibleTextEditors: vi.fn(() => ({ dispose: () => {} })),
+  showQuickPick: vi.fn(),
+  withProgress: vi.fn(async (_opts: unknown, task: (progress: unknown, token: unknown) => Promise<unknown>) => {
+    const progress = { report: vi.fn() };
+    const token = { isCancellationRequested: false };
+    return task(progress, token);
+  }),
 };
 
 // ── Workspace mock ─────────────────────────────────────────
@@ -159,6 +165,8 @@ export const window = {
 export const workspace = {
   getConfiguration,
   onDidChangeConfiguration: vi.fn(() => ({ dispose: () => {} })),
+  onDidSaveTextDocument: vi.fn(() => ({ dispose: () => {} })),
+  registerTextDocumentContentProvider: vi.fn(() => ({ dispose: () => {} })),
   textDocuments: [] as unknown[],
 };
 
@@ -166,6 +174,7 @@ export const workspace = {
 
 export const commands = {
   registerCommand: vi.fn((_command: string, _callback: unknown) => ({ dispose: () => {} })),
+  executeCommand: vi.fn(),
 };
 
 // ── Uri mock ───────────────────────────────────────────────
@@ -299,12 +308,53 @@ export class SymbolInformation {
 
 // ── Languages mock ───────────────────────────────────────
 
+function createMockDiagnosticCollection() {
+  const store = new Map<string, unknown[]>();
+  return {
+    set: vi.fn((uri: { toString(): string }, diags: unknown[]) => {
+      store.set(uri.toString(), diags);
+    }),
+    delete: vi.fn((uri: { toString(): string }) => {
+      store.delete(uri.toString());
+    }),
+    get: vi.fn((uri: { toString(): string }) => store.get(uri.toString())),
+    clear: vi.fn(() => store.clear()),
+    dispose: vi.fn(),
+    __store: store,
+  };
+}
+
 export const languages = {
   registerWorkspaceSymbolProvider: vi.fn(() => ({ dispose: () => {} })),
   registerDefinitionProvider: vi.fn(() => ({ dispose: () => {} })),
   registerHoverProvider: vi.fn(() => ({ dispose: () => {} })),
   registerCompletionItemProvider: vi.fn(() => ({ dispose: () => {} })),
   setTextDocumentLanguage: vi.fn(),
+  createDiagnosticCollection: vi.fn((_name?: string) => createMockDiagnosticCollection()),
+};
+
+// ── Diagnostic mock ─────────────────────────────────────────
+
+export const DiagnosticSeverity = {
+  Error: 0,
+  Warning: 1,
+  Information: 2,
+  Hint: 3,
+};
+
+export class Diagnostic {
+  source?: string;
+  constructor(
+    public readonly range: Range,
+    public readonly message: string,
+    public readonly severity: number = DiagnosticSeverity.Error,
+  ) {}
+}
+
+export const ProgressLocation = {
+  SourceControl: 1,
+  Window: 10,
+  Notification: 15,
 };
 
 // ── MarkdownString mock ──────────────────────────────────

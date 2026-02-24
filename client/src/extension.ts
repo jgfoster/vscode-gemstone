@@ -24,12 +24,16 @@ import { BreakpointManager } from './breakpointManager';
 import { SelectorBreakpointManager } from './selectorBreakpointManager';
 import { SunitTestController } from './sunitTestController';
 import { ExportManager } from './exportManager';
+import { FileInManager } from './fileInManager';
+import { ReconcileManager } from './reconcileManager';
 import * as queries from './browserQueries';
 import { getGciLog } from './gciLog';
 
 let client: LanguageClient;
 let sessionManager: SessionManager;
 let exportManager: ExportManager;
+let fileInManager: FileInManager;
+let reconcileManager: ReconcileManager;
 
 export function activate(context: vscode.ExtensionContext) {
   // ── LSP Client ───────────────────────────────────────────
@@ -90,6 +94,10 @@ export function activate(context: vscode.ExtensionContext) {
   // ── Session Management ───────────────────────────────────
   sessionManager = new SessionManager();
   exportManager = new ExportManager();
+  fileInManager = new FileInManager(sessionManager, exportManager);
+  fileInManager.register(context);
+  reconcileManager = new ReconcileManager(exportManager);
+  reconcileManager.register(context);
   const sessionTreeProvider = new SessionTreeProvider(sessionManager);
 
   const sessionTreeView = vscode.window.createTreeView('gemstoneSessions', {
@@ -416,7 +424,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage(
           `Connected to ${login.stone} (${session.stoneVersion}) on ${login.gem_host} as ${login.gs_user}`
         );
-        exportManager.exportSession(session, true);
+        reconcileManager.reconcileOrExport(session, true);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         vscode.window.showErrorMessage(`Login failed: ${msg}`);
@@ -424,6 +432,14 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('gemstone.sessionCommit', async (item: GemStoneSessionItem) => {
+      if (fileInManager.hasUnsavedChanges(item.activeSession)) {
+        const choice = await vscode.window.showWarningMessage(
+          'Exported .gs files have unsaved edits that will be overwritten.',
+          { modal: true },
+          'Commit Anyway',
+        );
+        if (choice !== 'Commit Anyway') return;
+      }
       try {
         const { success, err } = sessionManager.commit(item.activeSession.id);
         if (success) {
@@ -443,6 +459,14 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('gemstone.sessionAbort', async (item: GemStoneSessionItem) => {
+      if (fileInManager.hasUnsavedChanges(item.activeSession)) {
+        const choice = await vscode.window.showWarningMessage(
+          'Exported .gs files have unsaved edits that will be overwritten.',
+          { modal: true },
+          'Abort Anyway',
+        );
+        if (choice !== 'Abort Anyway') return;
+      }
       try {
         const { success, err } = sessionManager.abort(item.activeSession.id);
         if (success) {
@@ -981,6 +1005,12 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate(): Thenable<void> | undefined {
+  if (reconcileManager) {
+    reconcileManager.dispose();
+  }
+  if (fileInManager) {
+    fileInManager.dispose();
+  }
   if (exportManager) {
     exportManager.dispose();
   }
