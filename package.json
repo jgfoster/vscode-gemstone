@@ -456,7 +456,7 @@
           "group": "inline@3"
         },
         {
-          "command": "gemstone.selectSession",
+          "command": "gemstone.openBrowser",
           "when": "view == gemstoneSessions && viewItem == gemstoneSession",
           "group": "inline@4"
         },
@@ -465,7 +465,7 @@
           "when": "view == gemstoneSessions && viewItem == gemstoneSession"
         },
         {
-          "command": "gemstone.openBrowser",
+          "command": "gemstone.selectSession",
           "when": "view == gemstoneSessions && viewItem == gemstoneSession"
         },
         {

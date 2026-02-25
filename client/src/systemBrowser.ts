@@ -63,6 +63,7 @@ export class SystemBrowser {
   private readonly panel: vscode.WebviewPanel;
   private disposables: vscode.Disposable[] = [];
   private state: BrowserState;
+  private syncingFromBrowser = false; // prevent cursor→browser feedback loops
 
   // Caches
   private dictEntryCache = new Map<number, queries.DictEntry[]>();
@@ -151,6 +152,127 @@ export class SystemBrowser {
       this.clearDimming();
     });
     this.disposables.push(editorSub);
+
+    // Sync browser webview when cursor moves in a session file
+    const selSub = vscode.window.onDidChangeTextEditorSelection(e => {
+      this.handleCursorSync(e);
+    });
+    this.disposables.push(selSub);
+  }
+
+  // ── Cursor-based browser sync ──────────────────────────────
+
+  private handleCursorSync(e: vscode.TextEditorSelectionChangeEvent): void {
+    if (this.syncingFromBrowser) return;
+
+    const filePath = e.textEditor.document.uri.fsPath;
+    const sessionRoot = this.exportManager.getSessionRoot(this.session);
+    if (!sessionRoot || !filePath.startsWith(sessionRoot)) return;
+
+    // Parse path: sessionRoot / "N. DictName" / "ClassName.gs"
+    const relative = filePath.slice(sessionRoot.length + 1); // skip leading /
+    const sep = relative.indexOf(path.sep);
+    if (sep < 0) return;
+    const dictLabel = relative.slice(0, sep);
+    const classFile = relative.slice(sep + 1);
+    if (!classFile.endsWith('.gs')) return;
+    const className = classFile.slice(0, -3);
+
+    const dotPos = dictLabel.indexOf('.');
+    if (dotPos < 0) return;
+    const dictIndex = parseInt(dictLabel.slice(0, dotPos), 10);
+    if (isNaN(dictIndex)) return;
+
+    // Find which method the cursor is in
+    const cursorLine = e.selections[0].active.line;
+    const content = e.textEditor.document.getText();
+    const regions = parseTopazDocument(content);
+    const cursorRegion = regions.find(
+      r => r.kind === 'smalltalk-method' && cursorLine >= r.startLine && cursorLine <= r.endLine,
+    );
+
+    const selector = cursorRegion
+      ? extractSelector(cursorRegion.text.split('\n')[0]?.trim() ?? '')
+      : null;
+    const isMeta = cursorRegion ? cursorRegion.command === 'classmethod' : this.state.isMeta;
+
+    // Skip if already in sync
+    if (this.state.selectedDictIndex === dictIndex &&
+      this.state.selectedClass === className &&
+      this.state.selectedMethod === (selector ?? null) &&
+      this.state.isMeta === isMeta) {
+      return;
+    }
+
+    // Update dictionary if changed
+    if (this.state.selectedDictIndex !== dictIndex) {
+      this.handleSelectDictionary(dictIndex);
+      this.panel.webview.postMessage({
+        command: 'selectDictionaryItem',
+        index: dictIndex,
+      });
+    }
+
+    // Ensure the class is visible — if the current category doesn't include
+    // this class, switch to "** ALL CLASSES **"
+    if (this.state.selectedClass !== className) {
+      if (!this.state.classes.includes(className)) {
+        this.handleSelectCategory('** ALL CLASSES **');
+      }
+      this.state.selectedClass = className;
+      this.state.selectedMethodCategory = null;
+      this.state.selectedMethod = null;
+      this.loadMethodCategories();
+    }
+
+    if (isMeta !== this.state.isMeta) {
+      this.handleToggleSide(isMeta);
+    }
+
+    // Find the method category containing this selector and load its methods
+    if (selector) {
+      const envData = this.getCachedEnvData(dictIndex, className);
+      const matchingEnv = envData.find(
+        entry => entry.isMeta === this.state.isMeta &&
+          entry.envId === this.state.selectedEnvId &&
+          entry.selectors.includes(selector),
+      );
+      if (matchingEnv && matchingEnv.category !== this.state.selectedMethodCategory) {
+        this.handleSelectMethodCategory(matchingEnv.category);
+      }
+      this.state.selectedMethod = selector;
+    } else {
+      this.state.selectedMethod = null;
+    }
+
+    // Refresh all webview column selections
+    this.panel.webview.postMessage({
+      command: 'loadClassCategories',
+      items: this.state.classCategories,
+      selected: this.state.selectedCategory,
+    });
+    this.panel.webview.postMessage({
+      command: 'loadClasses',
+      items: this.state.classes,
+      selected: className,
+    });
+    this.panel.webview.postMessage({
+      command: 'loadMethodCategories',
+      items: this.state.methodCategories,
+      selected: this.state.selectedMethodCategory,
+    });
+    this.panel.webview.postMessage({
+      command: 'loadMethods',
+      items: this.state.methods,
+      selected: selector,
+    });
+
+    // Update dimming to highlight the current method
+    if (cursorRegion) {
+      this.applyDimming(e.textEditor, cursorRegion.startLine, cursorRegion.endLine);
+    } else {
+      this.clearDimming();
+    }
   }
 
   private dispose(): void {
@@ -459,17 +581,29 @@ export class SystemBrowser {
       }
     } else {
       this.panel.webview.postMessage({ command: 'setViewMode', mode: 'category' });
-      // Re-send category data so the columns are populated
+      // Re-send category data so the columns are populated, restoring selection
       if (this.state.selectedDictIndex) {
         this.panel.webview.postMessage({
           command: 'loadClassCategories',
           items: this.state.classCategories,
+          selected: this.state.selectedCategory,
         });
         if (this.state.selectedCategory) {
           this.panel.webview.postMessage({
             command: 'loadClasses',
             items: this.state.classes,
+            selected: this.state.selectedClass,
           });
+          if (this.state.selectedClass) {
+            this.loadMethodCategories(this.state.selectedMethodCategory);
+            if (this.state.selectedMethodCategory) {
+              this.panel.webview.postMessage({
+                command: 'loadMethods',
+                items: this.state.methods,
+                selected: this.state.selectedMethod,
+              });
+            }
+          }
         }
       }
     }
@@ -854,7 +988,7 @@ export class SystemBrowser {
     return data;
   }
 
-  private loadMethodCategories(): void {
+  private loadMethodCategories(selected?: string | null): void {
     const dictIndex = this.state.selectedDictIndex;
     const className = this.state.selectedClass;
     if (!dictIndex || !className) return;
@@ -870,6 +1004,7 @@ export class SystemBrowser {
     this.panel.webview.postMessage({
       command: 'loadMethodCategories',
       items: this.state.methodCategories,
+      ...(selected ? { selected } : {}),
     });
   }
 
@@ -900,11 +1035,11 @@ export class SystemBrowser {
 
   // ── File navigation + dimming ─────────────────────────────
 
-  private openClassFile(
+  private async openClassFile(
     className: string,
     selector?: string,
     isMeta?: boolean,
-  ): void {
+  ): Promise<void> {
     const sessionRoot = this.exportManager.getSessionRoot(this.session);
     if (!sessionRoot) return;
 
@@ -919,13 +1054,22 @@ export class SystemBrowser {
 
     const uri = vscode.Uri.file(filePath);
 
+    // Reuse the editor group where a browser file is already shown,
+    // so the user can drag it to the bottom and subsequent opens stay there.
+    const viewColumn = await this.getBrowserViewColumn();
+
+    // Suppress cursor sync while we programmatically open/scroll the editor
+    this.syncingFromBrowser = true;
+
     if (!selector) {
       // Open at top (class definition)
       this.clearDimming();
       vscode.window.showTextDocument(uri, {
-        viewColumn: vscode.ViewColumn.Beside,
+        viewColumn,
         preview: false,
-        preserveFocus: true,
+      }).then(() => {
+        this.panel.reveal(undefined, true);
+        this.syncingFromBrowser = false;
       });
       return;
     }
@@ -943,19 +1087,50 @@ export class SystemBrowser {
       return extractSelector(firstLine) === selector;
     });
 
-    if (!matchingRegion) return;
+    if (!matchingRegion) {
+      this.syncingFromBrowser = false;
+      return;
+    }
 
     vscode.window.showTextDocument(uri, {
-      viewColumn: vscode.ViewColumn.Beside,
+      viewColumn,
       preview: false,
-      preserveFocus: true,
       selection: new vscode.Range(
         matchingRegion.startLine, 0,
         matchingRegion.startLine, 0,
       ),
     }).then(editor => {
+      const revealLine = Math.max(0, matchingRegion.startLine - 2);
+      editor.revealRange(
+        new vscode.Range(revealLine, 0, revealLine, 0),
+        vscode.TextEditorRevealType.AtTop,
+      );
       this.applyDimming(editor, matchingRegion.startLine, matchingRegion.endLine);
+      // Return focus to the browser so the user can keep clicking methods
+      this.panel.reveal(undefined, true);
+      this.syncingFromBrowser = false;
     });
+  }
+
+  private async getBrowserViewColumn(): Promise<vscode.ViewColumn> {
+    const sessionRoot = this.exportManager.getSessionRoot(this.session);
+    if (sessionRoot) {
+      for (const editor of vscode.window.visibleTextEditors) {
+        if (editor.document.uri.fsPath.startsWith(sessionRoot)) {
+          return editor.viewColumn ?? vscode.ViewColumn.Beside;
+        }
+      }
+    }
+    // No existing editor group — create a top/bottom split so the
+    // text editor opens below the browser instead of to the right.
+    await vscode.commands.executeCommand('vscode.setEditorLayout', {
+      orientation: 1,  // vertical (top/bottom)
+      groups: [
+        { size: 0.5 },
+        { size: 0.5 },
+      ],
+    });
+    return vscode.ViewColumn.Two;
   }
 
   private applyDimming(
@@ -1017,10 +1192,19 @@ export class SystemBrowser {
     .toolbar {
       display: flex;
       align-items: center;
-      padding: 4px 8px;
+      padding: 4px 0;
       border-bottom: 1px solid var(--vscode-panel-border);
-      gap: 6px;
       flex-shrink: 0;
+    }
+
+    .toolbar-cell {
+      flex: 1;
+      padding: 0 8px;
+    }
+
+    .toolbar-mode {
+      flex: 2;
+      text-align: center;
     }
 
     .toolbar button {
@@ -1034,6 +1218,11 @@ export class SystemBrowser {
       font-size: var(--vscode-font-size);
     }
 
+    .toolbar button:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+
     .toolbar button:hover {
       background: var(--vscode-button-secondaryHoverBackground);
     }
@@ -1041,7 +1230,10 @@ export class SystemBrowser {
     .toolbar .session-label {
       font-size: 0.85em;
       color: var(--vscode-descriptionForeground);
-      margin-left: auto;
+    }
+
+    .toolbar-session {
+      text-align: right;
     }
 
     .columns {
@@ -1233,12 +1425,18 @@ export class SystemBrowser {
 <body>
   <div class="error-banner" id="errorBanner"></div>
   <div class="toolbar">
-    <button id="refreshBtn" title="Refresh">&#x21bb; Refresh</button>
-    <span class="mode-toggle">
-      <button id="catBtn" class="mode-btn active" title="Category view">Category</button>
-      <button id="hierBtn" class="mode-btn" title="Hierarchy view">Hierarchy</button>
-    </span>
-    <span class="session-label" id="sessionLabel"></span>
+    <div class="toolbar-cell">
+      <button id="refreshBtn" title="Refresh">&#x21bb; Refresh</button>
+    </div>
+    <div class="toolbar-cell toolbar-mode">
+      <span class="mode-toggle">
+        <button id="catBtn" class="mode-btn active" title="Category view">Category</button>
+        <button id="hierBtn" class="mode-btn" title="Hierarchy view">Hierarchy</button>
+      </span>
+    </div>
+    <div class="toolbar-cell"></div>
+    <div class="toolbar-cell"></div>
+    <div class="toolbar-cell toolbar-session"><span class="session-label" id="sessionLabel"></span></div>
   </div>
   <div class="columns">
     <div class="column">
@@ -1296,7 +1494,6 @@ export class SystemBrowser {
     const colHierarchy = document.getElementById('col-hierarchy');
     const catBtn = document.getElementById('catBtn');
     const hierBtn = document.getElementById('hierBtn');
-
     const errorBanner = document.getElementById('errorBanner');
 
     // ── Populate a column with items ───────────────
@@ -1312,6 +1509,17 @@ export class SystemBrowser {
           div.draggable = true;
         }
         listEl.appendChild(div);
+      }
+    }
+
+    function selectItemInColumn(listEl, value) {
+      if (!value) return;
+      for (const child of listEl.children) {
+        if (child.dataset.value === value) {
+          child.classList.add('selected');
+          child.scrollIntoView({ block: 'nearest' });
+          break;
+        }
       }
     }
 
@@ -1613,18 +1821,22 @@ export class SystemBrowser {
         case 'loadClassCategories':
           clearFrom('categories');
           populateColumn(cols.categories, msg.items, ['** ALL CLASSES **', '** GLOBALS **']);
+          if (msg.selected) selectItemInColumn(cols.categories, msg.selected);
           break;
         case 'loadClasses':
           clearFrom('classes');
           populateColumn(cols.classes, msg.items, [], true);
+          if (msg.selected) selectItemInColumn(cols.classes, msg.selected);
           break;
         case 'loadMethodCategories':
           clearFrom('methodCats');
           populateColumn(cols.methodCats, msg.items, ['** ALL METHODS **']);
+          if (msg.selected) selectItemInColumn(cols.methodCats, msg.selected);
           break;
         case 'loadMethods':
           cols.methods.innerHTML = '';
           populateColumn(cols.methods, msg.items, [], true);
+          if (msg.selected) selectItemInColumn(cols.methods, msg.selected);
           break;
         case 'setViewMode':
           if (msg.mode === 'hierarchy') {

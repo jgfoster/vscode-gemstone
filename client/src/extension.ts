@@ -214,18 +214,29 @@ export function activate(context: vscode.ExtensionContext) {
   statusBarItem.command = 'gemstone.selectSession';
   context.subscriptions.push(statusBarItem);
 
+  const browserBarItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Right, 99
+  );
+  browserBarItem.text = '$(book)';
+  browserBarItem.tooltip = 'Open System Browser';
+  browserBarItem.command = 'gemstone.openBrowser';
+  context.subscriptions.push(browserBarItem);
+
   function updateStatusBar() {
     const session = sessionManager.getSelectedSession();
     if (session) {
       statusBarItem.text = `$(database) ${session.login.label}`;
       statusBarItem.tooltip = `GemStone: ${session.login.gs_user} in ${session.login.stone} (click to change)`;
       statusBarItem.show();
+      browserBarItem.show();
     } else if (sessionManager.getSessions().length > 0) {
       statusBarItem.text = '$(database) No session selected';
       statusBarItem.tooltip = 'Click to select a GemStone session';
       statusBarItem.show();
+      browserBarItem.hide();
     } else {
       statusBarItem.hide();
+      browserBarItem.hide();
     }
   }
 

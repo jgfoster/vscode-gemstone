@@ -29,7 +29,7 @@ vi.mock('fs', async () => {
 
 import * as fs from 'fs';
 
-import { window, ViewColumn, commands, __setConfig, __resetConfig } from '../__mocks__/vscode';
+import { window, ViewColumn, TextEditorRevealType, Range, commands, __setConfig, __resetConfig } from '../__mocks__/vscode';
 import { SystemBrowser, extractSelector } from '../systemBrowser';
 import * as queries from '../browserQueries';
 import type { ActiveSession } from '../sessionManager';
@@ -364,16 +364,18 @@ describe('SystemBrowser', () => {
       messageHandler({ command: 'selectCategory', name: '** ALL CLASSES **' });
     });
 
-    it('opens .gs file when selecting a class', () => {
+    it('opens .gs file when selecting a class', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockReturnValue(gsContent);
       messageHandler({ command: 'selectClass', name: 'Array' });
+      await vi.waitFor(() => {
+        expect(window.showTextDocument).toHaveBeenCalled();
+      });
 
       expect(window.showTextDocument).toHaveBeenCalledWith(
         expect.objectContaining({ path: '/tmp/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/Array.gs' }),
         expect.objectContaining({
-          viewColumn: ViewColumn.Beside,
-          preserveFocus: true,
+          viewColumn: ViewColumn.Two,
         }),
       );
     });
@@ -384,14 +386,20 @@ describe('SystemBrowser', () => {
       expect(window.showTextDocument).not.toHaveBeenCalled();
     });
 
-    it('opens file at method line when selecting a method', () => {
+    it('opens file at method line when selecting a method', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockReturnValue(gsContent);
 
       messageHandler({ command: 'selectClass', name: 'Array' });
+      await vi.waitFor(() => {
+        expect(window.showTextDocument).toHaveBeenCalled();
+      });
       vi.mocked(window.showTextDocument).mockClear();
 
       messageHandler({ command: 'selectMethod', selector: 'size' });
+      await vi.waitFor(() => {
+        expect(window.showTextDocument).toHaveBeenCalled();
+      });
 
       expect(window.showTextDocument).toHaveBeenCalledWith(
         expect.objectContaining({ path: '/tmp/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/Array.gs' }),
@@ -401,15 +409,68 @@ describe('SystemBrowser', () => {
       );
     });
 
-    it('does not open file when method not found', () => {
+    it('scrolls to two lines above the method so the category is visible', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(gsContent);
+
+      messageHandler({ command: 'selectClass', name: 'Array' });
+      await vi.waitFor(() => {
+        expect(window.showTextDocument).toHaveBeenCalled();
+      });
+
+      // 'size' method starts at line 10; reveal should be at line 8
+      messageHandler({ command: 'selectMethod', selector: 'size' });
+      await vi.waitFor(() => {
+        expect(vi.mocked(window.showTextDocument).mock.calls.length).toBeGreaterThanOrEqual(2);
+      });
+
+      const editor = await vi.mocked(window.showTextDocument).mock.results.at(-1)!.value;
+      expect(editor.revealRange).toHaveBeenCalledWith(
+        new Range(8, 0, 8, 0),
+        TextEditorRevealType.AtTop,
+      );
+    });
+
+    it('does not open file when method not found', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockReturnValue('run\n"empty"\n%\n');
       messageHandler({ command: 'selectClass', name: 'Array' });
+      await vi.waitFor(() => {
+        expect(window.showTextDocument).toHaveBeenCalled();
+      });
       vi.mocked(window.showTextDocument).mockClear();
 
       // Try to open a method that doesn't exist in the file
       messageHandler({ command: 'selectMethod', selector: 'nonExistentMethod' });
+      // openClassFile returns before showTextDocument when method not found,
+      // but we need to let the async getBrowserViewColumn resolve first
+      await new Promise(resolve => setTimeout(resolve, 0));
       expect(window.showTextDocument).not.toHaveBeenCalled();
+    });
+
+    it('reuses the editor group where a browser file is already open', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(gsContent);
+
+      // Simulate a browser file already visible in group Two (e.g. dragged to bottom)
+      const sessionRoot = '/tmp/gemstone/localhost/gs64stone/DataCurator';
+      (window.visibleTextEditors as unknown[]).push({
+        document: { uri: { fsPath: `${sessionRoot}/1. UserGlobals/Array.gs` } },
+        viewColumn: ViewColumn.Two,
+      });
+
+      messageHandler({ command: 'selectClass', name: 'Array' });
+      await vi.waitFor(() => {
+        expect(window.showTextDocument).toHaveBeenCalled();
+      });
+
+      expect(window.showTextDocument).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ viewColumn: ViewColumn.Two }),
+      );
+
+      // Clean up
+      (window.visibleTextEditors as unknown[]).length = 0;
     });
   });
 
@@ -486,11 +547,61 @@ describe('SystemBrowser', () => {
       expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
         command: 'loadClassCategories',
         items: ['** ALL CLASSES **', 'Collections', 'Kernel', '** GLOBALS **'],
+        selected: '** ALL CLASSES **',
       });
       expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
         command: 'loadClasses',
         items: ['Array', 'Bag', 'Set'],
+        selected: 'Array',
       });
+    });
+
+    it('restores class selection and method categories when toggling back to category mode', () => {
+      // Select a class so method categories are loaded
+      messageHandler({ command: 'selectClass', name: 'Array' });
+
+      messageHandler({ command: 'toggleViewMode', mode: 'hierarchy' });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      messageHandler({ command: 'toggleViewMode', mode: 'category' });
+
+      // Class list should include the selected class
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command: 'loadClasses',
+          selected: 'Array',
+        }),
+      );
+      // Method categories should be restored
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadMethodCategories',
+        items: ['** ALL METHODS **', 'Accessing', 'Comparing'],
+      });
+    });
+
+    it('restores method category and method selection when toggling back to category mode', () => {
+      messageHandler({ command: 'selectClass', name: 'Array' });
+      messageHandler({ command: 'selectMethodCategory', name: 'Accessing' });
+      messageHandler({ command: 'selectMethod', selector: 'size' });
+
+      messageHandler({ command: 'toggleViewMode', mode: 'hierarchy' });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      messageHandler({ command: 'toggleViewMode', mode: 'category' });
+
+      // Method categories should be restored with selection
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadMethodCategories',
+        items: ['** ALL METHODS **', 'Accessing', 'Comparing'],
+        selected: 'Accessing',
+      });
+      // Methods should be restored with selection
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command: 'loadMethods',
+          selected: 'size',
+        }),
+      );
     });
 
     it('loads method categories when selecting a hierarchy class', () => {
@@ -1025,4 +1136,5 @@ describe('SystemBrowser', () => {
       });
     });
   });
+
 });

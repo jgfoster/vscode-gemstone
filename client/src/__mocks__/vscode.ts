@@ -102,6 +102,15 @@ export const ViewColumn = {
   Beside: -2,
 };
 
+// ── TextEditorRevealType mock ──────────────────────────────
+
+export const TextEditorRevealType = {
+  Default: 0,
+  InCenter: 1,
+  InCenterIfOutsideViewport: 2,
+  AtTop: 3,
+};
+
 // ── OverviewRulerLane mock ────────────────────────────────
 
 export const OverviewRulerLane = {
@@ -132,9 +141,11 @@ function createMockPanel() {
   return {
     webview,
     title: '',
+    active: true,
     reveal: vi.fn(),
     dispose: vi.fn(),
     onDidDispose: vi.fn((_handler: unknown) => ({ dispose: () => {} })),
+    onDidChangeViewState: vi.fn((_handler: unknown) => ({ dispose: () => {} })),
   };
 }
 
@@ -164,6 +175,7 @@ export const window = {
   createTextEditorDecorationType: vi.fn(() => ({ dispose: vi.fn() })),
   visibleTextEditors: [] as unknown[],
   onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: () => {} })),
+  onDidChangeTextEditorSelection: vi.fn(() => ({ dispose: () => {} })),
   onDidChangeVisibleTextEditors: vi.fn(() => ({ dispose: () => {} })),
   showInputBox: vi.fn(),
   showQuickPick: vi.fn(),
@@ -284,10 +296,17 @@ export class Position {
 }
 
 export class Range {
-  constructor(
-    public readonly start: Position,
-    public readonly end: Position,
-  ) {}
+  public readonly start: Position;
+  public readonly end: Position;
+  constructor(startOrLine: Position | number, endOrChar: Position | number, endLine?: number, endChar?: number) {
+    if (typeof startOrLine === 'number') {
+      this.start = new Position(startOrLine, endOrChar as number);
+      this.end = new Position(endLine ?? startOrLine, endChar ?? (endOrChar as number));
+    } else {
+      this.start = startOrLine;
+      this.end = endOrChar as Position;
+    }
+  }
 }
 
 export class CodeLens {

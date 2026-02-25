@@ -511,7 +511,7 @@ supers reverseDo: [:each |
     nextPutAll: each name; tab; nextPutAll: 'superclass'; lf].
 stream nextPutAll: (classDict at: class ifAbsent: ['']); tab;
   nextPutAll: class name; tab; nextPutAll: 'self'; lf.
-subs asSortedCollection do: [:each |
+(subs asSortedCollection: [:a :b | a name <= b name]) do: [:each |
   stream nextPutAll: (classDict at: each ifAbsent: ['']); tab;
     nextPutAll: each name; tab; nextPutAll: 'subclass'; lf].
 stream contents`;

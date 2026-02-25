@@ -949,10 +949,12 @@ export class Parser {
     if (token.type === TokenType.EnvSpecifier) {
       const next = this.pos + 1 < this.tokens.length ? this.tokens[this.pos + 1] : null;
       return next !== null && (next.type === TokenType.BinarySelector || next.type === TokenType.Minus ||
-        next.type === TokenType.LessThan || next.type === TokenType.GreaterThan);
+        next.type === TokenType.LessThan || next.type === TokenType.GreaterThan ||
+        next.type === TokenType.Pipe);
     }
     return token.type === TokenType.BinarySelector || token.type === TokenType.Minus ||
-      token.type === TokenType.LessThan || token.type === TokenType.GreaterThan;
+      token.type === TokenType.LessThan || token.type === TokenType.GreaterThan ||
+      token.type === TokenType.Pipe;
   }
 
   private isKeywordMessage(): boolean {
