@@ -254,6 +254,37 @@ export function getIndexedOops(
   return oops;
 }
 
+/**
+ * Returns sorted key-value entries for a SymbolDictionary.
+ */
+export function getDictionaryEntries(
+  session: ActiveSession, oop: bigint,
+): { key: string; valueOop: bigint }[] {
+  const keysOop = gciPerform(session, oop, 'keys');
+  const sortedOop = gciPerform(session, keysOop, 'asSortedCollection');
+  const keyArrayOop = gciPerform(session, sortedOop, 'asArray');
+
+  const { result: sizeRaw, err: sizeErr } = session.gci.GciTsFetchSize(
+    session.handle, keyArrayOop,
+  );
+  if (sizeErr.number !== 0) return [];
+  const count = Number(sizeRaw);
+  if (count === 0) return [];
+
+  const { oops: keyOops, err: fetchErr } = session.gci.GciTsFetchOops(
+    session.handle, keyArrayOop, 1n, count,
+  );
+  if (fetchErr.number !== 0) return [];
+
+  const entries: { key: string; valueOop: bigint }[] = [];
+  for (const keyOop of keyOops) {
+    const key = gciPerformFetchString(session, keyOop, 'asString');
+    const valueOop = gciPerform(session, oop, 'at:', [keyOop]);
+    entries.push({ key, valueOop });
+  }
+  return entries;
+}
+
 // ── Stepping ────────────────────────────────────────────
 
 /**

@@ -19,6 +19,10 @@
 - **Breakpoint Conditions** — Conditional breakpoints and hit count breakpoints.
 - **Transcript via ClientForwarderSend** — Real-time output using `System signal: 2336`.
 
+## Bugs
+
+- **Browser "Delete Class" doesn't delete local `.gs` file** — `handleDeleteClass` in `systemBrowser.ts` removes the class from GemStone but does not delete the corresponding `.gs` file from disk. The file persists in the file explorer until the next export/refresh.
+
 ## Known Limitations
 
 - **Detecting in-session commit/abort/continue**: If a user executes `System commit`, `System abort`, or `System continueTransaction` from a workspace (directly or indirectly via other code), the exported files become stale without the extension knowing. Possible approaches:

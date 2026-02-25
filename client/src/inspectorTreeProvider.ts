@@ -10,12 +10,14 @@ export interface InspectorNode {
   oop: bigint;
   label: string;
   isRoot: boolean;
-  kind: 'root' | 'named' | 'indexed';
+  kind: 'root' | 'named' | 'indexed' | 'association' | 'range';
+  rangeStart?: number;
+  rangeEnd?: number;
 }
 
 // ── TreeDataProvider ───────────────────────────────────
 
-const MAX_INDEXED = 500;
+const PAGE_SIZE = 100;
 const MAX_PRINT_STRING = 200;
 
 export class InspectorTreeProvider implements vscode.TreeDataProvider<InspectorNode> {
@@ -52,6 +54,16 @@ export class InspectorTreeProvider implements vscode.TreeDataProvider<InspectorN
   }
 
   getTreeItem(node: InspectorNode): vscode.TreeItem {
+    // Range nodes are virtual grouping nodes — no GCI calls needed
+    if (node.kind === 'range') {
+      const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.Collapsed);
+      const count = (node.rangeEnd ?? 0) - (node.rangeStart ?? 0) + 1;
+      item.description = `${count} items`;
+      item.iconPath = new vscode.ThemeIcon('symbol-array');
+      item.contextValue = 'gemstoneInspectorItem';
+      return item;
+    }
+
     const session = this.sessionManager.getSession(node.sessionId);
     if (!session) {
       const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.None);
@@ -88,6 +100,9 @@ export class InspectorTreeProvider implements vscode.TreeDataProvider<InspectorN
       case 'indexed':
         item.iconPath = new vscode.ThemeIcon('symbol-array');
         break;
+      case 'association':
+        item.iconPath = new vscode.ThemeIcon('symbol-key');
+        break;
     }
 
     return item;
@@ -101,6 +116,32 @@ export class InspectorTreeProvider implements vscode.TreeDataProvider<InspectorN
 
     if (node.oop === OOP_NIL || debug.isSpecialOop(session, node.oop)) {
       return [];
+    }
+
+    // Range nodes: fetch the specific slice of indexed elements
+    if (node.kind === 'range' && node.rangeStart !== undefined && node.rangeEnd !== undefined) {
+      const count = node.rangeEnd - node.rangeStart + 1;
+      const oops = debug.getIndexedOops(session, node.oop, node.rangeStart, count);
+      return oops.map((oop, i) => ({
+        sessionId: node.sessionId,
+        oop,
+        label: `[${node.rangeStart! + i}]`,
+        isRoot: false,
+        kind: 'indexed' as const,
+      }));
+    }
+
+    // Custom type-specific handling
+    const className = debug.getObjectClassName(session, node.oop);
+    if (className === 'SymbolDictionary') {
+      const entries = debug.getDictionaryEntries(session, node.oop);
+      return entries.map(e => ({
+        sessionId: node.sessionId,
+        oop: e.valueOop,
+        label: e.key,
+        isRoot: false,
+        kind: 'association' as const,
+      }));
     }
 
     const children: InspectorNode[] = [];
@@ -123,16 +164,30 @@ export class InspectorTreeProvider implements vscode.TreeDataProvider<InspectorN
     // Indexed elements
     const indexedCount = debug.getIndexedSize(session, node.oop);
     if (indexedCount > 0) {
-      const count = Math.min(indexedCount, MAX_INDEXED);
-      const oops = debug.getIndexedOops(session, node.oop, 1, count);
-      for (let i = 0; i < oops.length; i++) {
-        children.push({
-          sessionId: node.sessionId,
-          oop: oops[i],
-          label: `[${i + 1}]`,
-          isRoot: false,
-          kind: 'indexed',
-        });
+      if (indexedCount <= PAGE_SIZE) {
+        const oops = debug.getIndexedOops(session, node.oop, 1, indexedCount);
+        for (let i = 0; i < oops.length; i++) {
+          children.push({
+            sessionId: node.sessionId,
+            oop: oops[i],
+            label: `[${i + 1}]`,
+            isRoot: false,
+            kind: 'indexed',
+          });
+        }
+      } else {
+        for (let start = 1; start <= indexedCount; start += PAGE_SIZE) {
+          const end = Math.min(start + PAGE_SIZE - 1, indexedCount);
+          children.push({
+            sessionId: node.sessionId,
+            oop: node.oop,
+            label: `[${start}..${end}]`,
+            isRoot: false,
+            kind: 'range',
+            rangeStart: start,
+            rangeEnd: end,
+          });
+        }
       }
     }
 

@@ -14,6 +14,7 @@ vi.mock('../browserQueries', () => ({
   moveClass: vi.fn(),
   deleteMethod: vi.fn(),
   recategorizeMethod: vi.fn(),
+  removeDictionary: vi.fn(),
   renameCategory: vi.fn(),
   getMethodCategories: vi.fn(),
 }));
@@ -24,6 +25,8 @@ vi.mock('fs', async () => {
     ...actual,
     existsSync: vi.fn(() => false),
     readFileSync: vi.fn(() => ''),
+    mkdirSync: vi.fn(),
+    rmSync: vi.fn(),
   };
 });
 
@@ -692,6 +695,18 @@ describe('SystemBrowser', () => {
       });
     });
 
+    it('creates a directory on disk for the new dictionary', async () => {
+      vi.mocked(window.showInputBox).mockResolvedValue('NewDict');
+      vi.mocked(queries.getDictionaryNames).mockReturnValue(['UserGlobals', 'Globals', 'NewDict']);
+
+      await messageHandler({ command: 'ctxAddDictionary' });
+
+      expect(fs.mkdirSync).toHaveBeenCalledWith(
+        '/tmp/gemstone/localhost/gs64stone/DataCurator/3. NewDict',
+        { recursive: true },
+      );
+    });
+
     it('does nothing when user cancels add dictionary', async () => {
       vi.mocked(window.showInputBox).mockResolvedValue(undefined);
       await messageHandler({ command: 'ctxAddDictionary' });
@@ -742,6 +757,48 @@ describe('SystemBrowser', () => {
       messageHandler({ command: 'selectDictionary', index: 2 });
       messageHandler({ command: 'ctxMoveDictDown' });
       expect(queries.moveDictionaryDown).not.toHaveBeenCalled();
+    });
+
+    it('removes dictionary after confirmation', async () => {
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      vi.mocked(window.showWarningMessage).mockResolvedValue('Remove' as never);
+      vi.mocked(queries.getDictionaryNames).mockReturnValue(['Globals']);
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      await messageHandler({ command: 'ctxRemoveDictionary' });
+
+      expect(queries.removeDictionary).toHaveBeenCalledWith(session, 1);
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadDictionaries',
+        items: ['Globals'],
+      });
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadClassCategories',
+        items: [],
+      });
+    });
+
+    it('does not remove dictionary when user cancels', async () => {
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      vi.mocked(window.showWarningMessage).mockResolvedValue(undefined as never);
+
+      await messageHandler({ command: 'ctxRemoveDictionary' });
+
+      expect(queries.removeDictionary).not.toHaveBeenCalled();
+    });
+
+    it('deletes directory on disk when removing dictionary', async () => {
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      vi.mocked(window.showWarningMessage).mockResolvedValue('Remove' as never);
+      vi.mocked(queries.getDictionaryNames).mockReturnValue(['Globals']);
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+
+      await messageHandler({ command: 'ctxRemoveDictionary' });
+
+      expect(fs.rmSync).toHaveBeenCalledWith(
+        '/tmp/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals',
+        { recursive: true, force: true },
+      );
     });
   });
 
@@ -943,9 +1000,10 @@ describe('SystemBrowser', () => {
     });
 
     it('does not move class when no dictionary is selected', () => {
-      // Reset state — no dictionary selected
-      messageHandler({ command: 'refresh' });
-      vi.mocked(mockPanel.webview.postMessage).mockClear();
+      // Create a fresh browser with no dictionary selected
+      (SystemBrowser as unknown as { panels: Map<number, unknown> }).panels.clear();
+      SystemBrowser.show(session, exportManager);
+      messageHandler({ command: 'ready' });
 
       messageHandler({ command: 'dropClassOnDictionary', className: 'Array', dictName: 'Globals' });
 
@@ -1134,6 +1192,49 @@ describe('SystemBrowser', () => {
         command: 'loadMethodCategories',
         items: ['** ALL METHODS **', 'Accessing', 'Comparing'],
       });
+    });
+  });
+
+  describe('static refresh', () => {
+    it('refreshes the browser for a given session', () => {
+      SystemBrowser.show(session, exportManager);
+      messageHandler({ command: 'ready' });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      SystemBrowser.refresh(session.id);
+
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadDictionaries',
+        items: ['UserGlobals', 'Globals'],
+      });
+    });
+
+    it('restores dictionary and category selection after refresh', () => {
+      SystemBrowser.show(session, exportManager);
+      messageHandler({ command: 'ready' });
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      messageHandler({ command: 'selectCategory', name: '** ALL CLASSES **' });
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+
+      SystemBrowser.refresh(session.id);
+
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'selectDictionaryItem',
+        index: 1,
+      });
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'selectCategoryItem',
+        name: '** ALL CLASSES **',
+      });
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadClasses',
+        items: expect.any(Array),
+      });
+    });
+
+    it('does nothing when no browser exists for the session', () => {
+      // No browser has been created — should not throw
+      SystemBrowser.refresh(999);
     });
   });
 

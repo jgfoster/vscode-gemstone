@@ -15,6 +15,8 @@ vi.mock('../debugQueries', () => ({
     if (oop === 200n) return 'Array';
     if (oop === 300n) return 'UserProfile';
     if (oop === 0x14n) return 'UndefinedObject';
+    if (oop === 400n) return 'SymbolDictionary';
+    if (oop === 500n) return 'Array';
     return 'Object';
   }),
   isSpecialOop: vi.fn((_s: unknown, oop: bigint) => {
@@ -24,6 +26,8 @@ vi.mock('../debugQueries', () => ({
   getInstVarNames: vi.fn((_s: unknown, oop: bigint) => {
     if (oop === 100n) return ['list', 'maxSize'];
     if (oop === 200n) return [];
+    if (oop === 400n) return ['name', 'table'];
+    if (oop === 500n) return [];
     return [];
   }),
   getNamedInstVarOops: vi.fn((_s: unknown, oop: bigint) => {
@@ -32,10 +36,23 @@ vi.mock('../debugQueries', () => ({
   }),
   getIndexedSize: vi.fn((_s: unknown, oop: bigint) => {
     if (oop === 200n) return 2;
+    if (oop === 500n) return 250;
     return 0;
   }),
-  getIndexedOops: vi.fn((_s: unknown, oop: bigint) => {
+  getIndexedOops: vi.fn((_s: unknown, oop: bigint, start: number, count: number) => {
     if (oop === 200n) return [300n, 300n];
+    if (oop === 500n) {
+      return Array.from({ length: count }, (_, i) => BigInt(1000 + start + i));
+    }
+    return [];
+  }),
+  getDictionaryEntries: vi.fn((_s: unknown, oop: bigint) => {
+    if (oop === 400n) {
+      return [
+        { key: 'Alpha', valueOop: 300n },
+        { key: 'Beta', valueOop: 42n },
+      ];
+    }
     return [];
   }),
 }));
@@ -252,6 +269,97 @@ describe('InspectorTreeProvider', () => {
         sessionId: 1, oop: 100n, label: 'AllUsers', isRoot: true, kind: 'root',
       };
       expect(disconnectedProvider.getChildren(node)).toEqual([]);
+    });
+  });
+
+  describe('SymbolDictionary (custom inspector)', () => {
+    let provider: InspectorTreeProvider;
+
+    beforeEach(() => {
+      provider = new InspectorTreeProvider(makeSessionManager(true));
+    });
+
+    it('returns association children for a SymbolDictionary', () => {
+      const node: InspectorNode = {
+        sessionId: 1, oop: 400n, label: 'Globals', isRoot: true, kind: 'root',
+      };
+      const children = provider.getChildren(node);
+      expect(children).toHaveLength(2);
+      expect(children[0]).toMatchObject({
+        label: 'Alpha', oop: 300n, kind: 'association', isRoot: false,
+      });
+      expect(children[1]).toMatchObject({
+        label: 'Beta', oop: 42n, kind: 'association', isRoot: false,
+      });
+    });
+
+    it('renders association nodes with symbol-key icon', () => {
+      const node: InspectorNode = {
+        sessionId: 1, oop: 300n, label: 'Alpha', isRoot: false, kind: 'association',
+      };
+      const item = provider.getTreeItem(node);
+      expect((item.iconPath as ThemeIcon).id).toBe('symbol-key');
+    });
+  });
+
+  describe('pagination (range nodes)', () => {
+    let provider: InspectorTreeProvider;
+
+    beforeEach(() => {
+      provider = new InspectorTreeProvider(makeSessionManager(true));
+    });
+
+    it('creates range nodes for collections larger than PAGE_SIZE', () => {
+      const node: InspectorNode = {
+        sessionId: 1, oop: 500n, label: 'bigArray', isRoot: true, kind: 'root',
+      };
+      const children = provider.getChildren(node);
+      expect(children).toHaveLength(3);
+      expect(children[0]).toMatchObject({
+        label: '[1..100]', kind: 'range', rangeStart: 1, rangeEnd: 100,
+      });
+      expect(children[1]).toMatchObject({
+        label: '[101..200]', kind: 'range', rangeStart: 101, rangeEnd: 200,
+      });
+      expect(children[2]).toMatchObject({
+        label: '[201..250]', kind: 'range', rangeStart: 201, rangeEnd: 250,
+      });
+    });
+
+    it('expands a range node into indexed elements', () => {
+      const rangeNode: InspectorNode = {
+        sessionId: 1, oop: 500n, label: '[1..100]', isRoot: false,
+        kind: 'range', rangeStart: 1, rangeEnd: 100,
+      };
+      const children = provider.getChildren(rangeNode);
+      expect(children).toHaveLength(100);
+      expect(children[0]).toMatchObject({
+        label: '[1]', kind: 'indexed', isRoot: false,
+      });
+      expect(children[99]).toMatchObject({
+        label: '[100]', kind: 'indexed', isRoot: false,
+      });
+    });
+
+    it('renders range nodes as always-collapsed with item count', () => {
+      const rangeNode: InspectorNode = {
+        sessionId: 1, oop: 500n, label: '[1..100]', isRoot: false,
+        kind: 'range', rangeStart: 1, rangeEnd: 100,
+      };
+      const item = provider.getTreeItem(rangeNode);
+      expect(item.collapsibleState).toBe(TreeItemCollapsibleState.Collapsed);
+      expect(item.description).toBe('100 items');
+      expect((item.iconPath as ThemeIcon).id).toBe('symbol-array');
+    });
+
+    it('shows small collections inline without range grouping', () => {
+      const node: InspectorNode = {
+        sessionId: 1, oop: 200n, label: 'list', isRoot: false, kind: 'named',
+      };
+      const children = provider.getChildren(node);
+      expect(children).toHaveLength(2);
+      expect(children[0].kind).toBe('indexed');
+      expect(children[1].kind).toBe('indexed');
     });
   });
 });

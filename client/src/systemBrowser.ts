@@ -74,6 +74,14 @@ export class SystemBrowser {
   private dimDecorationType: vscode.TextEditorDecorationType;
   private dimmedEditorUri: string | undefined;
 
+  /**
+   * Refresh the browser for a given session (e.g. after abort or commit).
+   */
+  static refresh(sessionId: number): void {
+    const browser = SystemBrowser.panels.get(sessionId);
+    if (browser) browser.handleRefresh();
+  }
+
   static show(
     session: ActiveSession,
     exportManager: ExportManager,
@@ -331,6 +339,9 @@ export class SystemBrowser {
         case 'ctxMoveDictDown':
           this.handleMoveDictDown();
           break;
+        case 'ctxRemoveDictionary':
+          this.handleRemoveDictionary().catch(e => this.postError(e));
+          break;
         case 'ctxNewClassCategory':
           this.handleNewClassCategory().catch(e => this.postError(e));
           break;
@@ -538,6 +549,9 @@ export class SystemBrowser {
   }
 
   private handleRefresh(): void {
+    const prevDictIndex = this.state.selectedDictIndex;
+    const prevCategory = this.state.selectedCategory;
+
     this.dictEntryCache.clear();
     this.envCache.clear();
     this.hierarchyCache.clear();
@@ -563,6 +577,22 @@ export class SystemBrowser {
 
     this.panel.webview.postMessage({ command: 'setViewMode', mode: 'category' });
     this.handleReady();
+
+    // Restore dictionary and category selection so the class list stays visible
+    if (prevDictIndex && prevDictIndex <= this.state.dictionaries.length) {
+      this.handleSelectDictionary(prevDictIndex);
+      this.panel.webview.postMessage({
+        command: 'selectDictionaryItem',
+        index: prevDictIndex,
+      });
+      if (prevCategory && this.state.classCategories.includes(prevCategory)) {
+        this.handleSelectCategory(prevCategory);
+        this.panel.webview.postMessage({
+          command: 'selectCategoryItem',
+          name: prevCategory,
+        });
+      }
+    }
   }
 
   private handleToggleViewMode(mode: string): void {
@@ -648,6 +678,15 @@ export class SystemBrowser {
     queries.addDictionary(this.session, name);
     this.dictEntryCache.clear();
     this.state.dictionaries = queries.getDictionaryNames(this.session);
+
+    // Create the directory on disk so it appears in the file explorer
+    const sessionRoot = this.exportManager.getSessionRoot(this.session);
+    if (sessionRoot) {
+      const dictIndex = this.state.dictionaries.length; // new dict is last
+      const dictLabel = `${dictIndex}. ${name}`;
+      fs.mkdirSync(path.join(sessionRoot, dictLabel), { recursive: true });
+    }
+
     this.panel.webview.postMessage({
       command: 'loadDictionaries',
       items: this.state.dictionaries,
@@ -694,6 +733,53 @@ export class SystemBrowser {
       command: 'selectDictionaryItem',
       index: idx + 1,
     });
+  }
+
+  private async handleRemoveDictionary(): Promise<void> {
+    const dictIndex = this.state.selectedDictIndex;
+    if (!dictIndex) return;
+
+    const dictName = this.state.dictionaries[dictIndex - 1];
+
+    const confirmed = await vscode.window.showWarningMessage(
+      `Remove dictionary "${dictName}" from symbol list?`,
+      { modal: true },
+      'Remove',
+    );
+    if (confirmed !== 'Remove') return;
+
+    queries.removeDictionary(this.session, dictIndex);
+
+    // Delete the local directory
+    const sessionRoot = this.exportManager.getSessionRoot(this.session);
+    if (sessionRoot) {
+      const dictLabel = `${dictIndex}. ${dictName}`;
+      const dirPath = path.join(sessionRoot, dictLabel);
+      if (fs.existsSync(dirPath)) {
+        fs.rmSync(dirPath, { recursive: true, force: true });
+      }
+    }
+
+    // Re-fetch dictionaries — indices have shifted
+    this.dictEntryCache.clear();
+    this.envCache.clear();
+    this.hierarchyCache.clear();
+    this.state.dictionaries = queries.getDictionaryNames(this.session);
+    this.state.selectedDictIndex = null;
+    this.state.selectedCategory = null;
+    this.state.selectedClass = null;
+    this.state.selectedMethodCategory = null;
+    this.state.selectedMethod = null;
+    this.clearDimming();
+
+    this.panel.webview.postMessage({
+      command: 'loadDictionaries',
+      items: this.state.dictionaries,
+    });
+    this.panel.webview.postMessage({ command: 'loadClassCategories', items: [] });
+    this.panel.webview.postMessage({ command: 'loadClasses', items: [] });
+    this.panel.webview.postMessage({ command: 'loadMethodCategories', items: [] });
+    this.panel.webview.postMessage({ command: 'loadMethods', items: [] });
   }
 
   private async handleNewClassCategory(): Promise<void> {
@@ -1068,7 +1154,6 @@ export class SystemBrowser {
         viewColumn,
         preview: false,
       }).then(() => {
-        this.panel.reveal(undefined, true);
         this.syncingFromBrowser = false;
       });
       return;
@@ -1106,8 +1191,6 @@ export class SystemBrowser {
         vscode.TextEditorRevealType.AtTop,
       );
       this.applyDimming(editor, matchingRegion.startLine, matchingRegion.endLine);
-      // Return focus to the browser so the user can keep clicking methods
-      this.panel.reveal(undefined, true);
       this.syncingFromBrowser = false;
     });
   }
@@ -1737,6 +1820,8 @@ export class SystemBrowser {
           { separator: true },
           { label: 'Move Up', action: () => vscode.postMessage({ command: 'ctxMoveDictUp' }) },
           { label: 'Move Down', action: () => vscode.postMessage({ command: 'ctxMoveDictDown' }) },
+          { separator: true },
+          { label: 'Remove Dictionary\\u2026', action: () => vscode.postMessage({ command: 'ctxRemoveDictionary' }) },
         ] : []),
       ]);
     });

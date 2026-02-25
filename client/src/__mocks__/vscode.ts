@@ -179,6 +179,10 @@ export const window = {
   onDidChangeVisibleTextEditors: vi.fn(() => ({ dispose: () => {} })),
   showInputBox: vi.fn(),
   showQuickPick: vi.fn(),
+  tabGroups: {
+    all: [] as { tabs: { input: unknown }[] }[],
+    close: vi.fn(),
+  },
   withProgress: vi.fn(async (_opts: unknown, task: (progress: unknown, token: unknown) => Promise<unknown>) => {
     const progress = { report: vi.fn() };
     const token = { isCancellationRequested: false };
@@ -193,6 +197,7 @@ export const workspace = {
   onDidChangeConfiguration: vi.fn(() => ({ dispose: () => {} })),
   onDidSaveTextDocument: vi.fn(() => ({ dispose: () => {} })),
   onDidCreateFiles: vi.fn(() => ({ dispose: () => {} })),
+  onDidDeleteFiles: vi.fn(() => ({ dispose: () => {} })),
   registerTextDocumentContentProvider: vi.fn(() => ({ dispose: () => {} })),
   textDocuments: [] as unknown[],
 };

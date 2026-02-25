@@ -14,12 +14,23 @@ vi.mock('../topazFileIn', () => ({
   })),
 }));
 
+vi.mock('../systemBrowser', () => ({
+  SystemBrowser: { refresh: vi.fn() },
+}));
+
+vi.mock('../browserQueries', () => ({
+  deleteClass: vi.fn(),
+  removeDictionary: vi.fn(),
+}));
+
 import * as vscode from 'vscode';
 import { FileInManager, newClassTemplate } from '../fileInManager';
 import { SessionManager, ActiveSession } from '../sessionManager';
 import { ExportManager } from '../exportManager';
 import { GemStoneLogin } from '../loginTypes';
 import { fileInClass } from '../topazFileIn';
+import { SystemBrowser } from '../systemBrowser';
+import * as queries from '../browserQueries';
 
 function createMockSession(overrides?: Partial<GemStoneLogin>): ActiveSession {
   return {
@@ -420,7 +431,7 @@ describe('FileInManager', () => {
       expect(content).toBe('existing content');
     });
 
-    it('skips non-.gs files', () => {
+    it('skips non-.gs files with an extension', () => {
       const dictDir = path.join(exportRoot, '1. UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       const filePath = path.join(dictDir, 'notes.txt');
@@ -430,6 +441,21 @@ describe('FileInManager', () => {
 
       const content = fs.readFileSync(filePath, 'utf-8');
       expect(content).toBe('');
+    });
+
+    it('appends .gs and populates template when file has no extension', () => {
+      const dictDir = path.join(exportRoot, '1. UserGlobals');
+      fs.mkdirSync(dictDir, { recursive: true });
+      const filePath = path.join(dictDir, 'MyClass');
+      fs.writeFileSync(filePath, '', 'utf-8');
+
+      createHandler({ files: [createUri(filePath)] });
+
+      expect(fs.existsSync(filePath)).toBe(false);
+      const renamed = filePath + '.gs';
+      expect(fs.existsSync(renamed)).toBe(true);
+      const content = fs.readFileSync(renamed, 'utf-8');
+      expect(content).toContain("Object subclass: 'MyClass'");
     });
 
     it('skips files outside export root', () => {
@@ -483,6 +509,166 @@ describe('FileInManager', () => {
 
       const content = fs.readFileSync(filePath, 'utf-8');
       expect(content).toBe('');
+    });
+
+    it('files in the template and refreshes the browser', () => {
+      // Use full session path so resolveSessionFromPath finds the session
+      const sessionDir = path.join(exportRoot, 'localhost', 'gs64stone', 'DataCurator');
+      const dictDir = path.join(sessionDir, '1. UserGlobals');
+      fs.mkdirSync(dictDir, { recursive: true });
+      const filePath = path.join(dictDir, 'NewClass.gs');
+      fs.writeFileSync(filePath, '', 'utf-8');
+
+      createHandler({ files: [createUri(filePath)] });
+
+      expect(fileInClass).toHaveBeenCalledWith(
+        mockSession,
+        expect.stringContaining("Object subclass: 'NewClass'"),
+      );
+      expect(SystemBrowser.refresh).toHaveBeenCalledWith(mockSession.id);
+    });
+
+    it('files in and refreshes browser when file has no extension', () => {
+      const sessionDir = path.join(exportRoot, 'localhost', 'gs64stone', 'DataCurator');
+      const dictDir = path.join(sessionDir, '1. UserGlobals');
+      fs.mkdirSync(dictDir, { recursive: true });
+      const filePath = path.join(dictDir, 'James');
+      fs.writeFileSync(filePath, '', 'utf-8');
+
+      createHandler({ files: [createUri(filePath)] });
+
+      expect(fileInClass).toHaveBeenCalledWith(
+        mockSession,
+        expect.stringContaining("Object subclass: 'James'"),
+      );
+      expect(SystemBrowser.refresh).toHaveBeenCalledWith(mockSession.id);
+    });
+
+    it('closes the stale tab when file is renamed to .gs', () => {
+      const dictDir = path.join(exportRoot, '1. UserGlobals');
+      fs.mkdirSync(dictDir, { recursive: true });
+      const filePath = path.join(dictDir, 'James');
+      fs.writeFileSync(filePath, '', 'utf-8');
+
+      const mockClose = vi.fn();
+      const mockTab = { input: { uri: { fsPath: filePath } } };
+      (vscode.window as Record<string, unknown>).tabGroups = {
+        all: [{ tabs: [mockTab] }],
+        close: mockClose,
+      };
+
+      createHandler({ files: [createUri(filePath)] });
+
+      expect(mockClose).toHaveBeenCalledWith(mockTab);
+    });
+  });
+
+  describe('handleFileDelete', () => {
+    let deleteHandler: (e: { files: vscode.Uri[] }) => void;
+
+    beforeEach(() => {
+      mockExportManager = createMockExportManager();
+      manager = new FileInManager(mockSessionManager, mockExportManager);
+
+      (vscode.workspace.onDidDeleteFiles as ReturnType<typeof vi.fn>).mockImplementation(
+        (handler: (e: { files: vscode.Uri[] }) => void) => {
+          deleteHandler = handler;
+          return { dispose: () => {} };
+        },
+      );
+      const context = { subscriptions: [] } as unknown as vscode.ExtensionContext;
+      manager.register(context);
+    });
+
+    function createUri(fsPath: string): vscode.Uri {
+      return { scheme: 'file', fsPath } as unknown as vscode.Uri;
+    }
+
+    it('removes class from GemStone when .gs file is deleted', () => {
+      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/MyClass.gs';
+      deleteHandler({ files: [createUri(fsPath)] });
+
+      expect(queries.deleteClass).toHaveBeenCalledWith(mockSession, 1, 'MyClass');
+      expect(SystemBrowser.refresh).toHaveBeenCalledWith(mockSession.id);
+    });
+
+    it('removes dictionary from GemStone when directory is deleted', () => {
+      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/3. Published';
+      deleteHandler({ files: [createUri(fsPath)] });
+
+      expect(queries.removeDictionary).toHaveBeenCalledWith(mockSession, 3);
+      expect(SystemBrowser.refresh).toHaveBeenCalledWith(mockSession.id);
+    });
+
+    it('skips files outside export root', () => {
+      const fsPath = '/other/path/MyClass.gs';
+      deleteHandler({ files: [createUri(fsPath)] });
+
+      expect(queries.deleteClass).not.toHaveBeenCalled();
+      expect(queries.removeDictionary).not.toHaveBeenCalled();
+    });
+
+    it('skips when isWriting is true', () => {
+      Object.defineProperty(mockExportManager, 'isWriting', { get: () => true, configurable: true });
+
+      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/MyClass.gs';
+      deleteHandler({ files: [createUri(fsPath)] });
+
+      expect(queries.deleteClass).not.toHaveBeenCalled();
+    });
+
+    it('skips non-file scheme URIs', () => {
+      const uri = { scheme: 'gemstone', fsPath: '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/MyClass.gs' } as unknown as vscode.Uri;
+      deleteHandler({ files: [uri] });
+
+      expect(queries.deleteClass).not.toHaveBeenCalled();
+    });
+
+    it('skips when no session matches the path', () => {
+      const fsPath = '/workspace/gemstone/otherhost/otherstone/otheruser/1. Dict/MyClass.gs';
+      deleteHandler({ files: [createUri(fsPath)] });
+
+      expect(queries.deleteClass).not.toHaveBeenCalled();
+    });
+
+    it('skips directories without numeric prefix', () => {
+      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/notes';
+      deleteHandler({ files: [createUri(fsPath)] });
+
+      expect(queries.removeDictionary).not.toHaveBeenCalled();
+    });
+
+    it('shows error when class deletion fails', () => {
+      vi.mocked(queries.deleteClass).mockImplementation(() => {
+        throw new Error('GCI error');
+      });
+
+      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/MyClass.gs';
+      deleteHandler({ files: [createUri(fsPath)] });
+
+      expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to remove class'),
+      );
+    });
+
+    it('shows error when dictionary deletion fails', () => {
+      vi.mocked(queries.removeDictionary).mockImplementation(() => {
+        throw new Error('GCI error');
+      });
+
+      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals';
+      deleteHandler({ files: [createUri(fsPath)] });
+
+      expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to remove dictionary'),
+      );
+    });
+
+    it('parses multi-digit dictionary index correctly', () => {
+      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/12. Published/Account.gs';
+      deleteHandler({ files: [createUri(fsPath)] });
+
+      expect(queries.deleteClass).toHaveBeenCalledWith(mockSession, 12, 'Account');
     });
   });
 });

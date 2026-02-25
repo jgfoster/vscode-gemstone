@@ -4,6 +4,8 @@ import * as vscode from 'vscode';
 import { SessionManager, ActiveSession } from './sessionManager';
 import { ExportManager } from './exportManager';
 import { fileInClass } from './topazFileIn';
+import { SystemBrowser } from './systemBrowser';
+import * as queries from './browserQueries';
 
 /**
  * Generate a Topaz file-out template for a new class.
@@ -76,8 +78,13 @@ export class FileInManager {
         this.handleFileCreate(file);
       }
     });
-    this.disposables.push(saveSub, createSub);
-    context.subscriptions.push(saveSub, createSub, this.diagnostics);
+    const deleteSub = vscode.workspace.onDidDeleteFiles((e) => {
+      for (const file of e.files) {
+        this.handleFileDelete(file);
+      }
+    });
+    this.disposables.push(saveSub, createSub, deleteSub);
+    context.subscriptions.push(saveSub, createSub, deleteSub, this.diagnostics);
   }
 
   private shouldHandle(document: vscode.TextDocument): boolean {
@@ -95,7 +102,6 @@ export class FileInManager {
 
   private handleFileCreate(uri: vscode.Uri): void {
     if (uri.scheme !== 'file') return;
-    if (!uri.fsPath.endsWith('.gs')) return;
     if (this.exportManager.isWriting) return;
 
     const exportRoot = this.exportManager.getExportRoot();
@@ -104,23 +110,100 @@ export class FileInManager {
     const relative = path.relative(exportRoot, uri.fsPath);
     if (relative.startsWith('..') || path.isAbsolute(relative)) return;
 
+    // Append .gs if the file has no extension
+    let filePath = uri.fsPath;
+    if (!path.extname(filePath)) {
+      const newPath = filePath + '.gs';
+      fs.renameSync(filePath, newPath);
+      filePath = newPath;
+    }
+
+    if (!filePath.endsWith('.gs')) return;
+
     // Check the file is empty (newly created)
     try {
-      const stat = fs.statSync(uri.fsPath);
+      const stat = fs.statSync(filePath);
       if (stat.size > 0) return;
     } catch {
       return;
     }
 
     // Extract class name from filename and dictionary name from parent dir
-    const className = path.basename(uri.fsPath, '.gs');
-    const dictDir = path.basename(path.dirname(uri.fsPath));
+    const className = path.basename(filePath, '.gs');
+    const dictDir = path.basename(path.dirname(filePath));
     const dictNameMatch = dictDir.match(/^\d+\.\s+(.*)/);
     if (!dictNameMatch) return;
     const dictName = dictNameMatch[1];
 
     const template = newClassTemplate(className, dictName);
-    fs.writeFileSync(uri.fsPath, template, 'utf-8');
+    fs.writeFileSync(filePath, template, 'utf-8');
+
+    // File in the template so the class exists in GemStone
+    const session = this.resolveSessionFromPath(filePath);
+    if (session) {
+      fileInClass(session, template);
+      SystemBrowser.refresh(session.id);
+    }
+
+    if (filePath !== uri.fsPath) {
+      // Close the stale tab for the original file
+      for (const group of vscode.window.tabGroups.all) {
+        for (const tab of group.tabs) {
+          const input = tab.input as { uri?: vscode.Uri } | undefined;
+          if (input?.uri?.fsPath === uri.fsPath) {
+            vscode.window.tabGroups.close(tab);
+          }
+        }
+      }
+      // Open the renamed file
+      vscode.window.showTextDocument(vscode.Uri.file(filePath));
+    }
+  }
+
+  private handleFileDelete(uri: vscode.Uri): void {
+    if (uri.scheme !== 'file') return;
+    if (this.exportManager.isWriting) return;
+
+    const exportRoot = this.exportManager.getExportRoot();
+    if (!exportRoot) return;
+
+    const relative = path.relative(exportRoot, uri.fsPath);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) return;
+
+    const session = this.resolveSessionFromPath(uri.fsPath);
+    if (!session) return;
+
+    // Path: {exportRoot}/{gem_host}/{stone}/{gs_user}/{N. DictName}/{ClassName}.gs
+    const parts = relative.split(path.sep);
+
+    if (uri.fsPath.endsWith('.gs') && parts.length >= 5) {
+      // Deleting a .gs file → remove class from GemStone
+      const dictDir = parts[3];
+      const dictMatch = dictDir.match(/^(\d+)\.\s+(.*)/);
+      if (!dictMatch) return;
+      const dictIndex = parseInt(dictMatch[1], 10);
+      const className = path.basename(uri.fsPath, '.gs');
+      try {
+        queries.deleteClass(session, dictIndex, className);
+        SystemBrowser.refresh(session.id);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        vscode.window.showErrorMessage(`Failed to remove class "${className}" from GemStone: ${msg}`);
+      }
+    } else if (parts.length === 4) {
+      // Deleting a {N. DictName} directory → remove dictionary from symbol list
+      const dictDir = parts[3];
+      const dictMatch = dictDir.match(/^(\d+)\.\s+(.*)/);
+      if (!dictMatch) return;
+      const dictIndex = parseInt(dictMatch[1], 10);
+      try {
+        queries.removeDictionary(session, dictIndex);
+        SystemBrowser.refresh(session.id);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        vscode.window.showErrorMessage(`Failed to remove dictionary from GemStone: ${msg}`);
+      }
+    }
   }
 
   private handleSave(document: vscode.TextDocument): void {

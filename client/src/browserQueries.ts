@@ -333,6 +333,15 @@ dict name`;
   executeFetchString(session, `addDictionary(${dictName})`, code);
 }
 
+export function removeDictionary(
+  session: ActiveSession, dictIndex: number
+): void {
+  const code = `| sl |
+sl := System myUserProfile symbolList.
+sl remove: (sl at: ${dictIndex}). 'ok'`;
+  executeFetchString(session, `removeDictionary(dictIndex: ${dictIndex})`, code);
+}
+
 export function moveDictionaryUp(
   session: ActiveSession, dictIndex: number
 ): void {
