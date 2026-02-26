@@ -4,6 +4,31 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-02-26
+
+### Added
+
+- **File-based class browser** — export classes in Topaz format to the file system; open and edit classes with the standard VS Code file explorer; System Browser webview with five-column layout (dictionaries, class categories, classes, method categories, methods) with file editor below
+- **Multiple browser windows** — each "Open Browser" creates a new panel; tab title updates to `Browser: ClassName` when a class is selected
+- **Login export reconciliation** — on login, detects conflicts between local files and the GemStone image; offers Use Local, Use Server, Show Differences, or Skip options
+- **New class template** — creating a `.gs` file in a dictionary directory auto-fills a class template and files it in to GemStone
+- **Hierarchy view** — toggle between category and hierarchy views in the browser; shows superclass chain and subclasses
+- **Context menus** — right-click dictionaries, classes, method categories, and methods for actions (add, delete, move, rename, run tests, inspect, senders, implementors, browse references)
+- **Browse References** — right-click a dictionary or class to find all methods that reference that object via `ClassOrganizer >> referencesToObject:`
+- **Drag-and-drop** — drag methods to recategorize; drag classes between dictionaries
+- **Inspect non-class globals** — selecting a global in the `** GLOBALS **` category opens the object inspector
+- **Multiple method environments** — `gemstone.maxEnvironment` setting controls how many method environments are displayed
+- **Transcript channel** — GemStone Transcript output routed to a VS Code output channel
+- **Semantic tokens** — language server provides semantic token highlighting for Smalltalk method source
+- **Code lens** — inline code lens annotations in Smalltalk source files
+- **Custom dictionary inspector** — inspector tree view supports drilling into SymbolDictionary entries
+- **Large collection pagination** — inspector paginates large indexed collections instead of loading all elements at once
+
+### Changed
+
+- Dictionary directories renamed from `N. DictName` to `N-DictName` to avoid spaces in file paths (improves Topaz compatibility)
+- Method reveal scrolls to top of editor pane instead of center when selecting a method in the browser
+
 ## [1.0.4] - 2026-02-19
 
 ### Added

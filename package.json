@@ -2,7 +2,7 @@
   "name": "gemstone-ide",
   "displayName": "GemStone Smalltalk IDE",
 	"description": "GemStone/S IDE for Visual Studio Code",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "publisher": "gemtalksystems",
   "license": "MIT",
   "author": "James Foster",
