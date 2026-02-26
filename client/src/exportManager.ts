@@ -76,7 +76,7 @@ export class ExportManager {
         let totalClasses = 0;
         for (let i = 0; i < dictNames.length; i++) {
           const dictIndex = i + 1; // Smalltalk 1-based
-          const dictLabel = `${dictIndex}. ${dictNames[i]}`;
+          const dictLabel = `${dictIndex}-${dictNames[i]}`;
           const dirPath = path.join(sessionRoot, dictLabel);
           const classes = queries.getClassNames(session, dictIndex);
           plan.push({ dictIndex, dictLabel, dirPath, classes });

@@ -58,7 +58,7 @@ export function extractSelector(messagePattern: string): string {
 // ── SystemBrowser ────────────────────────────────────────────
 
 export class SystemBrowser {
-  private static panels = new Map<number, SystemBrowser>();
+  private static panels = new Map<number, Set<SystemBrowser>>();
 
   private readonly panel: vscode.WebviewPanel;
   private disposables: vscode.Disposable[] = [];
@@ -78,23 +78,19 @@ export class SystemBrowser {
    * Refresh the browser for a given session (e.g. after abort or commit).
    */
   static refresh(sessionId: number): void {
-    const browser = SystemBrowser.panels.get(sessionId);
-    if (browser) browser.handleRefresh();
+    const browsers = SystemBrowser.panels.get(sessionId);
+    if (browsers) {
+      for (const browser of browsers) browser.handleRefresh();
+    }
   }
 
   static show(
     session: ActiveSession,
     exportManager: ExportManager,
   ): void {
-    const existing = SystemBrowser.panels.get(session.id);
-    if (existing) {
-      existing.panel.reveal();
-      return;
-    }
-
     const panel = vscode.window.createWebviewPanel(
       'gemstoneSystemBrowser',
-      `Browser: ${session.login.label}`,
+      'Browser',
       vscode.ViewColumn.One,
       {
         enableScripts: true,
@@ -103,16 +99,19 @@ export class SystemBrowser {
       },
     );
 
-    SystemBrowser.panels.set(
-      session.id,
-      new SystemBrowser(panel, session, exportManager),
-    );
+    const browser = new SystemBrowser(panel, session, exportManager);
+    let set = SystemBrowser.panels.get(session.id);
+    if (!set) {
+      set = new Set();
+      SystemBrowser.panels.set(session.id, set);
+    }
+    set.add(browser);
   }
 
   static disposeForSession(sessionId: number): void {
-    const browser = SystemBrowser.panels.get(sessionId);
-    if (browser) {
-      browser.panel.dispose();
+    const browsers = SystemBrowser.panels.get(sessionId);
+    if (browsers) {
+      for (const browser of [...browsers]) browser.panel.dispose();
     }
   }
 
@@ -284,7 +283,11 @@ export class SystemBrowser {
   }
 
   private dispose(): void {
-    SystemBrowser.panels.delete(this.session.id);
+    const set = SystemBrowser.panels.get(this.session.id);
+    if (set) {
+      set.delete(this);
+      if (set.size === 0) SystemBrowser.panels.delete(this.session.id);
+    }
     this.clearDimming();
     this.dimDecorationType.dispose();
     this.panel.dispose();
@@ -377,6 +380,9 @@ export class SystemBrowser {
           break;
         case 'ctxImplementorsOf':
           this.handleImplementorsOf();
+          break;
+        case 'ctxBrowseReferences':
+          this.handleBrowseReferences(message.name as string);
           break;
         // Drag-and-drop commands
         case 'dropMethodOnCategory':
@@ -483,6 +489,7 @@ export class SystemBrowser {
     this.state.selectedClass = className;
     this.state.selectedMethodCategory = null;
     this.state.selectedMethod = null;
+    this.panel.title = `Browser: ${className}`;
 
     if (this.state.selectedCategory === '** GLOBALS **') {
       // Non-class global — inspect it instead of browsing methods
@@ -575,6 +582,7 @@ export class SystemBrowser {
       hierarchyClassName: null,
     };
 
+    this.panel.title = 'Browser';
     this.panel.webview.postMessage({ command: 'setViewMode', mode: 'category' });
     this.handleReady();
 
@@ -651,6 +659,7 @@ export class SystemBrowser {
     this.state.selectedClass = className;
     this.state.selectedMethodCategory = null;
     this.state.selectedMethod = null;
+    this.panel.title = `Browser: ${className}`;
 
     this.loadMethodCategories();
     this.openClassFile(className);
@@ -683,7 +692,7 @@ export class SystemBrowser {
     const sessionRoot = this.exportManager.getSessionRoot(this.session);
     if (sessionRoot) {
       const dictIndex = this.state.dictionaries.length; // new dict is last
-      const dictLabel = `${dictIndex}. ${name}`;
+      const dictLabel = `${dictIndex}-${name}`;
       fs.mkdirSync(path.join(sessionRoot, dictLabel), { recursive: true });
     }
 
@@ -753,7 +762,7 @@ export class SystemBrowser {
     // Delete the local directory
     const sessionRoot = this.exportManager.getSessionRoot(this.session);
     if (sessionRoot) {
-      const dictLabel = `${dictIndex}. ${dictName}`;
+      const dictLabel = `${dictIndex}-${dictName}`;
       const dirPath = path.join(sessionRoot, dictLabel);
       if (fs.existsSync(dirPath)) {
         fs.rmSync(dirPath, { recursive: true, force: true });
@@ -1010,6 +1019,14 @@ export class SystemBrowser {
     });
   }
 
+  private handleBrowseReferences(objectName: string): void {
+    if (!objectName) return;
+    vscode.commands.executeCommand('gemstone.browseReferences', {
+      objectName,
+      sessionId: this.session.id,
+    });
+  }
+
   // ── Drag-and-drop handlers ──────────────────────
 
   private handleDropMethodOnCategory(selector: string, category: string): void {
@@ -1133,7 +1150,7 @@ export class SystemBrowser {
     if (!dictIndex) return;
 
     const dictName = this.state.dictionaries[dictIndex - 1];
-    const dictLabel = `${dictIndex}. ${dictName}`;
+    const dictLabel = `${dictIndex}-${dictName}`;
     const filePath = path.join(sessionRoot, dictLabel, `${className}.gs`);
 
     if (!fs.existsSync(filePath)) return;
@@ -1180,11 +1197,11 @@ export class SystemBrowser {
     vscode.window.showTextDocument(uri, {
       viewColumn,
       preview: false,
-      selection: new vscode.Range(
-        matchingRegion.startLine, 0,
-        matchingRegion.startLine, 0,
-      ),
     }).then(editor => {
+      editor.selection = new vscode.Selection(
+        matchingRegion.startLine, 0,
+        matchingRegion.startLine, 0,
+      );
       const revealLine = Math.max(0, matchingRegion.startLine - 2);
       editor.revealRange(
         new vscode.Range(revealLine, 0, revealLine, 0),
@@ -1821,6 +1838,8 @@ export class SystemBrowser {
           { label: 'Move Up', action: () => vscode.postMessage({ command: 'ctxMoveDictUp' }) },
           { label: 'Move Down', action: () => vscode.postMessage({ command: 'ctxMoveDictDown' }) },
           { separator: true },
+          { label: 'Browse References', action: () => vscode.postMessage({ command: 'ctxBrowseReferences', name: item.dataset.value }) },
+          { separator: true },
           { label: 'Remove Dictionary\\u2026', action: () => vscode.postMessage({ command: 'ctxRemoveDictionary' }) },
         ] : []),
       ]);
@@ -1849,6 +1868,7 @@ export class SystemBrowser {
           { label: 'Delete Class', action: () => vscode.postMessage({ command: 'ctxDeleteClass' }) },
           { label: 'Move to Dictionary\\u2026', action: () => vscode.postMessage({ command: 'ctxMoveClass' }) },
           { separator: true },
+          { label: 'Browse References', action: () => vscode.postMessage({ command: 'ctxBrowseReferences', name: item.dataset.value }) },
           { label: 'Run SUnit Tests', action: () => vscode.postMessage({ command: 'ctxRunTests' }) },
           { label: 'Inspect Global', action: () => vscode.postMessage({ command: 'ctxInspectGlobal' }) },
         ] : []),

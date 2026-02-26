@@ -17,6 +17,7 @@ vi.mock('../browserQueries', () => ({
   removeDictionary: vi.fn(),
   renameCategory: vi.fn(),
   getMethodCategories: vi.fn(),
+  referencesToObject: vi.fn(),
 }));
 
 vi.mock('fs', async () => {
@@ -32,7 +33,7 @@ vi.mock('fs', async () => {
 
 import * as fs from 'fs';
 
-import { window, ViewColumn, TextEditorRevealType, Range, commands, __setConfig, __resetConfig } from '../__mocks__/vscode';
+import { window, ViewColumn, TextEditorRevealType, Range, Selection, Position, commands, __setConfig, __resetConfig } from '../__mocks__/vscode';
 import { SystemBrowser, extractSelector } from '../systemBrowser';
 import * as queries from '../browserQueries';
 import type { ActiveSession } from '../sessionManager';
@@ -164,22 +165,21 @@ describe('SystemBrowser', () => {
   });
 
   describe('show', () => {
-    it('creates a new panel', () => {
+    it('creates a new panel with initial title Browser', () => {
       SystemBrowser.show(session, exportManager);
       expect(window.createWebviewPanel).toHaveBeenCalledTimes(1);
       expect(window.createWebviewPanel).toHaveBeenCalledWith(
         'gemstoneSystemBrowser',
-        'Browser: test',
+        'Browser',
         ViewColumn.One,
         expect.objectContaining({ enableScripts: true, retainContextWhenHidden: true }),
       );
     });
 
-    it('reveals existing panel for same session', () => {
+    it('creates a new panel each time for the same session', () => {
       SystemBrowser.show(session, exportManager);
       SystemBrowser.show(session, exportManager);
-      expect(window.createWebviewPanel).toHaveBeenCalledTimes(1);
-      expect(mockPanel.reveal).toHaveBeenCalledTimes(1);
+      expect(window.createWebviewPanel).toHaveBeenCalledTimes(2);
     });
 
     it('creates separate panels for different sessions', () => {
@@ -188,10 +188,20 @@ describe('SystemBrowser', () => {
       SystemBrowser.show(session2, exportManager);
       expect(window.createWebviewPanel).toHaveBeenCalledTimes(2);
     });
+
+    it('updates title to Browser: ClassName when a class is selected', () => {
+      SystemBrowser.show(session, exportManager);
+      messageHandler({ command: 'ready' });
+      messageHandler({ command: 'selectDictionary', index: 1 });
+      messageHandler({ command: 'selectCategory', name: '** ALL CLASSES **' });
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      messageHandler({ command: 'selectClass', name: 'Array' });
+      expect(mockPanel.title).toBe('Browser: Array');
+    });
   });
 
   describe('disposeForSession', () => {
-    it('disposes the panel for the given session', () => {
+    it('disposes all panels for the given session', () => {
       SystemBrowser.show(session, exportManager);
       SystemBrowser.disposeForSession(session.id);
       expect(mockPanel.dispose).toHaveBeenCalled();
@@ -376,7 +386,7 @@ describe('SystemBrowser', () => {
       });
 
       expect(window.showTextDocument).toHaveBeenCalledWith(
-        expect.objectContaining({ path: '/tmp/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/Array.gs' }),
+        expect.objectContaining({ path: '/tmp/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/Array.gs' }),
         expect.objectContaining({
           viewColumn: ViewColumn.Two,
         }),
@@ -405,9 +415,9 @@ describe('SystemBrowser', () => {
       });
 
       expect(window.showTextDocument).toHaveBeenCalledWith(
-        expect.objectContaining({ path: '/tmp/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/Array.gs' }),
+        expect.objectContaining({ path: '/tmp/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/Array.gs' }),
         expect.objectContaining({
-          selection: expect.any(Object),
+          preview: false,
         }),
       );
     });
@@ -434,6 +444,30 @@ describe('SystemBrowser', () => {
       );
     });
 
+    it('sets cursor on the method line without passing selection to showTextDocument', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockReturnValue(gsContent);
+
+      messageHandler({ command: 'selectClass', name: 'Array' });
+      await vi.waitFor(() => {
+        expect(window.showTextDocument).toHaveBeenCalled();
+      });
+
+      messageHandler({ command: 'selectMethod', selector: 'size' });
+      await vi.waitFor(() => {
+        expect(vi.mocked(window.showTextDocument).mock.calls.length).toBeGreaterThanOrEqual(2);
+      });
+
+      // showTextDocument should NOT receive a selection option (avoids VS Code centering)
+      const lastCall = vi.mocked(window.showTextDocument).mock.calls.at(-1) as unknown[];
+      expect(lastCall[1]).not.toHaveProperty('selection');
+
+      // Instead, the editor's selection should be set directly on the method start line
+      const editor = await vi.mocked(window.showTextDocument).mock.results.at(-1)!.value;
+      expect(editor.selection.start).toEqual(new Position(10, 0));
+      expect(editor.selection.end).toEqual(new Position(10, 0));
+    });
+
     it('does not open file when method not found', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockReturnValue('run\n"empty"\n%\n');
@@ -458,7 +492,7 @@ describe('SystemBrowser', () => {
       // Simulate a browser file already visible in group Two (e.g. dragged to bottom)
       const sessionRoot = '/tmp/gemstone/localhost/gs64stone/DataCurator';
       (window.visibleTextEditors as unknown[]).push({
-        document: { uri: { fsPath: `${sessionRoot}/1. UserGlobals/Array.gs` } },
+        document: { uri: { fsPath: `${sessionRoot}/1-UserGlobals/Array.gs` } },
         viewColumn: ViewColumn.Two,
       });
 
@@ -702,7 +736,7 @@ describe('SystemBrowser', () => {
       await messageHandler({ command: 'ctxAddDictionary' });
 
       expect(fs.mkdirSync).toHaveBeenCalledWith(
-        '/tmp/gemstone/localhost/gs64stone/DataCurator/3. NewDict',
+        '/tmp/gemstone/localhost/gs64stone/DataCurator/3-NewDict',
         { recursive: true },
       );
     });
@@ -796,7 +830,7 @@ describe('SystemBrowser', () => {
       await messageHandler({ command: 'ctxRemoveDictionary' });
 
       expect(fs.rmSync).toHaveBeenCalledWith(
-        '/tmp/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals',
+        '/tmp/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals',
         { recursive: true, force: true },
       );
     });
@@ -939,6 +973,14 @@ describe('SystemBrowser', () => {
       expect(commands.executeCommand).toHaveBeenCalledWith(
         'gemstone.implementorsOfSelector',
         { selector: 'name', sessionId: 1 },
+      );
+    });
+
+    it('delegates browse references to command', () => {
+      messageHandler({ command: 'ctxBrowseReferences', name: 'Array' });
+      expect(commands.executeCommand).toHaveBeenCalledWith(
+        'gemstone.browseReferences',
+        { objectName: 'Array', sessionId: 1 },
       );
     });
   });

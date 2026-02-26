@@ -140,7 +140,7 @@ export class ReconcileManager {
       const dirPath = path.join(sessionRoot, entry);
       if (!fs.statSync(dirPath).isDirectory()) continue;
 
-      const indexMatch = entry.match(/^(\d+)\.\s/);
+      const indexMatch = entry.match(/^(\d+)-/);
       if (!indexMatch) continue;
 
       const dictIndex = parseInt(indexMatch[1], 10);

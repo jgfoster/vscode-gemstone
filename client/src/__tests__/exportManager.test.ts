@@ -126,8 +126,8 @@ describe('ExportManager', () => {
       const sessionRoot = manager.getSessionRoot(session)!;
 
       // Check directory structure
-      const dict1Dir = path.join(sessionRoot, '1. UserGlobals');
-      const dict2Dir = path.join(sessionRoot, '2. Globals');
+      const dict1Dir = path.join(sessionRoot, '1-UserGlobals');
+      const dict2Dir = path.join(sessionRoot, '2-Globals');
       expect(fs.existsSync(dict1Dir)).toBe(true);
       expect(fs.existsSync(dict2Dir)).toBe(true);
 
@@ -192,9 +192,9 @@ describe('ExportManager', () => {
 
       const sessionRoot = manager.getSessionRoot(session)!;
       // MyClass should still exist
-      expect(fs.existsSync(path.join(sessionRoot, '1. UserGlobals', 'MyClass.gs'))).toBe(true);
+      expect(fs.existsSync(path.join(sessionRoot, '1-UserGlobals', 'MyClass.gs'))).toBe(true);
       // OtherClass should not
-      expect(fs.existsSync(path.join(sessionRoot, '1. UserGlobals', 'OtherClass.gs'))).toBe(false);
+      expect(fs.existsSync(path.join(sessionRoot, '1-UserGlobals', 'OtherClass.gs'))).toBe(false);
     });
 
     it('creates directories for empty dictionaries', async () => {
@@ -206,8 +206,8 @@ describe('ExportManager', () => {
       await manager.exportSession(session);
 
       const sessionRoot = manager.getSessionRoot(session)!;
-      expect(fs.existsSync(path.join(sessionRoot, '1. UserGlobals'))).toBe(true);
-      expect(fs.existsSync(path.join(sessionRoot, '2. Globals'))).toBe(true);
+      expect(fs.existsSync(path.join(sessionRoot, '1-UserGlobals'))).toBe(true);
+      expect(fs.existsSync(path.join(sessionRoot, '2-Globals'))).toBe(true);
     });
 
     it('removes stale dictionary directories on re-export', async () => {
@@ -215,7 +215,7 @@ describe('ExportManager', () => {
       await manager.exportSession(session);
 
       const sessionRoot = manager.getSessionRoot(session)!;
-      expect(fs.existsSync(path.join(sessionRoot, '2. Globals'))).toBe(true);
+      expect(fs.existsSync(path.join(sessionRoot, '2-Globals'))).toBe(true);
 
       // Simulate dictionary removal — second export has fewer dictionaries
       (queries.getDictionaryNames as ReturnType<typeof vi.fn>).mockReturnValue(['UserGlobals']);
@@ -226,8 +226,8 @@ describe('ExportManager', () => {
 
       await manager.refreshSession(session);
 
-      expect(fs.existsSync(path.join(sessionRoot, '1. UserGlobals'))).toBe(true);
-      expect(fs.existsSync(path.join(sessionRoot, '2. Globals'))).toBe(false);
+      expect(fs.existsSync(path.join(sessionRoot, '1-UserGlobals'))).toBe(true);
+      expect(fs.existsSync(path.join(sessionRoot, '2-Globals'))).toBe(false);
     });
 
     it('removes stale files on re-export', async () => {
@@ -235,7 +235,7 @@ describe('ExportManager', () => {
       await manager.exportSession(session);
 
       const sessionRoot = manager.getSessionRoot(session)!;
-      const staleFile = path.join(sessionRoot, '1. UserGlobals', 'MyClass.gs');
+      const staleFile = path.join(sessionRoot, '1-UserGlobals', 'MyClass.gs');
       expect(fs.existsSync(staleFile)).toBe(true);
 
       // Simulate class removal — second export returns fewer classes
@@ -249,7 +249,7 @@ describe('ExportManager', () => {
       await manager.refreshSession(session);
 
       expect(fs.existsSync(staleFile)).toBe(false);
-      expect(fs.existsSync(path.join(sessionRoot, '1. UserGlobals', 'OtherClass.gs'))).toBe(true);
+      expect(fs.existsSync(path.join(sessionRoot, '1-UserGlobals', 'OtherClass.gs'))).toBe(true);
     });
   });
 
@@ -260,7 +260,7 @@ describe('ExportManager', () => {
       manager.markReadOnly(session);
 
       const sessionRoot = manager.getSessionRoot(session)!;
-      const filePath = path.join(sessionRoot, '1. UserGlobals', 'MyClass.gs');
+      const filePath = path.join(sessionRoot, '1-UserGlobals', 'MyClass.gs');
       const stat = fs.statSync(filePath);
       // Check that write bits are cleared (owner, group, other)
       expect(stat.mode & 0o222).toBe(0);
@@ -273,7 +273,7 @@ describe('ExportManager', () => {
       manager.markWritable(session);
 
       const sessionRoot = manager.getSessionRoot(session)!;
-      const filePath = path.join(sessionRoot, '1. UserGlobals', 'MyClass.gs');
+      const filePath = path.join(sessionRoot, '1-UserGlobals', 'MyClass.gs');
       const stat = fs.statSync(filePath);
       // Check that owner write bit is set
       expect(stat.mode & 0o200).not.toBe(0);
@@ -300,8 +300,8 @@ describe('ExportManager', () => {
       const root2 = manager.getSessionRoot(session2)!;
 
       expect(root1).not.toBe(root2);
-      expect(fs.existsSync(path.join(root1, '1. UserGlobals', 'MyClass.gs'))).toBe(true);
-      expect(fs.existsSync(path.join(root2, '1. UserGlobals', 'MyClass.gs'))).toBe(true);
+      expect(fs.existsSync(path.join(root1, '1-UserGlobals', 'MyClass.gs'))).toBe(true);
+      expect(fs.existsSync(path.join(root2, '1-UserGlobals', 'MyClass.gs'))).toBe(true);
     });
   });
 });

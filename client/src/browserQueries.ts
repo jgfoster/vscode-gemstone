@@ -540,6 +540,19 @@ stream contents`;
   return results;
 }
 
+export function referencesToObject(
+  session: ActiveSession, objectName: string, environmentId: number = 0,
+): MethodSearchResult[] {
+  const code = `| methods stream limit classDict sl |
+methods := (ClassOrganizer new referencesToObject:
+  (System myUserProfile symbolList objectNamed: #'${escapeString(objectName)}')).
+${methodSerialization(environmentId)}`;
+
+  return parseMethodSearchResults(
+    executeFetchString(session, `referencesToObject(${objectName})`, code),
+  );
+}
+
 export function fileOutClass(
   session: ActiveSession, dictIndex: number, className: string,
 ): string {

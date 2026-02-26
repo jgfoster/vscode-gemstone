@@ -105,7 +105,7 @@ describe('FileInManager', () => {
 
   describe('resolveSessionFromPath', () => {
     it('matches session by gem_host/stone/gs_user path segments', () => {
-      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/MyClass.gs';
+      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs';
       const result = manager.resolveSessionFromPath(fsPath);
       expect(result).toBe(mockSession);
     });
@@ -117,7 +117,7 @@ describe('FileInManager', () => {
     });
 
     it('returns undefined when no session matches', () => {
-      const fsPath = '/workspace/gemstone/otherhost/otherstone/otheruser/1. Dict/MyClass.gs';
+      const fsPath = '/workspace/gemstone/otherhost/otherstone/otheruser/1-Dict/MyClass.gs';
       const result = manager.resolveSessionFromPath(fsPath);
       expect(result).toBeUndefined();
     });
@@ -137,7 +137,7 @@ describe('FileInManager', () => {
       mockSessionManager = createMockSessionManager([mockSession, session2]);
       manager = new FileInManager(mockSessionManager, mockExportManager);
 
-      const fsPath = '/workspace/gemstone/remote/prod/Admin/1. Globals/Object.gs';
+      const fsPath = '/workspace/gemstone/remote/prod/Admin/1-Globals/Object.gs';
       const result = manager.resolveSessionFromPath(fsPath);
       expect(result).toBe(session2);
     });
@@ -146,7 +146,7 @@ describe('FileInManager', () => {
   describe('hasUnsavedChanges', () => {
     it('returns true when dirty .gs files exist under session root', () => {
       const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/MyClass.gs',
+        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
         { isDirty: true },
       );
       (vscode.workspace as unknown as { textDocuments: unknown[] }).textDocuments = [doc];
@@ -156,7 +156,7 @@ describe('FileInManager', () => {
 
     it('returns false when no dirty files exist', () => {
       const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/MyClass.gs',
+        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
         { isDirty: false },
       );
       (vscode.workspace as unknown as { textDocuments: unknown[] }).textDocuments = [doc];
@@ -166,7 +166,7 @@ describe('FileInManager', () => {
 
     it('returns false for dirty files outside session root', () => {
       const doc = createMockDocument(
-        '/workspace/gemstone/otherhost/otherstone/otheruser/1. Dict/Other.gs',
+        '/workspace/gemstone/otherhost/otherstone/otheruser/1-Dict/Other.gs',
         { isDirty: true },
       );
       (vscode.workspace as unknown as { textDocuments: unknown[] }).textDocuments = [doc];
@@ -206,7 +206,7 @@ describe('FileInManager', () => {
 
     it('compiles on save and shows success message', () => {
       const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/MyClass.gs',
+        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
       );
       savedHandler(doc);
 
@@ -225,7 +225,7 @@ describe('FileInManager', () => {
       });
 
       const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/MyClass.gs',
+        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
       );
       savedHandler(doc);
 
@@ -240,7 +240,7 @@ describe('FileInManager', () => {
 
     it('clears diagnostics on successful save', () => {
       const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/MyClass.gs',
+        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
       );
       savedHandler(doc);
 
@@ -271,7 +271,7 @@ describe('FileInManager', () => {
       Object.defineProperty(mockExportManager, 'isWriting', { get: () => true });
 
       const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/MyClass.gs',
+        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
       );
       savedHandler(doc);
 
@@ -280,7 +280,7 @@ describe('FileInManager', () => {
 
     it('skips non-file scheme documents', () => {
       const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/MyClass.gs',
+        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
         { scheme: 'gemstone' },
       );
       savedHandler(doc);
@@ -302,7 +302,7 @@ describe('FileInManager', () => {
       manager.register(context);
 
       const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/MyClass.gs',
+        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
       );
       savedHandler(doc);
 
@@ -394,7 +394,7 @@ describe('FileInManager', () => {
     }
 
     it('populates an empty .gs file with template', () => {
-      const dictDir = path.join(exportRoot, '1. UserGlobals');
+      const dictDir = path.join(exportRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       const filePath = path.join(dictDir, 'MyClass.gs');
       fs.writeFileSync(filePath, '', 'utf-8');
@@ -407,7 +407,7 @@ describe('FileInManager', () => {
     });
 
     it('extracts dictionary name from numbered directory', () => {
-      const dictDir = path.join(exportRoot, '3. Published');
+      const dictDir = path.join(exportRoot, '3-Published');
       fs.mkdirSync(dictDir, { recursive: true });
       const filePath = path.join(dictDir, 'Account.gs');
       fs.writeFileSync(filePath, '', 'utf-8');
@@ -420,7 +420,7 @@ describe('FileInManager', () => {
     });
 
     it('skips non-empty files', () => {
-      const dictDir = path.join(exportRoot, '1. UserGlobals');
+      const dictDir = path.join(exportRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       const filePath = path.join(dictDir, 'MyClass.gs');
       fs.writeFileSync(filePath, 'existing content', 'utf-8');
@@ -432,7 +432,7 @@ describe('FileInManager', () => {
     });
 
     it('skips non-.gs files with an extension', () => {
-      const dictDir = path.join(exportRoot, '1. UserGlobals');
+      const dictDir = path.join(exportRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       const filePath = path.join(dictDir, 'notes.txt');
       fs.writeFileSync(filePath, '', 'utf-8');
@@ -444,7 +444,7 @@ describe('FileInManager', () => {
     });
 
     it('appends .gs and populates template when file has no extension', () => {
-      const dictDir = path.join(exportRoot, '1. UserGlobals');
+      const dictDir = path.join(exportRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       const filePath = path.join(dictDir, 'MyClass');
       fs.writeFileSync(filePath, '', 'utf-8');
@@ -460,7 +460,7 @@ describe('FileInManager', () => {
 
     it('skips files outside export root', () => {
       const otherDir = fs.mkdtempSync(path.join(os.tmpdir(), 'other-'));
-      const dictDir = path.join(otherDir, '1. UserGlobals');
+      const dictDir = path.join(otherDir, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       const filePath = path.join(dictDir, 'MyClass.gs');
       fs.writeFileSync(filePath, '', 'utf-8');
@@ -487,7 +487,7 @@ describe('FileInManager', () => {
     it('skips when isWriting is true', () => {
       Object.defineProperty(mockExportManager, 'isWriting', { get: () => true, configurable: true });
 
-      const dictDir = path.join(exportRoot, '1. UserGlobals');
+      const dictDir = path.join(exportRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       const filePath = path.join(dictDir, 'MyClass.gs');
       fs.writeFileSync(filePath, '', 'utf-8');
@@ -499,7 +499,7 @@ describe('FileInManager', () => {
     });
 
     it('skips non-file scheme URIs', () => {
-      const dictDir = path.join(exportRoot, '1. UserGlobals');
+      const dictDir = path.join(exportRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       const filePath = path.join(dictDir, 'MyClass.gs');
       fs.writeFileSync(filePath, '', 'utf-8');
@@ -514,7 +514,7 @@ describe('FileInManager', () => {
     it('files in the template and refreshes the browser', () => {
       // Use full session path so resolveSessionFromPath finds the session
       const sessionDir = path.join(exportRoot, 'localhost', 'gs64stone', 'DataCurator');
-      const dictDir = path.join(sessionDir, '1. UserGlobals');
+      const dictDir = path.join(sessionDir, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       const filePath = path.join(dictDir, 'NewClass.gs');
       fs.writeFileSync(filePath, '', 'utf-8');
@@ -530,7 +530,7 @@ describe('FileInManager', () => {
 
     it('files in and refreshes browser when file has no extension', () => {
       const sessionDir = path.join(exportRoot, 'localhost', 'gs64stone', 'DataCurator');
-      const dictDir = path.join(sessionDir, '1. UserGlobals');
+      const dictDir = path.join(sessionDir, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       const filePath = path.join(dictDir, 'James');
       fs.writeFileSync(filePath, '', 'utf-8');
@@ -545,7 +545,7 @@ describe('FileInManager', () => {
     });
 
     it('closes the stale tab when file is renamed to .gs', () => {
-      const dictDir = path.join(exportRoot, '1. UserGlobals');
+      const dictDir = path.join(exportRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       const filePath = path.join(dictDir, 'James');
       fs.writeFileSync(filePath, '', 'utf-8');
@@ -585,7 +585,7 @@ describe('FileInManager', () => {
     }
 
     it('removes class from GemStone when .gs file is deleted', () => {
-      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/MyClass.gs';
+      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs';
       deleteHandler({ files: [createUri(fsPath)] });
 
       expect(queries.deleteClass).toHaveBeenCalledWith(mockSession, 1, 'MyClass');
@@ -593,7 +593,7 @@ describe('FileInManager', () => {
     });
 
     it('removes dictionary from GemStone when directory is deleted', () => {
-      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/3. Published';
+      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/3-Published';
       deleteHandler({ files: [createUri(fsPath)] });
 
       expect(queries.removeDictionary).toHaveBeenCalledWith(mockSession, 3);
@@ -611,21 +611,21 @@ describe('FileInManager', () => {
     it('skips when isWriting is true', () => {
       Object.defineProperty(mockExportManager, 'isWriting', { get: () => true, configurable: true });
 
-      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/MyClass.gs';
+      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs';
       deleteHandler({ files: [createUri(fsPath)] });
 
       expect(queries.deleteClass).not.toHaveBeenCalled();
     });
 
     it('skips non-file scheme URIs', () => {
-      const uri = { scheme: 'gemstone', fsPath: '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/MyClass.gs' } as unknown as vscode.Uri;
+      const uri = { scheme: 'gemstone', fsPath: '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs' } as unknown as vscode.Uri;
       deleteHandler({ files: [uri] });
 
       expect(queries.deleteClass).not.toHaveBeenCalled();
     });
 
     it('skips when no session matches the path', () => {
-      const fsPath = '/workspace/gemstone/otherhost/otherstone/otheruser/1. Dict/MyClass.gs';
+      const fsPath = '/workspace/gemstone/otherhost/otherstone/otheruser/1-Dict/MyClass.gs';
       deleteHandler({ files: [createUri(fsPath)] });
 
       expect(queries.deleteClass).not.toHaveBeenCalled();
@@ -643,7 +643,7 @@ describe('FileInManager', () => {
         throw new Error('GCI error');
       });
 
-      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals/MyClass.gs';
+      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs';
       deleteHandler({ files: [createUri(fsPath)] });
 
       expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
@@ -656,7 +656,7 @@ describe('FileInManager', () => {
         throw new Error('GCI error');
       });
 
-      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/1. UserGlobals';
+      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals';
       deleteHandler({ files: [createUri(fsPath)] });
 
       expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
@@ -665,7 +665,7 @@ describe('FileInManager', () => {
     });
 
     it('parses multi-digit dictionary index correctly', () => {
-      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/12. Published/Account.gs';
+      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/12-Published/Account.gs';
       deleteHandler({ files: [createUri(fsPath)] });
 
       expect(queries.deleteClass).toHaveBeenCalledWith(mockSession, 12, 'Account');

@@ -131,7 +131,7 @@ export class FileInManager {
     // Extract class name from filename and dictionary name from parent dir
     const className = path.basename(filePath, '.gs');
     const dictDir = path.basename(path.dirname(filePath));
-    const dictNameMatch = dictDir.match(/^\d+\.\s+(.*)/);
+    const dictNameMatch = dictDir.match(/^\d+-(.*)/);
     if (!dictNameMatch) return;
     const dictName = dictNameMatch[1];
 
@@ -173,13 +173,13 @@ export class FileInManager {
     const session = this.resolveSessionFromPath(uri.fsPath);
     if (!session) return;
 
-    // Path: {exportRoot}/{gem_host}/{stone}/{gs_user}/{N. DictName}/{ClassName}.gs
+    // Path: {exportRoot}/{gem_host}/{stone}/{gs_user}/{N-DictName}/{ClassName}.gs
     const parts = relative.split(path.sep);
 
     if (uri.fsPath.endsWith('.gs') && parts.length >= 5) {
       // Deleting a .gs file → remove class from GemStone
       const dictDir = parts[3];
-      const dictMatch = dictDir.match(/^(\d+)\.\s+(.*)/);
+      const dictMatch = dictDir.match(/^(\d+)-(.*)/);
       if (!dictMatch) return;
       const dictIndex = parseInt(dictMatch[1], 10);
       const className = path.basename(uri.fsPath, '.gs');
@@ -191,9 +191,9 @@ export class FileInManager {
         vscode.window.showErrorMessage(`Failed to remove class "${className}" from GemStone: ${msg}`);
       }
     } else if (parts.length === 4) {
-      // Deleting a {N. DictName} directory → remove dictionary from symbol list
+      // Deleting a {N-DictName} directory → remove dictionary from symbol list
       const dictDir = parts[3];
-      const dictMatch = dictDir.match(/^(\d+)\.\s+(.*)/);
+      const dictMatch = dictDir.match(/^(\d+)-(.*)/);
       if (!dictMatch) return;
       const dictIndex = parseInt(dictMatch[1], 10);
       try {
@@ -254,7 +254,7 @@ export class FileInManager {
     const exportRoot = this.exportManager.getExportRoot();
     if (!exportRoot) return undefined;
 
-    // Path: {exportRoot}/{gem_host}/{stone}/{gs_user}/{N. DictName}/{ClassName}.gs
+    // Path: {exportRoot}/{gem_host}/{stone}/{gs_user}/{N-DictName}/{ClassName}.gs
     const relative = path.relative(exportRoot, fsPath);
     const parts = relative.split(path.sep);
     if (parts.length < 3) return undefined;

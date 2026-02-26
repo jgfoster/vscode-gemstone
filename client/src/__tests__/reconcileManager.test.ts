@@ -65,7 +65,7 @@ function createMockExportManager(sessionRoot: string | undefined): ExportManager
 describe('ReconcileContentProvider', () => {
   it('stores and retrieves content by key', () => {
     const provider = new ReconcileContentProvider();
-    const uri = provider.setContent('1. UserGlobals/MyClass', 'class content');
+    const uri = provider.setContent('1-UserGlobals/MyClass', 'class content');
     expect(provider.provideTextDocumentContent(uri)).toBe('class content');
   });
 
@@ -126,7 +126,7 @@ describe('ReconcileManager', () => {
 
     it('calls exportSession when session root has no .gs files', async () => {
       fs.mkdirSync(sessionRoot, { recursive: true });
-      fs.mkdirSync(path.join(sessionRoot, '1. UserGlobals'), { recursive: true });
+      fs.mkdirSync(path.join(sessionRoot, '1-UserGlobals'), { recursive: true });
       // Directory exists but no .gs files
 
       await manager.reconcileOrExport(session, true);
@@ -136,7 +136,7 @@ describe('ReconcileManager', () => {
 
     it('calls exportSession when all files match GemStone', async () => {
       // Create local file that matches what GemStone returns
-      const dictDir = path.join(sessionRoot, '1. UserGlobals');
+      const dictDir = path.join(sessionRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       fs.writeFileSync(path.join(dictDir, 'MyClass.gs'), '! fileout of MyClass\n');
 
@@ -148,7 +148,7 @@ describe('ReconcileManager', () => {
     });
 
     it('shows summary dialog when files differ', async () => {
-      const dictDir = path.join(sessionRoot, '1. UserGlobals');
+      const dictDir = path.join(sessionRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       fs.writeFileSync(path.join(dictDir, 'MyClass.gs'), 'local version\n');
 
@@ -168,7 +168,7 @@ describe('ReconcileManager', () => {
     });
 
     it('"Use GemStone" calls exportSession', async () => {
-      const dictDir = path.join(sessionRoot, '1. UserGlobals');
+      const dictDir = path.join(sessionRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       fs.writeFileSync(path.join(dictDir, 'MyClass.gs'), 'local version\n');
 
@@ -181,7 +181,7 @@ describe('ReconcileManager', () => {
     });
 
     it('"Use Local" calls fileInClass for each diff then exportSession', async () => {
-      const dictDir = path.join(sessionRoot, '1. UserGlobals');
+      const dictDir = path.join(sessionRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       fs.writeFileSync(path.join(dictDir, 'MyClass.gs'), 'local version\n');
 
@@ -195,7 +195,7 @@ describe('ReconcileManager', () => {
     });
 
     it('"Skip" does not call exportSession or fileInClass', async () => {
-      const dictDir = path.join(sessionRoot, '1. UserGlobals');
+      const dictDir = path.join(sessionRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       fs.writeFileSync(path.join(dictDir, 'MyClass.gs'), 'local version\n');
 
@@ -209,7 +209,7 @@ describe('ReconcileManager', () => {
     });
 
     it('dismissed dialog does not call exportSession or fileInClass', async () => {
-      const dictDir = path.join(sessionRoot, '1. UserGlobals');
+      const dictDir = path.join(sessionRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       fs.writeFileSync(path.join(dictDir, 'MyClass.gs'), 'local version\n');
 
@@ -223,7 +223,7 @@ describe('ReconcileManager', () => {
     });
 
     it('"Use Local" with file-in errors shows warning and still exports', async () => {
-      const dictDir = path.join(sessionRoot, '1. UserGlobals');
+      const dictDir = path.join(sessionRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       fs.writeFileSync(path.join(dictDir, 'MyClass.gs'), 'local version\n');
 
@@ -246,8 +246,8 @@ describe('ReconcileManager', () => {
 
     it('parses dictionary index from directory name', async () => {
       // Create directories with various numbered formats
-      const dict1 = path.join(sessionRoot, '1. UserGlobals');
-      const dict3 = path.join(sessionRoot, '3. Published');
+      const dict1 = path.join(sessionRoot, '1-UserGlobals');
+      const dict3 = path.join(sessionRoot, '3-Published');
       fs.mkdirSync(dict1, { recursive: true });
       fs.mkdirSync(dict3, { recursive: true });
       fs.writeFileSync(path.join(dict1, 'MyClass.gs'), 'local version\n');
@@ -264,7 +264,7 @@ describe('ReconcileManager', () => {
     });
 
     it('counts local-only files when GCI call fails', async () => {
-      const dictDir = path.join(sessionRoot, '1. UserGlobals');
+      const dictDir = path.join(sessionRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       fs.writeFileSync(path.join(dictDir, 'DeletedClass.gs'), 'old content\n');
       fs.writeFileSync(path.join(dictDir, 'MyClass.gs'), 'local version\n');
@@ -294,7 +294,7 @@ describe('ReconcileManager', () => {
     });
 
     it('ignores directories without numeric prefix', async () => {
-      const dictDir = path.join(sessionRoot, '1. UserGlobals');
+      const dictDir = path.join(sessionRoot, '1-UserGlobals');
       const otherDir = path.join(sessionRoot, 'notes');
       fs.mkdirSync(dictDir, { recursive: true });
       fs.mkdirSync(otherDir, { recursive: true });
@@ -311,7 +311,7 @@ describe('ReconcileManager', () => {
     });
 
     it('"Show Differences" shows QuickPick then batch dialog', async () => {
-      const dictDir = path.join(sessionRoot, '1. UserGlobals');
+      const dictDir = path.join(sessionRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       fs.writeFileSync(path.join(dictDir, 'MyClass.gs'), 'local version\n');
 
@@ -333,7 +333,7 @@ describe('ReconcileManager', () => {
     });
 
     it('handles multiple differing files', async () => {
-      const dictDir = path.join(sessionRoot, '1. UserGlobals');
+      const dictDir = path.join(sessionRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       fs.writeFileSync(path.join(dictDir, 'ClassA.gs'), 'local A\n');
       fs.writeFileSync(path.join(dictDir, 'ClassB.gs'), 'local B\n');
