@@ -92,6 +92,24 @@ describe('Parser', () => {
       expect(ast).not.toBeNull();
     });
 
+    it('parses pipe as binary message', () => {
+      const { ast, errors } = parse('foo ^(true | false)');
+      expect(errors).toHaveLength(0);
+      expect(ast).not.toBeNull();
+    });
+
+    it('parses ampersand as binary message', () => {
+      const { ast, errors } = parse('foo ^(true & false)');
+      expect(errors).toHaveLength(0);
+      expect(ast).not.toBeNull();
+    });
+
+    it('parses pipe in complex expression', () => {
+      const { ast, errors } = parse('foo | x | ^((x < 1) | (x > 10))');
+      expect(errors).toHaveLength(0);
+      expect(ast).not.toBeNull();
+    });
+
     it('parses cascade', () => {
       const { ast } = parse('foo self add: 1; add: 2; yourself');
       expect(ast).not.toBeNull();

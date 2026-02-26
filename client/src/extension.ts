@@ -12,7 +12,7 @@ import { LoginEditorPanel } from './loginEditorPanel';
 import { SessionManager } from './sessionManager';
 import { SessionTreeProvider, GemStoneSessionItem } from './sessionTreeProvider';
 import { CodeExecutor } from './codeExecutor';
-import { BrowserTreeProvider, BrowserNode } from './browserTreeProvider';
+import { SystemBrowser } from './systemBrowser';
 import { GemStoneFileSystemProvider } from './gemstoneFileSystemProvider';
 import { GemStoneDebugSession } from './gemstoneDebugSession';
 import { InspectorTreeProvider, InspectorNode } from './inspectorTreeProvider';
@@ -23,11 +23,18 @@ import { GemStoneCompletionProvider } from './gemstoneCompletionProvider';
 import { BreakpointManager } from './breakpointManager';
 import { SelectorBreakpointManager } from './selectorBreakpointManager';
 import { SunitTestController } from './sunitTestController';
+import { ExportManager } from './exportManager';
+import { FileInManager } from './fileInManager';
+import { ReconcileManager } from './reconcileManager';
+import { showTranscript } from './transcriptChannel';
+import { GemStoneCodeLensProvider } from './gemstoneCodeLensProvider';
 import * as queries from './browserQueries';
-import { getGciLog } from './gciLog';
 
 let client: LanguageClient;
 let sessionManager: SessionManager;
+let exportManager: ExportManager;
+let fileInManager: FileInManager;
+let reconcileManager: ReconcileManager;
 
 export function activate(context: vscode.ExtensionContext) {
   // ── LSP Client ───────────────────────────────────────────
@@ -80,13 +87,18 @@ export function activate(context: vscode.ExtensionContext) {
         treeProvider.refresh();
       }
       if (e.affectsConfiguration('gemstone.maxEnvironment')) {
-        browserTreeProvider.refresh();
+        // maxEnvironment changes are picked up on next browser refresh
       }
     })
   );
 
   // ── Session Management ───────────────────────────────────
   sessionManager = new SessionManager();
+  exportManager = new ExportManager();
+  fileInManager = new FileInManager(sessionManager, exportManager);
+  fileInManager.register(context);
+  reconcileManager = new ReconcileManager(exportManager);
+  reconcileManager.register(context);
   const sessionTreeProvider = new SessionTreeProvider(sessionManager);
 
   const sessionTreeView = vscode.window.createTreeView('gemstoneSessions', {
@@ -94,16 +106,6 @@ export function activate(context: vscode.ExtensionContext) {
     showCollapseAll: false,
   });
   context.subscriptions.push(sessionTreeView);
-
-  // ── Class/Method Browser ────────────────────────────────
-  const browserTreeProvider = new BrowserTreeProvider(sessionManager);
-
-  const browserTreeView = vscode.window.createTreeView('gemstoneBrowser', {
-    treeDataProvider: browserTreeProvider,
-    dragAndDropController: browserTreeProvider,
-    showCollapseAll: true,
-  });
-  context.subscriptions.push(browserTreeView);
 
   // ── Object Inspector ──────────────────────────────────────
   const inspectorProvider = new InspectorTreeProvider(sessionManager);
@@ -137,26 +139,6 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Sync browser tree selection with active editor
-  context.subscriptions.push(
-    vscode.window.onDidChangeActiveTextEditor((editor) => {
-      if (!editor || editor.document.uri.scheme !== 'gemstone') return;
-      const log = getGciLog();
-      log.appendLine(`[Tree] editor changed: ${editor.document.uri.toString()}`);
-      const node = browserTreeProvider.nodeForUri(editor.document.uri);
-      if (!node) {
-        log.appendLine('[Tree] nodeForUri returned null');
-        return;
-      }
-      log.appendLine(`[Tree] revealing ${node.kind} node, id=${JSON.stringify(node)}`);
-      browserTreeView.reveal(node, { select: true, focus: false, expand: true })
-        .then(
-          () => log.appendLine('[Tree] reveal succeeded'),
-          (err: unknown) => log.appendLine(`[Tree] reveal failed: ${err}`),
-        );
-    })
-  );
-
   // ── GCI-backed providers (Definition + Hover + Completion) ─
   const providerSelectors: vscode.DocumentFilter[] = [
     { scheme: 'gemstone', language: 'gemstone-smalltalk' },
@@ -173,10 +155,12 @@ export function activate(context: vscode.ExtensionContext) {
   const definitionProvider = new GemStoneDefinitionProvider(sessionManager, selectorResolver);
   const hoverProvider = new GemStoneHoverProvider(sessionManager, selectorResolver);
   const completionProvider = new GemStoneCompletionProvider(sessionManager);
+  const codeLensProvider = new GemStoneCodeLensProvider(sessionManager);
   context.subscriptions.push(
     vscode.languages.registerDefinitionProvider(providerSelectors, definitionProvider),
     vscode.languages.registerHoverProvider(providerSelectors, hoverProvider),
     vscode.languages.registerCompletionItemProvider(providerSelectors, completionProvider),
+    vscode.languages.registerCodeLensProvider(providerSelectors, codeLensProvider),
   );
 
   // ── Breakpoints + Debugger ───────────────────────────────
@@ -230,18 +214,29 @@ export function activate(context: vscode.ExtensionContext) {
   statusBarItem.command = 'gemstone.selectSession';
   context.subscriptions.push(statusBarItem);
 
+  const browserBarItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Right, 99
+  );
+  browserBarItem.text = '$(book)';
+  browserBarItem.tooltip = 'Open System Browser';
+  browserBarItem.command = 'gemstone.openBrowser';
+  context.subscriptions.push(browserBarItem);
+
   function updateStatusBar() {
     const session = sessionManager.getSelectedSession();
     if (session) {
       statusBarItem.text = `$(database) ${session.login.label}`;
       statusBarItem.tooltip = `GemStone: ${session.login.gs_user} in ${session.login.stone} (click to change)`;
       statusBarItem.show();
+      browserBarItem.show();
     } else if (sessionManager.getSessions().length > 0) {
       statusBarItem.text = '$(database) No session selected';
       statusBarItem.tooltip = 'Click to select a GemStone session';
       statusBarItem.show();
+      browserBarItem.hide();
     } else {
       statusBarItem.hide();
+      browserBarItem.hide();
     }
   }
 
@@ -252,9 +247,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // ── Shared Helpers ─────────────────────────────────────
 
-  async function resolveSelector(node?: BrowserNode): Promise<string | undefined> {
-    if (node && node.kind === 'method') return node.selector;
-
+  async function resolveSelector(): Promise<string | undefined> {
     const editor = vscode.window.activeTextEditor;
     if (editor) {
       if (!editor.selection.isEmpty) {
@@ -413,19 +406,30 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage(
           `Connected to ${login.stone} (${session.stoneVersion}) on ${login.gem_host} as ${login.gs_user}`
         );
+        reconcileManager.reconcileOrExport(session, true);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         vscode.window.showErrorMessage(`Login failed: ${msg}`);
       }
     }),
 
-    vscode.commands.registerCommand('gemstone.sessionCommit', (item: GemStoneSessionItem) => {
+    vscode.commands.registerCommand('gemstone.sessionCommit', async (item: GemStoneSessionItem) => {
+      if (fileInManager.hasUnsavedChanges(item.activeSession)) {
+        const choice = await vscode.window.showWarningMessage(
+          'Exported .gs files have unsaved edits that will be overwritten.',
+          { modal: true },
+          'Commit Anyway',
+        );
+        if (choice !== 'Commit Anyway') return;
+      }
       try {
         const { success, err } = sessionManager.commit(item.activeSession.id);
         if (success) {
           vscode.window.showInformationMessage(
             `Session ${item.activeSession.id}: Commit succeeded.`
           );
+          await exportManager.refreshSession(item.activeSession);
+          SystemBrowser.refresh(item.activeSession.id);
         } else {
           vscode.window.showErrorMessage(
             `Session ${item.activeSession.id}: Commit failed — ${err.message || `error ${err.number}`}`
@@ -437,13 +441,23 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }),
 
-    vscode.commands.registerCommand('gemstone.sessionAbort', (item: GemStoneSessionItem) => {
+    vscode.commands.registerCommand('gemstone.sessionAbort', async (item: GemStoneSessionItem) => {
+      if (fileInManager.hasUnsavedChanges(item.activeSession)) {
+        const choice = await vscode.window.showWarningMessage(
+          'Exported .gs files have unsaved edits that will be overwritten.',
+          { modal: true },
+          'Abort Anyway',
+        );
+        if (choice !== 'Abort Anyway') return;
+      }
       try {
         const { success, err } = sessionManager.abort(item.activeSession.id);
         if (success) {
           vscode.window.showInformationMessage(
             `Session ${item.activeSession.id}: Abort succeeded.`
           );
+          await exportManager.refreshSession(item.activeSession);
+          SystemBrowser.refresh(item.activeSession.id);
         } else {
           vscode.window.showErrorMessage(
             `Session ${item.activeSession.id}: Abort failed — ${err.message || `error ${err.number}`}`
@@ -455,14 +469,24 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }),
 
+    vscode.commands.registerCommand('gemstone.openBrowser', async (item?: GemStoneSessionItem) => {
+      const session = item
+        ? item.activeSession
+        : await sessionManager.resolveSession();
+      if (!session) return;
+      SystemBrowser.show(session, exportManager);
+    }),
+
     vscode.commands.registerCommand('gemstone.sessionLogout', (item: GemStoneSessionItem) => {
-      const { id } = item.activeSession;
-      sessionManager.logout(id);
+      const session = item.activeSession;
+      exportManager.markReadOnly(session);
+      SystemBrowser.disposeForSession(session.id);
+      sessionManager.logout(session.id);
       sessionTreeProvider.refresh();
-      inspectorProvider.removeSessionItems(id);
-      breakpointManager.clearAllForSession(id);
-      selectorBreakpointManager.clearAllForSession(id);
-      vscode.window.showInformationMessage(`Session ${id}: Logged out.`);
+      inspectorProvider.removeSessionItems(session.id);
+      breakpointManager.clearAllForSession(session.id);
+      selectorBreakpointManager.clearAllForSession(session.id);
+      vscode.window.showInformationMessage(`Session ${session.id}: Logged out.`);
     }),
 
     vscode.commands.registerCommand('gemstone.selectSession', async (item?: GemStoneSessionItem) => {
@@ -474,268 +498,25 @@ export function activate(context: vscode.ExtensionContext) {
       sessionTreeProvider.refresh();
     }),
 
-    vscode.commands.registerCommand('gemstone.refreshBrowser', () => {
-      browserTreeProvider.refresh();
+    vscode.commands.registerCommand('gemstone.exportClasses', async (item?: GemStoneSessionItem) => {
+      const session = item
+        ? item.activeSession
+        : await sessionManager.resolveSession();
+      if (!session) return;
+      await exportManager.exportSession(session);
+    }),
+
+    vscode.commands.registerCommand('gemstone.refreshBrowser', async () => {
       symbolProvider.invalidateCache();
       completionProvider.invalidateCache();
+      const session = sessionManager.getSelectedSession();
+      if (session) {
+        await exportManager.refreshSession(session);
+      }
     }),
 
     vscode.commands.registerCommand('gemstone.refreshTests', () => {
       sunitTestController.refresh();
-    }),
-
-    vscode.commands.registerCommand('gemstone.runSunitClass', async (node?: BrowserNode) => {
-      if (!node || node.kind !== 'class') return;
-      await sunitTestController.runClassByName(node.name);
-    }),
-
-    vscode.commands.registerCommand('gemstone.newClassCategory', async (node?: BrowserNode) => {
-      const session = sessionManager.getSelectedSession();
-      if (!session) {
-        vscode.window.showErrorMessage('No active GemStone session.');
-        return;
-      }
-      const categoryName = await vscode.window.showInputBox({
-        prompt: 'Enter the new class category name',
-        placeHolder: 'Category name',
-      });
-      if (!categoryName) return;
-      let dictName = 'UserGlobals';
-      if (node && node.kind === 'dictionary') dictName = node.name;
-      const uri = vscode.Uri.parse(
-        `gemstone://${session.id}/${encodeURIComponent(dictName)}/new-class?category=${encodeURIComponent(categoryName)}`
-      );
-      vscode.commands.executeCommand('gemstone.openDocument', uri);
-    }),
-
-    vscode.commands.registerCommand('gemstone.newClass', (node?: BrowserNode) => {
-      const session = sessionManager.getSelectedSession();
-      if (!session) {
-        vscode.window.showErrorMessage('No active GemStone session.');
-        return;
-      }
-      let dictName = 'UserGlobals';
-      if (node && node.kind === 'dictionary') dictName = node.name;
-      else if (node && node.kind === 'classCategory') dictName = node.dictName;
-      const uri = vscode.Uri.parse(
-        `gemstone://${session.id}/${encodeURIComponent(dictName)}/new-class`
-      );
-      vscode.commands.executeCommand('gemstone.openDocument', uri);
-    }),
-
-    vscode.commands.registerCommand('gemstone.newMethod', async (node?: BrowserNode) => {
-      const session = sessionManager.getSelectedSession();
-      if (!session) {
-        vscode.window.showErrorMessage('No active GemStone session.');
-        return;
-      }
-
-      let dictName: string;
-      let className: string;
-      let isMeta: boolean;
-      let category: string;
-      let environmentId = 0;
-
-      if (node && node.kind === 'category') {
-        dictName = node.dictName;
-        className = node.className;
-        isMeta = node.isMeta;
-        environmentId = node.environmentId;
-        category = node.name;
-      } else if (node && node.kind === 'side') {
-        dictName = node.dictName;
-        className = node.className;
-        isMeta = node.isMeta;
-        environmentId = node.environmentId;
-        const input = await vscode.window.showInputBox({
-          prompt: `Category for new method on ${className}${isMeta ? ' class' : ''}`,
-          placeHolder: 'e.g. accessing',
-        });
-        if (!input) return;
-        category = input;
-      } else {
-        vscode.window.showErrorMessage('Select a category or side to add a method.');
-        return;
-      }
-
-      const side = isMeta ? 'class' : 'instance';
-      let uriStr =
-        `gemstone://${session.id}` +
-        `/${encodeURIComponent(dictName)}` +
-        `/${encodeURIComponent(className)}` +
-        `/${side}` +
-        `/${encodeURIComponent(category)}` +
-        `/new-method`;
-      if (environmentId > 0) {
-        uriStr += `?env=${environmentId}`;
-      }
-      const uri = vscode.Uri.parse(uriStr);
-      vscode.commands.executeCommand('gemstone.openDocument', uri);
-    }),
-
-    vscode.commands.registerCommand('gemstone.deleteMethod', async (node?: BrowserNode) => {
-      const session = sessionManager.getSelectedSession();
-      if (!session || !node || node.kind !== 'method') return;
-
-      const recv = `${node.className}${node.isMeta ? ' class' : ''}`;
-      const confirmed = await vscode.window.showWarningMessage(
-        `Delete ${recv}>>#${node.selector}?`,
-        { modal: true },
-        'Delete',
-      );
-      if (confirmed !== 'Delete') return;
-
-      try {
-        queries.deleteMethod(session, node.className, node.isMeta, node.selector);
-        vscode.window.showInformationMessage(`Deleted ${recv}>>#${node.selector}`);
-        browserTreeProvider.refresh();
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        vscode.window.showErrorMessage(`Delete failed: ${msg}`);
-      }
-    }),
-
-    vscode.commands.registerCommand('gemstone.recategorizeMethod', async (node?: BrowserNode) => {
-      const session = sessionManager.getSelectedSession();
-      if (!session || !node || node.kind !== 'method') return;
-
-      const recv = `${node.className}${node.isMeta ? ' class' : ''}`;
-      const newCategory = await vscode.window.showInputBox({
-        prompt: `Move ${recv}>>#${node.selector} to category`,
-        value: node.category,
-      });
-      if (!newCategory || newCategory === node.category) return;
-
-      try {
-        queries.recategorizeMethod(session, node.className, node.isMeta, node.selector, newCategory);
-        vscode.window.showInformationMessage(
-          `Moved ${recv}>>#${node.selector} to '${newCategory}'`
-        );
-        browserTreeProvider.refresh();
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        vscode.window.showErrorMessage(`Move failed: ${msg}`);
-      }
-    }),
-
-    vscode.commands.registerCommand('gemstone.renameCategory', async (node?: BrowserNode) => {
-      const session = sessionManager.getSelectedSession();
-      if (!session || !node || node.kind !== 'category') return;
-
-      const recv = `${node.className}${node.isMeta ? ' class' : ''}`;
-      const newName = await vscode.window.showInputBox({
-        prompt: `Rename category '${node.name}' on ${recv}`,
-        value: node.name,
-      });
-      if (!newName || newName === node.name) return;
-
-      try {
-        queries.renameCategory(session, node.className, node.isMeta, node.name, newName);
-        vscode.window.showInformationMessage(
-          `Renamed category '${node.name}' to '${newName}' on ${recv}`
-        );
-        browserTreeProvider.refresh();
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        vscode.window.showErrorMessage(`Rename failed: ${msg}`);
-      }
-    }),
-
-    vscode.commands.registerCommand('gemstone.deleteClass', async (node?: BrowserNode) => {
-      const session = sessionManager.getSelectedSession();
-      if (!session || !node || node.kind !== 'class') return;
-
-      const confirmed = await vscode.window.showWarningMessage(
-        `Remove ${node.name} from ${node.dictName}?`,
-        { modal: true },
-        'Remove',
-      );
-      if (confirmed !== 'Remove') return;
-
-      try {
-        queries.deleteClass(session, node.dictIndex, node.name);
-        vscode.window.showInformationMessage(`Removed ${node.name} from ${node.dictName}`);
-        browserTreeProvider.refresh();
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        vscode.window.showErrorMessage(`Remove failed: ${msg}`);
-      }
-    }),
-
-    vscode.commands.registerCommand('gemstone.moveClass', async (node?: BrowserNode) => {
-      const session = sessionManager.getSelectedSession();
-      if (!session || !node || node.kind !== 'class') return;
-
-      const allDicts = queries.getDictionaryNames(session)
-        .map((name, i) => ({ label: name, dictIndex: i + 1 }))
-        .filter(d => d.dictIndex !== node.dictIndex);
-      if (allDicts.length === 0) {
-        vscode.window.showInformationMessage('No other dictionaries available.');
-        return;
-      }
-
-      const target = await vscode.window.showQuickPick(allDicts, {
-        placeHolder: `Move ${node.name} from ${node.dictName} to...`,
-      });
-      if (!target) return;
-
-      try {
-        queries.moveClass(session, node.dictIndex, target.dictIndex, node.name);
-        vscode.window.showInformationMessage(`Moved ${node.name} to ${target.label}`);
-        browserTreeProvider.refresh();
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        vscode.window.showErrorMessage(`Move failed: ${msg}`);
-      }
-    }),
-
-    vscode.commands.registerCommand('gemstone.addDictionary', async () => {
-      const session = sessionManager.getSelectedSession();
-      if (!session) {
-        vscode.window.showErrorMessage('No active GemStone session.');
-        return;
-      }
-
-      const name = await vscode.window.showInputBox({
-        prompt: 'Name for new SymbolDictionary',
-        placeHolder: 'e.g. MyDictionary',
-      });
-      if (!name) return;
-
-      try {
-        queries.addDictionary(session, name);
-        vscode.window.showInformationMessage(`Created dictionary ${name}`);
-        browserTreeProvider.refresh();
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        vscode.window.showErrorMessage(`Failed to create dictionary: ${msg}`);
-      }
-    }),
-
-    vscode.commands.registerCommand('gemstone.moveDictionaryUp', async (node?: BrowserNode) => {
-      const session = sessionManager.getSelectedSession();
-      if (!session || !node || node.kind !== 'dictionary') return;
-
-      try {
-        queries.moveDictionaryUp(session, node.dictIndex);
-        browserTreeProvider.refresh();
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        vscode.window.showErrorMessage(`Move failed: ${msg}`);
-      }
-    }),
-
-    vscode.commands.registerCommand('gemstone.moveDictionaryDown', async (node?: BrowserNode) => {
-      const session = sessionManager.getSelectedSession();
-      if (!session || !node || node.kind !== 'dictionary') return;
-
-      try {
-        queries.moveDictionaryDown(session, node.dictIndex);
-        browserTreeProvider.refresh();
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        vscode.window.showErrorMessage(`Move failed: ${msg}`);
-      }
     }),
 
     vscode.commands.registerCommand('gemstone.displayIt', () => {
@@ -750,11 +531,70 @@ export function activate(context: vscode.ExtensionContext) {
       codeExecutor.inspectIt(inspectorProvider);
     }),
 
-    vscode.commands.registerCommand('gemstone.inspectGlobal', async (node?: BrowserNode) => {
-      if (!node || node.kind !== 'global') return;
-      const code =
-        `(System myUserProfile symbolList at: ${node.dictIndex}) at: #'${node.name}'`;
-      await codeExecutor.inspectExpression(inspectorProvider, code, node.name);
+    vscode.commands.registerCommand('gemstone.showTranscript', () => {
+      showTranscript();
+    }),
+
+    vscode.commands.registerCommand('gemstone.runSunitClass', async (args: { className: string }) => {
+      await sunitTestController.runClassByName(args.className);
+    }),
+
+    vscode.commands.registerCommand('gemstone.inspectGlobal', async (args: { className: string }) => {
+      await codeExecutor.inspectExpression(inspectorProvider, args.className, args.className);
+    }),
+
+    vscode.commands.registerCommand('gemstone.sendersOfSelector', async (args: { selector: string; sessionId: number }) => {
+      const session = sessionManager.getSession(args.sessionId);
+      if (!session) return;
+      const maxEnv = vscode.workspace.getConfiguration('gemstone').get<number>('maxEnvironment', 0);
+      const all: queries.MethodSearchResult[] = [];
+      for (let env = 0; env <= maxEnv; env++) {
+        all.push(...queries.sendersOf(session, args.selector, env));
+      }
+      const seen = new Set<string>();
+      const results = all.filter(r => {
+        const key = `${r.className}|${r.isMeta}|${r.selector}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      await showMethodResults(session, results, `Senders of #${args.selector}`);
+    }),
+
+    vscode.commands.registerCommand('gemstone.implementorsOfSelector', async (args: { selector: string; sessionId: number }) => {
+      const session = sessionManager.getSession(args.sessionId);
+      if (!session) return;
+      const maxEnv = vscode.workspace.getConfiguration('gemstone').get<number>('maxEnvironment', 0);
+      const all: queries.MethodSearchResult[] = [];
+      for (let env = 0; env <= maxEnv; env++) {
+        all.push(...queries.implementorsOf(session, args.selector, env));
+      }
+      const seen = new Set<string>();
+      const results = all.filter(r => {
+        const key = `${r.className}|${r.isMeta}|${r.selector}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      await showMethodResults(session, results, `Implementors of #${args.selector}`);
+    }),
+
+    vscode.commands.registerCommand('gemstone.browseReferences', async (args: { objectName: string; sessionId: number }) => {
+      const session = sessionManager.getSession(args.sessionId);
+      if (!session) return;
+      const maxEnv = vscode.workspace.getConfiguration('gemstone').get<number>('maxEnvironment', 0);
+      const all: queries.MethodSearchResult[] = [];
+      for (let env = 0; env <= maxEnv; env++) {
+        all.push(...queries.referencesToObject(session, args.objectName, env));
+      }
+      const seen = new Set<string>();
+      const results = all.filter(r => {
+        const key = `${r.className}|${r.isMeta}|${r.selector}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      await showMethodResults(session, results, `References to ${args.objectName}`);
     }),
 
     vscode.commands.registerCommand('gemstone.removeInspectorItem', (node?: InspectorNode) => {
@@ -794,17 +634,14 @@ export function activate(context: vscode.ExtensionContext) {
       await showMethodResults(session, results, `Methods containing "${term}"`);
     }),
 
-    vscode.commands.registerCommand('gemstone.sendersOf', async (node?: BrowserNode) => {
+    vscode.commands.registerCommand('gemstone.sendersOf', async () => {
       const session = await sessionManager.resolveSession();
       if (!session) return;
 
-      const selector = await resolveSelector(node);
+      const selector = await resolveSelector();
       if (!selector) return;
 
-      const envId = (node && node.kind === 'method') ? node.environmentId : 0;
-      const maxEnv = (!node && vscode.workspace.getConfiguration('gemstone').get<number>('maxEnvironment', 0) > 0)
-        ? vscode.workspace.getConfiguration('gemstone').get<number>('maxEnvironment', 0)
-        : envId;
+      const maxEnv = vscode.workspace.getConfiguration('gemstone').get<number>('maxEnvironment', 0);
 
       let results: queries.MethodSearchResult[];
       try {
@@ -816,7 +653,7 @@ export function activate(context: vscode.ExtensionContext) {
           },
           () => {
             const all: queries.MethodSearchResult[] = [];
-            for (let env = (node ? envId : 0); env <= maxEnv; env++) {
+            for (let env = 0; env <= maxEnv; env++) {
               all.push(...queries.sendersOf(session, selector, env));
             }
             // Deduplicate by class+meta+selector
@@ -838,17 +675,14 @@ export function activate(context: vscode.ExtensionContext) {
       await showMethodResults(session, results, `Senders of #${selector}`);
     }),
 
-    vscode.commands.registerCommand('gemstone.implementorsOf', async (node?: BrowserNode) => {
+    vscode.commands.registerCommand('gemstone.implementorsOf', async () => {
       const session = await sessionManager.resolveSession();
       if (!session) return;
 
-      const selector = await resolveSelector(node);
+      const selector = await resolveSelector();
       if (!selector) return;
 
-      const envId = (node && node.kind === 'method') ? node.environmentId : 0;
-      const maxEnv = (!node && vscode.workspace.getConfiguration('gemstone').get<number>('maxEnvironment', 0) > 0)
-        ? vscode.workspace.getConfiguration('gemstone').get<number>('maxEnvironment', 0)
-        : envId;
+      const maxEnv = vscode.workspace.getConfiguration('gemstone').get<number>('maxEnvironment', 0);
 
       let results: queries.MethodSearchResult[];
       try {
@@ -860,7 +694,7 @@ export function activate(context: vscode.ExtensionContext) {
           },
           () => {
             const all: queries.MethodSearchResult[] = [];
-            for (let env = (node ? envId : 0); env <= maxEnv; env++) {
+            for (let env = 0; env <= maxEnv; env++) {
               all.push(...queries.implementorsOf(session, selector, env));
             }
             const seen = new Set<string>();
@@ -881,19 +715,14 @@ export function activate(context: vscode.ExtensionContext) {
       await showMethodResults(session, results, `Implementors of #${selector}`);
     }),
 
-    vscode.commands.registerCommand('gemstone.classHierarchy', async (node?: BrowserNode) => {
+    vscode.commands.registerCommand('gemstone.classHierarchy', async () => {
       const session = await sessionManager.resolveSession();
       if (!session) return;
 
-      let className: string | undefined;
-      if (node && node.kind === 'class') {
-        className = node.name;
-      } else {
-        className = await vscode.window.showInputBox({
-          prompt: 'Enter class name',
-          placeHolder: 'e.g. Array',
-        });
-      }
+      const className = await vscode.window.showInputBox({
+        prompt: 'Enter class name',
+        placeHolder: 'e.g. Array',
+      });
       if (!className) return;
 
       let results: queries.ClassHierarchyEntry[];
@@ -962,6 +791,15 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate(): Thenable<void> | undefined {
+  if (reconcileManager) {
+    reconcileManager.dispose();
+  }
+  if (fileInManager) {
+    fileInManager.dispose();
+  }
+  if (exportManager) {
+    exportManager.dispose();
+  }
   if (sessionManager) {
     sessionManager.dispose();
   }

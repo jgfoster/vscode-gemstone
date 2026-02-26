@@ -99,6 +99,16 @@ export const ViewColumn = {
   One: 1,
   Two: 2,
   Three: 3,
+  Beside: -2,
+};
+
+// ── TextEditorRevealType mock ──────────────────────────────
+
+export const TextEditorRevealType = {
+  Default: 0,
+  InCenter: 1,
+  InCenterIfOutsideViewport: 2,
+  AtTop: 3,
 };
 
 // ── OverviewRulerLane mock ────────────────────────────────
@@ -131,9 +141,21 @@ function createMockPanel() {
   return {
     webview,
     title: '',
+    active: true,
     reveal: vi.fn(),
     dispose: vi.fn(),
     onDidDispose: vi.fn((_handler: unknown) => ({ dispose: () => {} })),
+    onDidChangeViewState: vi.fn((_handler: unknown) => ({ dispose: () => {} })),
+  };
+}
+
+function createMockTextEditor() {
+  return {
+    document: { uri: Uri.file(''), languageId: '', getText: vi.fn(() => ''), lineAt: vi.fn(), lineCount: 0 },
+    selection: new Selection(new Position(0, 0), new Position(0, 0)),
+    selections: [],
+    setDecorations: vi.fn(),
+    revealRange: vi.fn(),
   };
 }
 
@@ -144,6 +166,7 @@ export const window = {
     panel.title = title;
     return panel;
   }),
+  showTextDocument: vi.fn(async () => createMockTextEditor()),
   showErrorMessage: vi.fn(),
   showInformationMessage: vi.fn(),
   showWarningMessage: vi.fn(),
@@ -151,7 +174,20 @@ export const window = {
   createOutputChannel: vi.fn(() => ({ appendLine: vi.fn(), show: vi.fn(), dispose: vi.fn() })),
   createTextEditorDecorationType: vi.fn(() => ({ dispose: vi.fn() })),
   visibleTextEditors: [] as unknown[],
+  onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: () => {} })),
+  onDidChangeTextEditorSelection: vi.fn(() => ({ dispose: () => {} })),
   onDidChangeVisibleTextEditors: vi.fn(() => ({ dispose: () => {} })),
+  showInputBox: vi.fn(),
+  showQuickPick: vi.fn(),
+  tabGroups: {
+    all: [] as { tabs: { input: unknown }[] }[],
+    close: vi.fn(),
+  },
+  withProgress: vi.fn(async (_opts: unknown, task: (progress: unknown, token: unknown) => Promise<unknown>) => {
+    const progress = { report: vi.fn() };
+    const token = { isCancellationRequested: false };
+    return task(progress, token);
+  }),
 };
 
 // ── Workspace mock ─────────────────────────────────────────
@@ -159,6 +195,10 @@ export const window = {
 export const workspace = {
   getConfiguration,
   onDidChangeConfiguration: vi.fn(() => ({ dispose: () => {} })),
+  onDidSaveTextDocument: vi.fn(() => ({ dispose: () => {} })),
+  onDidCreateFiles: vi.fn(() => ({ dispose: () => {} })),
+  onDidDeleteFiles: vi.fn(() => ({ dispose: () => {} })),
+  registerTextDocumentContentProvider: vi.fn(() => ({ dispose: () => {} })),
   textDocuments: [] as unknown[],
 };
 
@@ -166,6 +206,7 @@ export const workspace = {
 
 export const commands = {
   registerCommand: vi.fn((_command: string, _callback: unknown) => ({ dispose: () => {} })),
+  executeCommand: vi.fn(),
 };
 
 // ── Uri mock ───────────────────────────────────────────────
@@ -260,10 +301,37 @@ export class Position {
 }
 
 export class Range {
-  constructor(
-    public readonly start: Position,
-    public readonly end: Position,
-  ) {}
+  public readonly start: Position;
+  public readonly end: Position;
+  constructor(startOrLine: Position | number, endOrChar: Position | number, endLine?: number, endChar?: number) {
+    if (typeof startOrLine === 'number') {
+      this.start = new Position(startOrLine, endOrChar as number);
+      this.end = new Position(endLine ?? startOrLine, endChar ?? (endOrChar as number));
+    } else {
+      this.start = startOrLine;
+      this.end = endOrChar as Position;
+    }
+  }
+}
+
+export class CodeLens {
+  command?: { title: string; command: string; arguments?: unknown[] };
+  constructor(public readonly range: Range, command?: { title: string; command: string; arguments?: unknown[] }) {
+    this.command = command;
+  }
+  get isResolved(): boolean {
+    return this.command !== undefined;
+  }
+}
+
+export class Selection extends Range {
+  anchor: Position;
+  active: Position;
+  constructor(anchor: Position, active: Position) {
+    super(anchor, active);
+    this.anchor = anchor;
+    this.active = active;
+  }
 }
 
 export class Location {
@@ -299,12 +367,54 @@ export class SymbolInformation {
 
 // ── Languages mock ───────────────────────────────────────
 
+function createMockDiagnosticCollection() {
+  const store = new Map<string, unknown[]>();
+  return {
+    set: vi.fn((uri: { toString(): string }, diags: unknown[]) => {
+      store.set(uri.toString(), diags);
+    }),
+    delete: vi.fn((uri: { toString(): string }) => {
+      store.delete(uri.toString());
+    }),
+    get: vi.fn((uri: { toString(): string }) => store.get(uri.toString())),
+    clear: vi.fn(() => store.clear()),
+    dispose: vi.fn(),
+    __store: store,
+  };
+}
+
 export const languages = {
   registerWorkspaceSymbolProvider: vi.fn(() => ({ dispose: () => {} })),
   registerDefinitionProvider: vi.fn(() => ({ dispose: () => {} })),
   registerHoverProvider: vi.fn(() => ({ dispose: () => {} })),
   registerCompletionItemProvider: vi.fn(() => ({ dispose: () => {} })),
+  registerCodeLensProvider: vi.fn(() => ({ dispose: () => {} })),
   setTextDocumentLanguage: vi.fn(),
+  createDiagnosticCollection: vi.fn((_name?: string) => createMockDiagnosticCollection()),
+};
+
+// ── Diagnostic mock ─────────────────────────────────────────
+
+export const DiagnosticSeverity = {
+  Error: 0,
+  Warning: 1,
+  Information: 2,
+  Hint: 3,
+};
+
+export class Diagnostic {
+  source?: string;
+  constructor(
+    public readonly range: Range,
+    public readonly message: string,
+    public readonly severity: number = DiagnosticSeverity.Error,
+  ) {}
+}
+
+export const ProgressLocation = {
+  SourceControl: 1,
+  Window: 10,
+  Notification: 15,
 };
 
 // ── MarkdownString mock ──────────────────────────────────

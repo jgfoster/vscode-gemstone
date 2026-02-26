@@ -3,6 +3,7 @@ import { SessionManager, ActiveSession } from './sessionManager';
 import { OOP_ILLEGAL, OOP_NIL, GCI_PERFORM_FLAG_ENABLE_DEBUG } from './gciConstants';
 import { logQuery, logResult, logError, logInfo } from './gciLog';
 import { InspectorTreeProvider } from './inspectorTreeProvider';
+import { appendTranscript } from './transcriptChannel';
 
 const BACKOFF_INTERVALS = [10, 10, 20, 40, 80, 160, 320, 500];
 const MAX_INTERVAL = 500;
@@ -91,9 +92,10 @@ export class CodeExecutor {
     this.executing.add(session.id);
     const label = displayResult ? 'Display It' : 'Execute It';
     logQuery(session.id, label, code);
+    const wrappedCode = this.wrapWithTranscriptCapture(code);
     try {
       const { success, err: startErr } = session.gci.GciTsNbExecute(
-        session.handle, code, oopClassString,
+        session.handle, wrappedCode, oopClassString,
         OOP_ILLEGAL, OOP_NIL, GCI_PERFORM_FLAG_ENABLE_DEBUG, 0,
       );
       if (!success) {
@@ -104,6 +106,9 @@ export class CodeExecutor {
       }
 
       const resultString = await this.pollForResult(session);
+
+      const transcript = this.fetchTranscriptOutput(session);
+      if (transcript) appendTranscript(transcript);
 
       logResult(session.id, resultString);
 
@@ -186,6 +191,43 @@ export class CodeExecutor {
       } else {
         logInfo(`[Session ${session.id}] Debug context FetchClass error: ${err.message}`);
       }
+    }
+  }
+
+  private wrapWithTranscriptCapture(code: string): string {
+    // Wrap user code so that Transcript writes are captured into SessionTemps.
+    // The wrapped code:
+    //   1. Creates a capture WriteStream
+    //   2. Saves the original Transcript
+    //   3. Installs the capture stream as Transcript in SessionTemps
+    //   4. Evaluates the user code inside an ensure: block
+    //   5. Restores the original Transcript and stores captured text
+    const escaped = code.replace(/'/g, "''");
+    return `| __vscCapture __vscOriginal __vscResult |
+__vscCapture := WriteStream on: String new.
+__vscOriginal := SessionTemps current at: #Transcript ifAbsent: [nil].
+SessionTemps current at: #Transcript put: __vscCapture.
+[__vscResult := [${escaped}] value]
+  ensure: [
+    SessionTemps current at: #Transcript put: __vscOriginal.
+    SessionTemps current at: #'__vscTranscriptResult' put: __vscCapture contents.
+  ].
+__vscResult`;
+  }
+
+  private fetchTranscriptOutput(session: ActiveSession): string {
+    try {
+      const code = `| __t |
+__t := SessionTemps current at: #'__vscTranscriptResult' ifAbsent: [''].
+SessionTemps current removeKey: #'__vscTranscriptResult' ifAbsent: [].
+__t`;
+      const { data, err } = session.gci.GciTsExecuteFetchBytes(
+        session.handle, code, -1, OOP_NIL, OOP_ILLEGAL, OOP_NIL, MAX_RESULT_SIZE,
+      );
+      if (err.number !== 0) return '';
+      return data || '';
+    } catch {
+      return '';
     }
   }
 
@@ -384,9 +426,10 @@ export class CodeExecutor {
 
     this.executing.add(session.id);
     logQuery(session.id, 'Inspect It', code);
+    const wrappedCode = this.wrapWithTranscriptCapture(code);
     try {
       const { success, err: startErr } = session.gci.GciTsNbExecute(
-        session.handle, code, oopClassString,
+        session.handle, wrappedCode, oopClassString,
         OOP_ILLEGAL, OOP_NIL, GCI_PERFORM_FLAG_ENABLE_DEBUG, 0,
       );
       if (!success) {
@@ -397,6 +440,10 @@ export class CodeExecutor {
       }
 
       const oop = await this.pollForResultOop(session);
+
+      const transcript = this.fetchTranscriptOutput(session);
+      if (transcript) appendTranscript(transcript);
+
       logResult(session.id, `OOP ${oop}`);
       inspectorProvider.addRoot(session.id, oop, label);
     } catch (e: unknown) {

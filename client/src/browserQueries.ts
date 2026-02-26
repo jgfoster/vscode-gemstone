@@ -333,6 +333,15 @@ dict name`;
   executeFetchString(session, `addDictionary(${dictName})`, code);
 }
 
+export function removeDictionary(
+  session: ActiveSession, dictIndex: number
+): void {
+  const code = `| sl |
+sl := System myUserProfile symbolList.
+sl remove: (sl at: ${dictIndex}). 'ok'`;
+  executeFetchString(session, `removeDictionary(dictIndex: ${dictIndex})`, code);
+}
+
 export function moveDictionaryUp(
   session: ActiveSession, dictIndex: number
 ): void {
@@ -511,7 +520,7 @@ supers reverseDo: [:each |
     nextPutAll: each name; tab; nextPutAll: 'superclass'; lf].
 stream nextPutAll: (classDict at: class ifAbsent: ['']); tab;
   nextPutAll: class name; tab; nextPutAll: 'self'; lf.
-subs asSortedCollection do: [:each |
+(subs asSortedCollection: [:a :b | a name <= b name]) do: [:each |
   stream nextPutAll: (classDict at: each ifAbsent: ['']); tab;
     nextPutAll: each name; tab; nextPutAll: 'subclass'; lf].
 stream contents`;
@@ -529,6 +538,26 @@ stream contents`;
     });
   }
   return results;
+}
+
+export function referencesToObject(
+  session: ActiveSession, objectName: string, environmentId: number = 0,
+): MethodSearchResult[] {
+  const code = `| methods stream limit classDict sl |
+methods := (ClassOrganizer new referencesToObject:
+  (System myUserProfile symbolList objectNamed: #'${escapeString(objectName)}')).
+${methodSerialization(environmentId)}`;
+
+  return parseMethodSearchResults(
+    executeFetchString(session, `referencesToObject(${objectName})`, code),
+  );
+}
+
+export function fileOutClass(
+  session: ActiveSession, dictIndex: number, className: string,
+): string {
+  const code = `((System myUserProfile symbolList at: ${dictIndex}) at: #'${escapeString(className)}') fileOutClass`;
+  return executeFetchString(session, `fileOutClass(${className})`, code);
 }
 
 export function getInstVarNames(

@@ -104,6 +104,11 @@
             "minimum": 0,
             "description": "Maximum method dictionary environment to show in the browser (0 = standard Smalltalk only, 2 = show environments 0–2)"
           },
+          "gemstone.exportPath": {
+            "type": "string",
+            "default": "",
+            "description": "Root path for exported class files. Defaults to {workspaceRoot}/gemstone/"
+          },
           "gemstone.logins": {
             "type": "array",
             "default": [],
@@ -245,12 +250,6 @@
           "icon": "$(plug)"
         },
         {
-          "id": "gemstoneBrowser",
-          "name": "Browser",
-          "type": "tree",
-          "icon": "$(list-tree)"
-        },
-        {
           "id": "gemstoneInspector",
           "name": "Inspector",
           "type": "tree",
@@ -259,10 +258,6 @@
       ]
     },
     "viewsWelcome": [
-      {
-        "view": "gemstoneBrowser",
-        "contents": "No GemStone session selected.\n[Select a session](command:gemstone.selectSession) to browse classes and methods."
-      },
       {
         "view": "gemstoneInspector",
         "contents": "No objects inspected yet.\nSelect code and press Cmd+I to inspect."
@@ -324,6 +319,12 @@
         "icon": "$(target)"
       },
       {
+        "command": "gemstone.exportClasses",
+        "title": "Export Classes to Files",
+        "category": "GemStone",
+        "icon": "$(cloud-download)"
+      },
+      {
         "command": "gemstone.displayIt",
         "title": "Display It",
         "category": "GemStone",
@@ -342,9 +343,10 @@
         "icon": "$(eye)"
       },
       {
-        "command": "gemstone.inspectGlobal",
-        "title": "Inspect",
-        "category": "GemStone"
+        "command": "gemstone.showTranscript",
+        "title": "Show Transcript",
+        "category": "GemStone",
+        "icon": "$(output)"
       },
       {
         "command": "gemstone.removeInspectorItem",
@@ -359,6 +361,12 @@
         "icon": "$(clear-all)"
       },
       {
+        "command": "gemstone.openBrowser",
+        "title": "Open System Browser",
+        "category": "GemStone",
+        "icon": "$(list-tree)"
+      },
+      {
         "command": "gemstone.refreshBrowser",
         "title": "Refresh Browser",
         "category": "GemStone",
@@ -369,75 +377,6 @@
         "title": "Refresh SUnit Tests",
         "category": "GemStone",
         "icon": "$(refresh)"
-      },
-      {
-        "command": "gemstone.runSunitClass",
-        "title": "Run SUnit Tests",
-        "category": "GemStone",
-        "icon": "$(testing-run-icon)"
-      },
-      {
-        "command": "gemstone.newClass",
-        "title": "New Class",
-        "category": "GemStone",
-        "icon": "$(add)"
-      },
-      {
-        "command": "gemstone.newClassCategory",
-        "title": "New Class Category",
-        "category": "GemStone",
-        "icon": "$(add)"
-      },
-      {
-        "command": "gemstone.newMethod",
-        "title": "New Method",
-        "category": "GemStone",
-        "icon": "$(add)"
-      },
-      {
-        "command": "gemstone.deleteMethod",
-        "title": "Delete Method",
-        "category": "GemStone",
-        "icon": "$(trash)"
-      },
-      {
-        "command": "gemstone.recategorizeMethod",
-        "title": "Move to Category...",
-        "category": "GemStone"
-      },
-      {
-        "command": "gemstone.renameCategory",
-        "title": "Rename Category...",
-        "category": "GemStone"
-      },
-      {
-        "command": "gemstone.deleteClass",
-        "title": "Remove from Dictionary",
-        "category": "GemStone",
-        "icon": "$(trash)"
-      },
-      {
-        "command": "gemstone.moveClass",
-        "title": "Move to Dictionary...",
-        "category": "GemStone"
-      },
-      {
-        "command": "gemstone.addDictionary",
-        "title": "Add Dictionary",
-        "category": "GemStone",
-        "icon": "$(add)"
-      },
-      {
-        "command": "gemstone.moveDictionaryUp",
-        "title": "Move Up",
-        "category": "GemStone",
-        "icon": "$(arrow-up)"
-      },
-      {
-        "command": "gemstone.moveDictionaryDown",
-        "title": "Move Down",
-        "category": "GemStone",
-        "icon": "$(arrow-down)"
       },
       {
         "command": "gemstone.searchMethods",
@@ -476,21 +415,6 @@
           "group": "navigation"
         },
         {
-          "command": "gemstone.searchMethods",
-          "when": "view == gemstoneBrowser",
-          "group": "navigation"
-        },
-        {
-          "command": "gemstone.addDictionary",
-          "when": "view == gemstoneBrowser",
-          "group": "navigation"
-        },
-        {
-          "command": "gemstone.refreshBrowser",
-          "when": "view == gemstoneBrowser",
-          "group": "navigation"
-        },
-        {
           "command": "gemstone.clearInspector",
           "when": "view == gemstoneInspector",
           "group": "navigation"
@@ -517,107 +441,6 @@
           "when": "view == gemstoneLogins"
         },
         {
-          "command": "gemstone.newClassCategory",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneDictionary",
-          "group": "inline@1"
-        },
-        {
-          "command": "gemstone.moveDictionaryUp",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneDictionary",
-          "group": "inline@2"
-        },
-        {
-          "command": "gemstone.moveDictionaryDown",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneDictionary",
-          "group": "inline@3"
-        },
-        {
-          "command": "gemstone.newClassCategory",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneDictionary"
-        },
-        {
-          "command": "gemstone.moveDictionaryUp",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneDictionary"
-        },
-        {
-          "command": "gemstone.moveDictionaryDown",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneDictionary"
-        },
-        {
-          "command": "gemstone.newClass",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneClassCategoryNamed",
-          "group": "inline@1"
-        },
-        {
-          "command": "gemstone.newClass",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneClassCategoryNamed"
-        },
-        {
-          "command": "gemstone.newMethod",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneCategory",
-          "group": "inline@1"
-        },
-        {
-          "command": "gemstone.newMethod",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneCategory"
-        },
-        {
-          "command": "gemstone.newMethod",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneSide",
-          "group": "inline@1"
-        },
-        {
-          "command": "gemstone.newMethod",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneSide"
-        },
-        {
-          "command": "gemstone.deleteMethod",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneMethod",
-          "group": "inline@1"
-        },
-        {
-          "command": "gemstone.deleteMethod",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneMethod"
-        },
-        {
-          "command": "gemstone.recategorizeMethod",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneMethod"
-        },
-        {
-          "command": "gemstone.sendersOf",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneMethod"
-        },
-        {
-          "command": "gemstone.implementorsOf",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneMethod"
-        },
-        {
-          "command": "gemstone.renameCategory",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneCategory"
-        },
-        {
-          "command": "gemstone.deleteClass",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneClass",
-          "group": "inline@1"
-        },
-        {
-          "command": "gemstone.deleteClass",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneClass"
-        },
-        {
-          "command": "gemstone.moveClass",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneClass"
-        },
-        {
-          "command": "gemstone.classHierarchy",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneClass"
-        },
-        {
-          "command": "gemstone.runSunitClass",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneClass",
-          "group": "2_test"
-        },
-        {
           "command": "gemstone.sessionCommit",
           "when": "view == gemstoneSessions && viewItem == gemstoneSession",
           "group": "inline@1"
@@ -633,18 +456,22 @@
           "group": "inline@3"
         },
         {
-          "command": "gemstone.selectSession",
+          "command": "gemstone.openBrowser",
           "when": "view == gemstoneSessions && viewItem == gemstoneSession",
           "group": "inline@4"
+        },
+        {
+          "command": "gemstone.exportClasses",
+          "when": "view == gemstoneSessions && viewItem == gemstoneSession"
+        },
+        {
+          "command": "gemstone.selectSession",
+          "when": "view == gemstoneSessions && viewItem == gemstoneSession"
         },
         {
           "command": "gemstone.removeInspectorItem",
           "when": "view == gemstoneInspector && viewItem == gemstoneInspectorRoot",
           "group": "inline@1"
-        },
-        {
-          "command": "gemstone.inspectGlobal",
-          "when": "view == gemstoneBrowser && viewItem == gemstoneGlobal"
         }
       ],
       "editor/context": [
@@ -736,6 +563,12 @@
         "key": "ctrl+i",
         "mac": "cmd+i",
         "when": "editorTextFocus && gemstone.hasActiveSession"
+      },
+      {
+        "command": "gemstone.openBrowser",
+        "key": "ctrl+shift+b",
+        "mac": "cmd+shift+b",
+        "when": "gemstone.hasActiveSession"
       }
     ]
   },

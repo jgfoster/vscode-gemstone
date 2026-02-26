@@ -27,6 +27,11 @@ import { findSelectorAtPosition } from './utils/astUtils';
 import { getFoldingRanges } from './services/folding';
 import { formatDocument } from './services/formatting';
 import { FormatterSettings, DEFAULT_SETTINGS } from './services/formatterSettings';
+import {
+  collectSemanticTokens, encodeSemanticTokens,
+  SEMANTIC_TOKEN_TYPES, SEMANTIC_TOKEN_MODIFIERS,
+} from './services/semanticTokens';
+import { ScopeAnalyzer } from './utils/scopeAnalyzer';
 
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
@@ -61,6 +66,13 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       workspaceSymbolProvider: true,
       foldingRangeProvider: true,
       documentFormattingProvider: true,
+      semanticTokensProvider: {
+        legend: {
+          tokenTypes: SEMANTIC_TOKEN_TYPES,
+          tokenModifiers: SEMANTIC_TOKEN_MODIFIERS,
+        },
+        full: true,
+      },
     },
   };
 });
@@ -321,6 +333,31 @@ connection.onDocumentFormatting((params) => {
   };
 
   return formatDocument(doc, settings);
+});
+
+// ── Semantic Tokens ─────────────────────────────────────────
+
+connection.languages.semanticTokens.on((params) => {
+  const doc = documentManager.get(params.textDocument.uri);
+  if (!doc) return { data: [] };
+
+  const allTokens: ReturnType<typeof collectSemanticTokens> = [];
+  const analyzer = new ScopeAnalyzer();
+
+  for (const pr of doc.parsedRegions) {
+    if (!pr.ast) continue;
+
+    const lineOffset = pr.region.startLine
+      - (pr.region.kind === 'smalltalk-code' ? 1 : 0);
+
+    const scopeRoot = analyzer.analyze(pr.ast);
+    const regionTokens = collectSemanticTokens(
+      pr.ast, pr.tokens, lineOffset, scopeRoot,
+    );
+    allTokens.push(...regionTokens);
+  }
+
+  return { data: encodeSemanticTokens(allTokens) };
 });
 
 // ── Custom: Selector at Position ─────────────────────────
