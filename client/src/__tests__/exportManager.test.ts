@@ -62,6 +62,7 @@ function createMockSession(overrides?: Partial<GemStoneLogin>): ActiveSession {
       netldi: 'gs64ldi',
       host_user: '',
       host_password: '',
+      exportPath: '',
       ...overrides,
     },
     stoneVersion: '3.7.2',
@@ -93,6 +94,7 @@ describe('ExportManager', () => {
 
   afterEach(() => {
     manager.dispose();
+    (vscode as unknown as { __resetConfig: () => void }).__resetConfig();
     // Clean up temp dir
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
@@ -104,6 +106,34 @@ describe('ExportManager', () => {
     });
 
     it('returns undefined when no workspace is open', () => {
+      const wsModule = vscode.workspace as unknown as { workspaceFolders: null };
+      wsModule.workspaceFolders = null;
+      expect(manager.getExportRoot()).toBeUndefined();
+    });
+
+    it('resolves a relative exportPath against the workspace root', () => {
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('exportPath', 'smalltalk');
+      expect(manager.getExportRoot()).toBe(path.join(tmpDir, 'smalltalk'));
+    });
+
+    it('returns an absolute exportPath as-is', () => {
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('exportPath', '/custom/absolute/path');
+      expect(manager.getExportRoot()).toBe('/custom/absolute/path');
+    });
+
+    it('expands {workspaceRoot} in exportPath', () => {
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('exportPath', '{workspaceRoot}/my-exports');
+      expect(manager.getExportRoot()).toBe(path.join(tmpDir, 'my-exports'));
+    });
+
+    it('returns undefined for relative exportPath when no workspace is open', () => {
+      const mockVscode = vscode as unknown as {
+        __setConfigValue: (key: string, value: unknown) => void;
+      };
+      mockVscode.__setConfigValue('exportPath', 'smalltalk');
       const wsModule = vscode.workspace as unknown as { workspaceFolders: null };
       wsModule.workspaceFolders = null;
       expect(manager.getExportRoot()).toBeUndefined();
@@ -302,6 +332,189 @@ describe('ExportManager', () => {
       expect(root1).not.toBe(root2);
       expect(fs.existsSync(path.join(root1, '1-UserGlobals', 'MyClass.gs'))).toBe(true);
       expect(fs.existsSync(path.join(root2, '1-UserGlobals', 'MyClass.gs'))).toBe(true);
+    });
+  });
+
+  describe('userManagedDictionaries', () => {
+    it('skips exporting user-managed dictionaries', async () => {
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('userManagedDictionaries', ['UserGlobals']);
+
+      const session = createMockSession();
+      await manager.exportSession(session);
+
+      const sessionRoot = manager.getSessionRoot(session)!;
+      // UserGlobals should NOT be exported
+      expect(fs.existsSync(path.join(sessionRoot, '1-UserGlobals'))).toBe(false);
+      // Globals should still be exported
+      expect(fs.existsSync(path.join(sessionRoot, '2-Globals', 'Array.gs'))).toBe(true);
+      expect(fs.existsSync(path.join(sessionRoot, '2-Globals', 'String.gs'))).toBe(true);
+    });
+
+    it('does not call getClassNames for user-managed dictionaries', async () => {
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('userManagedDictionaries', ['UserGlobals']);
+
+      const session = createMockSession();
+      await manager.exportSession(session);
+
+      // getClassNames should only be called for Globals (dictIndex 2), not UserGlobals (dictIndex 1)
+      expect(queries.getClassNames).not.toHaveBeenCalledWith(session, 1);
+      expect(queries.getClassNames).toHaveBeenCalledWith(session, 2);
+    });
+
+    it('preserves user-managed directories during stale cleanup', async () => {
+      const session = createMockSession();
+      const sessionRoot = manager.getSessionRoot(session)!;
+
+      // Pre-create a user-managed directory
+      const managedDir = path.join(sessionRoot, '1-UserGlobals');
+      fs.mkdirSync(managedDir, { recursive: true });
+      fs.writeFileSync(path.join(managedDir, 'MyClass.gs'), 'user content');
+
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('userManagedDictionaries', ['UserGlobals']);
+
+      // Export with UserGlobals managed — it should not be deleted
+      await manager.exportSession(session);
+
+      expect(fs.existsSync(managedDir)).toBe(true);
+      expect(fs.readFileSync(path.join(managedDir, 'MyClass.gs'), 'utf-8')).toBe('user content');
+    });
+
+    it('does not change permissions on user-managed directories', async () => {
+      const session = createMockSession();
+      await manager.exportSession(session);
+
+      const sessionRoot = manager.getSessionRoot(session)!;
+
+      // Pre-create a user-managed directory with a file
+      const managedDir = path.join(sessionRoot, '3-MyApp');
+      fs.mkdirSync(managedDir, { recursive: true });
+      const filePath = path.join(managedDir, 'Widget.gs');
+      fs.writeFileSync(filePath, 'user content');
+      fs.chmodSync(filePath, 0o644);
+
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('userManagedDictionaries', ['MyApp']);
+
+      // markReadOnly should skip managed directories
+      manager.markReadOnly(session);
+
+      const stat = fs.statSync(filePath);
+      // Owner write bit should still be set
+      expect(stat.mode & 0o200).not.toBe(0);
+    });
+
+    it('exports all dictionaries when list is empty', async () => {
+      // Default: empty list
+      const session = createMockSession();
+      await manager.exportSession(session);
+
+      const sessionRoot = manager.getSessionRoot(session)!;
+      expect(fs.existsSync(path.join(sessionRoot, '1-UserGlobals', 'MyClass.gs'))).toBe(true);
+      expect(fs.existsSync(path.join(sessionRoot, '2-Globals', 'Array.gs'))).toBe(true);
+    });
+  });
+
+  describe('per-login exportPath template', () => {
+    it('getResolvedTemplate uses login exportPath when set', () => {
+      const session = createMockSession({ exportPath: '{workspaceRoot}/smalltalk/{dictName}' });
+      const template = manager.getResolvedTemplate(session);
+      expect(template).toBe(path.join(tmpDir, 'smalltalk', '{dictName}'));
+    });
+
+    it('getResolvedTemplate falls back to default when login exportPath is empty', () => {
+      const session = createMockSession();
+      const template = manager.getResolvedTemplate(session);
+      expect(template).toBe(path.join(tmpDir, 'gemstone', 'localhost', 'gs64stone', 'DataCurator', '{index}-{dictName}'));
+    });
+
+    it('getResolvedTemplate resolves {host}, {stone}, {user} variables', () => {
+      const session = createMockSession({
+        exportPath: '{workspaceRoot}/exports/{host}/{stone}/{user}/{dictName}',
+        gem_host: 'myhost',
+        stone: 'mystone',
+        gs_user: 'myuser',
+      });
+      const template = manager.getResolvedTemplate(session);
+      expect(template).toBe(path.join(tmpDir, 'exports', 'myhost', 'mystone', 'myuser', '{dictName}'));
+    });
+
+    it('getResolvedTemplate handles relative login exportPath', () => {
+      const session = createMockSession({ exportPath: 'smalltalk/{dictName}' });
+      const template = manager.getResolvedTemplate(session);
+      expect(template).toBe(path.join(tmpDir, 'smalltalk', '{dictName}'));
+    });
+
+    it('getResolvedTemplate returns undefined for relative path with no workspace', () => {
+      const wsModule = vscode.workspace as unknown as { workspaceFolders: null };
+      wsModule.workspaceFolders = null;
+      const session = createMockSession({ exportPath: 'smalltalk/{dictName}' });
+      expect(manager.getResolvedTemplate(session)).toBeUndefined();
+    });
+
+    it('getDictPath fully resolves the template', () => {
+      const session = createMockSession({ exportPath: '{workspaceRoot}/smalltalk/{dictName}' });
+      const dictPath = manager.getDictPath(session, 1, 'UserGlobals');
+      expect(dictPath).toBe(path.join(tmpDir, 'smalltalk', 'UserGlobals'));
+    });
+
+    it('getDictPath resolves {index} in template', () => {
+      const session = createMockSession({ exportPath: '{workspaceRoot}/code/{index}-{dictName}' });
+      const dictPath = manager.getDictPath(session, 3, 'Published');
+      expect(dictPath).toBe(path.join(tmpDir, 'code', '3-Published'));
+    });
+
+    it('getSessionRoot returns parent of dict directories', () => {
+      const session = createMockSession({ exportPath: '{workspaceRoot}/smalltalk/{dictName}' });
+      const root = manager.getSessionRoot(session);
+      expect(root).toBe(path.join(tmpDir, 'smalltalk'));
+    });
+
+    it('exports to custom paths using login exportPath', async () => {
+      const session = createMockSession({ exportPath: '{workspaceRoot}/smalltalk/{dictName}' });
+      await manager.exportSession(session);
+
+      const root = manager.getSessionRoot(session)!;
+      expect(fs.existsSync(path.join(root, 'UserGlobals', 'MyClass.gs'))).toBe(true);
+      expect(fs.existsSync(path.join(root, 'UserGlobals', 'OtherClass.gs'))).toBe(true);
+      expect(fs.existsSync(path.join(root, 'Globals', 'Array.gs'))).toBe(true);
+      expect(fs.existsSync(path.join(root, 'Globals', 'String.gs'))).toBe(true);
+    });
+
+    it('uses global exportPath as root when login has no exportPath', () => {
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('exportPath', '{workspaceRoot}/my-exports');
+      const session = createMockSession();
+      const root = manager.getSessionRoot(session);
+      expect(root).toBe(path.join(tmpDir, 'my-exports', 'localhost', 'gs64stone', 'DataCurator'));
+    });
+
+    it('login exportPath takes precedence over global exportPath', () => {
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('exportPath', '{workspaceRoot}/global-exports');
+      const session = createMockSession({ exportPath: '{workspaceRoot}/login-exports/{dictName}' });
+      const root = manager.getSessionRoot(session);
+      expect(root).toBe(path.join(tmpDir, 'login-exports'));
+    });
+
+    it('preserves user-managed directories with plain dict names', async () => {
+      const session = createMockSession({ exportPath: '{workspaceRoot}/smalltalk/{dictName}' });
+      const root = manager.getSessionRoot(session)!;
+
+      // Pre-create a user-managed directory
+      const managedDir = path.join(root, 'UserGlobals');
+      fs.mkdirSync(managedDir, { recursive: true });
+      fs.writeFileSync(path.join(managedDir, 'MyClass.gs'), 'user content');
+
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('userManagedDictionaries', ['UserGlobals']);
+
+      await manager.exportSession(session);
+
+      expect(fs.existsSync(managedDir)).toBe(true);
+      expect(fs.readFileSync(path.join(managedDir, 'MyClass.gs'), 'utf-8')).toBe('user content');
     });
   });
 });

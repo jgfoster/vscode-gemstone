@@ -8,6 +8,7 @@ export interface GemStoneLogin {
   netldi: string;
   host_user: string;
   host_password: string;
+  exportPath: string;
 }
 
 export const DEFAULT_LOGIN: GemStoneLogin = {
@@ -20,4 +21,5 @@ export const DEFAULT_LOGIN: GemStoneLogin = {
   netldi: 'gs64ldi',
   host_user: '',
   host_password: '',
+  exportPath: '',
 };

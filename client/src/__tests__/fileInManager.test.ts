@@ -21,6 +21,7 @@ vi.mock('../systemBrowser', () => ({
 vi.mock('../browserQueries', () => ({
   deleteClass: vi.fn(),
   removeDictionary: vi.fn(),
+  getDictionaryNames: vi.fn(() => ['UserGlobals', 'Globals']),
 }));
 
 import * as vscode from 'vscode';
@@ -47,6 +48,7 @@ function createMockSession(overrides?: Partial<GemStoneLogin>): ActiveSession {
       netldi: 'gs64ldi',
       host_user: '',
       host_password: '',
+      exportPath: '',
       ...overrides,
     },
     stoneVersion: '3.7.2',
@@ -122,9 +124,9 @@ describe('FileInManager', () => {
       expect(result).toBeUndefined();
     });
 
-    it('returns undefined when export root is undefined', () => {
-      mockExportManager = createMockExportManager({ exportRoot: undefined as unknown as string });
-      (mockExportManager.getExportRoot as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+    it('returns undefined when session root is undefined', () => {
+      mockExportManager = createMockExportManager();
+      (mockExportManager.getSessionRoot as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
       manager = new FileInManager(mockSessionManager, mockExportManager);
 
       const result = manager.resolveSessionFromPath('/some/path/MyClass.gs');
@@ -135,6 +137,9 @@ describe('FileInManager', () => {
       const session2 = createMockSession({ gem_host: 'remote', stone: 'prod', gs_user: 'Admin' });
       session2.id = 2;
       mockSessionManager = createMockSessionManager([mockSession, session2]);
+      (mockExportManager.getSessionRoot as ReturnType<typeof vi.fn>).mockImplementation(
+        (s: ActiveSession) => `/workspace/gemstone/${s.login.gem_host}/${s.login.stone}/${s.login.gs_user}`,
+      );
       manager = new FileInManager(mockSessionManager, mockExportManager);
 
       const fsPath = '/workspace/gemstone/remote/prod/Admin/1-Globals/Object.gs';
@@ -288,7 +293,7 @@ describe('FileInManager', () => {
       expect(fileInClass).not.toHaveBeenCalled();
     });
 
-    it('shows warning when no matching session found', () => {
+    it('silently skips when no matching session found', () => {
       mockSessionManager = createMockSessionManager([]);
       manager = new FileInManager(mockSessionManager, mockExportManager);
       // Re-register to get new handler
@@ -306,9 +311,75 @@ describe('FileInManager', () => {
       );
       savedHandler(doc);
 
-      expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-        expect.stringContaining('No active GemStone session'),
+      expect(fileInClass).not.toHaveBeenCalled();
+      expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+    });
+
+    it('skips file-in when language server reports syntax errors', () => {
+      (vscode.languages.getDiagnostics as ReturnType<typeof vi.fn>).mockReturnValue([
+        {
+          source: 'gemstone-smalltalk',
+          severity: vscode.DiagnosticSeverity.Error,
+          message: 'Unexpected token',
+          range: new vscode.Range(0, 0, 0, 10),
+        },
+      ]);
+
+      const doc = createMockDocument(
+        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
       );
+      savedHandler(doc);
+
+      expect(fileInClass).not.toHaveBeenCalled();
+      // Should clear any stale file-in diagnostics
+      const diagCollection = vscode.languages.createDiagnosticCollection as ReturnType<typeof vi.fn>;
+      const collection = diagCollection.mock.results[0].value;
+      expect(collection.delete).toHaveBeenCalledWith(doc.uri);
+
+      // Reset mock
+      (vscode.languages.getDiagnostics as ReturnType<typeof vi.fn>).mockReturnValue([]);
+    });
+
+    it('proceeds with file-in when language server reports only warnings', () => {
+      (vscode.languages.getDiagnostics as ReturnType<typeof vi.fn>).mockReturnValue([
+        {
+          source: 'gemstone-smalltalk',
+          severity: vscode.DiagnosticSeverity.Warning,
+          message: 'Unused variable',
+          range: new vscode.Range(0, 0, 0, 10),
+        },
+      ]);
+
+      const doc = createMockDocument(
+        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
+      );
+      savedHandler(doc);
+
+      expect(fileInClass).toHaveBeenCalled();
+
+      // Reset mock
+      (vscode.languages.getDiagnostics as ReturnType<typeof vi.fn>).mockReturnValue([]);
+    });
+
+    it('proceeds with file-in when diagnostics are from other sources', () => {
+      (vscode.languages.getDiagnostics as ReturnType<typeof vi.fn>).mockReturnValue([
+        {
+          source: 'some-other-linter',
+          severity: vscode.DiagnosticSeverity.Error,
+          message: 'Some error',
+          range: new vscode.Range(0, 0, 0, 10),
+        },
+      ]);
+
+      const doc = createMockDocument(
+        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
+      );
+      savedHandler(doc);
+
+      expect(fileInClass).toHaveBeenCalled();
+
+      // Reset mock
+      (vscode.languages.getDiagnostics as ReturnType<typeof vi.fn>).mockReturnValue([]);
     });
   });
 
@@ -372,7 +443,7 @@ describe('FileInManager', () => {
     beforeEach(() => {
       tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filein-test-'));
       exportRoot = tmpDir;
-      mockExportManager = createMockExportManager({ exportRoot });
+      mockExportManager = createMockExportManager({ exportRoot, sessionRoot: exportRoot });
       manager = new FileInManager(mockSessionManager, mockExportManager);
 
       (vscode.workspace.onDidCreateFiles as ReturnType<typeof vi.fn>).mockImplementation(
@@ -472,8 +543,8 @@ describe('FileInManager', () => {
       fs.rmSync(otherDir, { recursive: true, force: true });
     });
 
-    it('skips directories without numeric prefix', () => {
-      const dictDir = path.join(exportRoot, 'notes');
+    it('uses raw directory name as dict name when no numeric prefix', () => {
+      const dictDir = path.join(exportRoot, 'UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       const filePath = path.join(dictDir, 'MyClass.gs');
       fs.writeFileSync(filePath, '', 'utf-8');
@@ -481,7 +552,8 @@ describe('FileInManager', () => {
       createHandler({ files: [createUri(filePath)] });
 
       const content = fs.readFileSync(filePath, 'utf-8');
-      expect(content).toBe('');
+      expect(content).toContain('inDictionary: UserGlobals');
+      expect(content).toContain("Object subclass: 'MyClass'");
     });
 
     it('skips when isWriting is true', () => {
@@ -512,9 +584,7 @@ describe('FileInManager', () => {
     });
 
     it('files in the template and refreshes the browser', () => {
-      // Use full session path so resolveSessionFromPath finds the session
-      const sessionDir = path.join(exportRoot, 'localhost', 'gs64stone', 'DataCurator');
-      const dictDir = path.join(sessionDir, '1-UserGlobals');
+      const dictDir = path.join(exportRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       const filePath = path.join(dictDir, 'NewClass.gs');
       fs.writeFileSync(filePath, '', 'utf-8');
@@ -529,8 +599,7 @@ describe('FileInManager', () => {
     });
 
     it('files in and refreshes browser when file has no extension', () => {
-      const sessionDir = path.join(exportRoot, 'localhost', 'gs64stone', 'DataCurator');
-      const dictDir = path.join(sessionDir, '1-UserGlobals');
+      const dictDir = path.join(exportRoot, '1-UserGlobals');
       fs.mkdirSync(dictDir, { recursive: true });
       const filePath = path.join(dictDir, 'James');
       fs.writeFileSync(filePath, '', 'utf-8');
@@ -631,11 +700,18 @@ describe('FileInManager', () => {
       expect(queries.deleteClass).not.toHaveBeenCalled();
     });
 
-    it('skips directories without numeric prefix', () => {
+    it('skips directories that are not recognized dictionaries', () => {
       const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/notes';
       deleteHandler({ files: [createUri(fsPath)] });
 
       expect(queries.removeDictionary).not.toHaveBeenCalled();
+    });
+
+    it('looks up dict index by name for directories without numeric prefix', () => {
+      const fsPath = '/workspace/gemstone/localhost/gs64stone/DataCurator/UserGlobals/MyClass.gs';
+      deleteHandler({ files: [createUri(fsPath)] });
+
+      expect(queries.deleteClass).toHaveBeenCalledWith(mockSession, 1, 'MyClass');
     });
 
     it('shows error when class deletion fails', () => {

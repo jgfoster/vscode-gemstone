@@ -55,7 +55,7 @@
         "extensions": [
           ".st"
         ],
-        "configuration": "./language-configuration-tonel.json"
+        "configuration": "./language-configuration.json"
       },
       {
         "id": "gemstone-smalltalk",
@@ -107,7 +107,13 @@
           "gemstone.exportPath": {
             "type": "string",
             "default": "",
-            "description": "Root path for exported class files. Defaults to {workspaceRoot}/gemstone/"
+            "description": "Root path for exported class files. May be absolute, relative to the workspace root, or use {workspaceRoot} as a variable. Defaults to {workspaceRoot}/gemstone/"
+          },
+          "gemstone.userManagedDictionaries": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": [],
+            "description": "Dictionary names managed by the user. These are never overwritten by export from GemStone. All other dictionaries are exported normally."
           },
           "gemstone.logins": {
             "type": "array",
@@ -154,6 +160,10 @@
                 "host_password": {
                   "type": "string",
                   "description": "Host OS password"
+                },
+                "exportPath": {
+                  "type": "string",
+                  "description": "Export path template for dictionaries. Variables: {workspaceRoot}, {host}, {stone}, {user}, {index}, {dictName}. Default: {workspaceRoot}/gemstone/{host}/{stone}/{user}/{index}-{dictName}"
                 }
               }
             }

@@ -25,7 +25,6 @@ import { SelectorBreakpointManager } from './selectorBreakpointManager';
 import { SunitTestController } from './sunitTestController';
 import { ExportManager } from './exportManager';
 import { FileInManager } from './fileInManager';
-import { ReconcileManager } from './reconcileManager';
 import { showTranscript } from './transcriptChannel';
 import { GemStoneCodeLensProvider } from './gemstoneCodeLensProvider';
 import * as queries from './browserQueries';
@@ -34,7 +33,6 @@ let client: LanguageClient;
 let sessionManager: SessionManager;
 let exportManager: ExportManager;
 let fileInManager: FileInManager;
-let reconcileManager: ReconcileManager;
 
 export function activate(context: vscode.ExtensionContext) {
   // ── LSP Client ───────────────────────────────────────────
@@ -97,8 +95,6 @@ export function activate(context: vscode.ExtensionContext) {
   exportManager = new ExportManager();
   fileInManager = new FileInManager(sessionManager, exportManager);
   fileInManager.register(context);
-  reconcileManager = new ReconcileManager(exportManager);
-  reconcileManager.register(context);
   const sessionTreeProvider = new SessionTreeProvider(sessionManager);
 
   const sessionTreeView = vscode.window.createTreeView('gemstoneSessions', {
@@ -406,7 +402,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage(
           `Connected to ${login.stone} (${session.stoneVersion}) on ${login.gem_host} as ${login.gs_user}`
         );
-        reconcileManager.reconcileOrExport(session, true);
+        exportManager.exportSession(session, true);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         vscode.window.showErrorMessage(`Login failed: ${msg}`);
@@ -791,9 +787,6 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate(): Thenable<void> | undefined {
-  if (reconcileManager) {
-    reconcileManager.dispose();
-  }
   if (fileInManager) {
     fileInManager.dispose();
   }

@@ -4,6 +4,17 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+### Added
+
+- **Per-login export path template** — each login now has an optional `exportPath` field that accepts a template with variables `{workspaceRoot}`, `{host}`, `{stone}`, `{user}`, `{index}`, `{dictName}`; e.g., `{workspaceRoot}/smalltalk/{dictName}` produces a flat project-friendly layout without host/stone/user nesting or index prefixes; the per-login template takes precedence over the global `gemstone.exportPath` setting
+- **User-managed dictionaries** — new `gemstone.userManagedDictionaries` setting lists dictionary names that the extension will never overwrite during export; user-managed directories are preserved during stale-file cleanup and excluded from permission changes on logout
+- **Configurable export root** — `gemstone.exportPath` setting supports `{workspaceRoot}` variable substitution, absolute paths, and paths relative to the workspace root
+
+### Changed
+
+- Removed login reconciliation on connect (local/server conflict detection); replaced by user-managed dictionaries for controlling which dictionaries are owned by the developer
+- Consolidated `language-configuration-tonel.json` into `language-configuration.json` (identical contents)
+
 ## [1.0.5] - 2026-02-26
 
 ### Added

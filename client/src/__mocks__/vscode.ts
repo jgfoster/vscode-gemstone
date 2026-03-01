@@ -391,6 +391,7 @@ export const languages = {
   registerCodeLensProvider: vi.fn(() => ({ dispose: () => {} })),
   setTextDocumentLanguage: vi.fn(),
   createDiagnosticCollection: vi.fn((_name?: string) => createMockDiagnosticCollection()),
+  getDiagnostics: vi.fn((_uri?: unknown) => [] as Diagnostic[]),
 };
 
 // ── Diagnostic mock ─────────────────────────────────────────

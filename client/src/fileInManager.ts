@@ -91,24 +91,14 @@ export class FileInManager {
     if (document.uri.scheme !== 'file') return false;
     if (!document.uri.fsPath.endsWith('.gs')) return false;
     if (this.exportManager.isWriting) return false;
-
-    const exportRoot = this.exportManager.getExportRoot();
-    if (!exportRoot) return false;
-
-    // Only handle files under the export root
-    const relative = path.relative(exportRoot, document.uri.fsPath);
-    return !relative.startsWith('..') && !path.isAbsolute(relative);
+    return this.resolveSessionFromPath(document.uri.fsPath) !== undefined;
   }
 
   private handleFileCreate(uri: vscode.Uri): void {
     if (uri.scheme !== 'file') return;
     if (this.exportManager.isWriting) return;
 
-    const exportRoot = this.exportManager.getExportRoot();
-    if (!exportRoot) return;
-
-    const relative = path.relative(exportRoot, uri.fsPath);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) return;
+    if (!this.resolveSessionFromPath(uri.fsPath)) return;
 
     // Append .gs if the file has no extension
     let filePath = uri.fsPath;
@@ -131,9 +121,8 @@ export class FileInManager {
     // Extract class name from filename and dictionary name from parent dir
     const className = path.basename(filePath, '.gs');
     const dictDir = path.basename(path.dirname(filePath));
-    const dictNameMatch = dictDir.match(/^\d+-(.*)/);
-    if (!dictNameMatch) return;
-    const dictName = dictNameMatch[1];
+    const dictMatch = dictDir.match(/^\d+-(.*)/);
+    const dictName = dictMatch ? dictMatch[1] : dictDir;
 
     const template = newClassTemplate(className, dictName);
     fs.writeFileSync(filePath, template, 'utf-8');
@@ -164,24 +153,17 @@ export class FileInManager {
     if (uri.scheme !== 'file') return;
     if (this.exportManager.isWriting) return;
 
-    const exportRoot = this.exportManager.getExportRoot();
-    if (!exportRoot) return;
-
-    const relative = path.relative(exportRoot, uri.fsPath);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) return;
-
     const session = this.resolveSessionFromPath(uri.fsPath);
     if (!session) return;
 
-    // Path: {exportRoot}/{gem_host}/{stone}/{gs_user}/{N-DictName}/{ClassName}.gs
+    const sessionRoot = this.exportManager.getSessionRoot(session)!;
+    const relative = path.relative(sessionRoot, uri.fsPath);
     const parts = relative.split(path.sep);
 
-    if (uri.fsPath.endsWith('.gs') && parts.length >= 5) {
+    if (uri.fsPath.endsWith('.gs') && parts.length >= 2) {
       // Deleting a .gs file → remove class from GemStone
-      const dictDir = parts[3];
-      const dictMatch = dictDir.match(/^(\d+)-(.*)/);
-      if (!dictMatch) return;
-      const dictIndex = parseInt(dictMatch[1], 10);
+      const dictIndex = this.parseDictIndex(parts[0], session);
+      if (!dictIndex) return;
       const className = path.basename(uri.fsPath, '.gs');
       try {
         queries.deleteClass(session, dictIndex, className);
@@ -190,12 +172,10 @@ export class FileInManager {
         const msg = e instanceof Error ? e.message : String(e);
         vscode.window.showErrorMessage(`Failed to remove class "${className}" from GemStone: ${msg}`);
       }
-    } else if (parts.length === 4) {
-      // Deleting a {N-DictName} directory → remove dictionary from symbol list
-      const dictDir = parts[3];
-      const dictMatch = dictDir.match(/^(\d+)-(.*)/);
-      if (!dictMatch) return;
-      const dictIndex = parseInt(dictMatch[1], 10);
+    } else if (parts.length === 1) {
+      // Deleting a dictionary directory → remove dictionary from symbol list
+      const dictIndex = this.parseDictIndex(parts[0], session);
+      if (!dictIndex) return;
       try {
         queries.removeDictionary(session, dictIndex);
         SystemBrowser.refresh(session.id);
@@ -206,12 +186,29 @@ export class FileInManager {
     }
   }
 
+  /**
+   * Extract dictionary index from a directory name.
+   * Handles both "{index}-{dictName}" and plain "{dictName}" formats.
+   */
+  private parseDictIndex(dictDir: string, session: ActiveSession): number | undefined {
+    const match = dictDir.match(/^(\d+)-(.*)/);
+    if (match) return parseInt(match[1], 10);
+    const dictNames = queries.getDictionaryNames(session);
+    const idx = dictNames.indexOf(dictDir) + 1;
+    return idx > 0 ? idx : undefined;
+  }
+
   private handleSave(document: vscode.TextDocument): void {
     const session = this.resolveSessionFromPath(document.uri.fsPath);
-    if (!session) {
-      vscode.window.showWarningMessage(
-        'No active GemStone session for this file.',
-      );
+    if (!session) return;
+
+    // Skip file-in if the language server has reported syntax errors
+    const langDiags = vscode.languages.getDiagnostics(document.uri);
+    const syntaxErrors = langDiags.filter(
+      (d) => d.source === 'gemstone-smalltalk' && d.severity === vscode.DiagnosticSeverity.Error,
+    );
+    if (syntaxErrors.length > 0) {
+      this.diagnostics.delete(document.uri);
       return;
     }
 
@@ -247,25 +244,15 @@ export class FileInManager {
   }
 
   /**
-   * Map a .gs file path back to the active session whose login fields
-   * match the {gem_host}/{stone}/{gs_user} path segments.
+   * Map a .gs file path back to the active session whose export area contains it.
    */
   resolveSessionFromPath(fsPath: string): ActiveSession | undefined {
-    const exportRoot = this.exportManager.getExportRoot();
-    if (!exportRoot) return undefined;
-
-    // Path: {exportRoot}/{gem_host}/{stone}/{gs_user}/{N-DictName}/{ClassName}.gs
-    const relative = path.relative(exportRoot, fsPath);
-    const parts = relative.split(path.sep);
-    if (parts.length < 3) return undefined;
-
-    const [gemHost, stone, gsUser] = parts;
-    return this.sessionManager.getSessions().find(
-      (s) =>
-        s.login.gem_host === gemHost &&
-        s.login.stone === stone &&
-        s.login.gs_user === gsUser,
-    );
+    return this.sessionManager.getSessions().find((session) => {
+      const sessionRoot = this.exportManager.getSessionRoot(session);
+      if (!sessionRoot) return false;
+      const relative = path.relative(sessionRoot, fsPath);
+      return !relative.startsWith('..') && !path.isAbsolute(relative);
+    });
   }
 
   /**

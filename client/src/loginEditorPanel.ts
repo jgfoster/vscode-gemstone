@@ -206,6 +206,14 @@ export class LoginEditorPanel {
     <input type="password" id="host_password">
   </div>
 
+  <div class="field-group">
+    <label for="exportPath">Export Path</label>
+    <input type="text" id="exportPath" placeholder="{workspaceRoot}/gemstone/{host}/{stone}/{user}/{index}-{dictName}">
+    <div style="margin-top: 4px; font-size: 0.9em; color: var(--vscode-descriptionForeground);">
+      Variables: <code>{workspaceRoot}</code> <code>{host}</code> <code>{stone}</code> <code>{user}</code> <code>{index}</code> <code>{dictName}</code>
+    </div>
+  </div>
+
   <div class="button-row">
     <button id="saveBtn">Save</button>
     <button id="cancelBtn" class="secondary">Cancel</button>
@@ -213,7 +221,7 @@ export class LoginEditorPanel {
 
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
-    const fields = ['label','version','gem_host','stone','gs_user','gs_password','netldi','host_user','host_password'];
+    const fields = ['label','version','gem_host','stone','gs_user','gs_password','netldi','host_user','host_password','exportPath'];
     let originalLabel = null;
 
     vscode.postMessage({ command: 'requestData' });

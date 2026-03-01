@@ -7,8 +7,12 @@ import * as queries from './browserQueries';
 /**
  * Manages exporting GemStone classes to local .gs files in Topaz file-out format.
  *
- * File structure:
- *   {workspaceRoot}/gemstone/{gem_host}/{stone}/{gs_user}/{N. DictName}/{ClassName}.gs
+ * Default file structure:
+ *   {workspaceRoot}/gemstone/{host}/{stone}/{user}/{index}-{dictName}/{ClassName}.gs
+ *
+ * Each login may specify a custom `exportPath` template with variables:
+ *   {workspaceRoot}, {host}, {stone}, {user}, {index}, {dictName}
+ * e.g. {workspaceRoot}/smalltalk/{dictName}
  */
 export class ExportManager {
   // Track exported file paths per session so we can detect stale files on refresh
@@ -21,6 +25,13 @@ export class ExportManager {
     return this.writing;
   }
 
+  private getUserManagedDictionaries(): Set<string> {
+    const list = vscode.workspace
+      .getConfiguration('gemstone')
+      .get<string[]>('userManagedDictionaries', []);
+    return new Set(list);
+  }
+
   /**
    * Root directory for exports. Uses the `gemstone.exportPath` setting if set,
    * otherwise defaults to {firstWorkspaceFolder}/gemstone.
@@ -28,21 +39,71 @@ export class ExportManager {
   getExportRoot(): string | undefined {
     const config = vscode.workspace.getConfiguration('gemstone');
     const custom = config.get<string>('exportPath', '').trim();
-    if (custom) return custom;
-
     const folders = vscode.workspace.workspaceFolders;
+
+    if (custom) {
+      const wsRoot = folders?.[0]?.uri.fsPath;
+      // Support {workspaceRoot} variable substitution
+      const resolved = wsRoot ? custom.replace(/\{workspaceRoot}/g, wsRoot) : custom;
+      if (path.isAbsolute(resolved)) return resolved;
+      // Resolve relative paths against the first workspace folder
+      if (!wsRoot) return undefined;
+      return path.resolve(wsRoot, resolved);
+    }
+
     if (!folders || folders.length === 0) return undefined;
     return path.join(folders[0].uri.fsPath, 'gemstone');
   }
 
   /**
-   * Session-specific directory: {exportRoot}/{host}/{stone}/{user}
+   * Resolved export path template for a session.
+   * Per-login `exportPath` takes precedence over the global setting.
+   * Session-level variables are resolved; {index} and {dictName} remain as placeholders.
    */
-  getSessionRoot(session: ActiveSession): string | undefined {
+  getResolvedTemplate(session: ActiveSession): string | undefined {
+    const { gem_host, stone, gs_user, exportPath: loginTemplate } = session.login;
+
+    if (loginTemplate?.trim()) {
+      const folders = vscode.workspace.workspaceFolders;
+      const wsRoot = folders?.[0]?.uri.fsPath;
+      let resolved = loginTemplate.trim()
+        .replace(/\{workspaceRoot}/g, wsRoot ?? '')
+        .replace(/\{host}/g, gem_host)
+        .replace(/\{stone}/g, stone)
+        .replace(/\{user}/g, gs_user);
+      // Handle relative paths (substitute dict vars with dummies to test)
+      const testPath = resolved.replace(/\{index}/g, '0').replace(/\{dictName}/g, 'X');
+      if (!path.isAbsolute(testPath)) {
+        if (!wsRoot) return undefined;
+        resolved = path.resolve(wsRoot, resolved);
+      }
+      return resolved;
+    }
+
+    // Default: global export root + standard session/dict structure
     const root = this.getExportRoot();
     if (!root) return undefined;
-    const { gem_host, stone, gs_user } = session.login;
-    return path.join(root, gem_host, stone, gs_user);
+    return path.join(root, gem_host, stone, gs_user, '{index}-{dictName}');
+  }
+
+  /**
+   * Full path for a specific dictionary directory.
+   */
+  getDictPath(session: ActiveSession, dictIndex: number, dictName: string): string | undefined {
+    const template = this.getResolvedTemplate(session);
+    if (!template) return undefined;
+    return template
+      .replace(/\{index}/g, String(dictIndex))
+      .replace(/\{dictName}/g, dictName);
+  }
+
+  /**
+   * Session-specific root directory (parent of all dictionary directories).
+   */
+  getSessionRoot(session: ActiveSession): string | undefined {
+    const template = this.getResolvedTemplate(session);
+    if (!template) return undefined;
+    return path.dirname(template);
   }
 
   /**
@@ -71,13 +132,15 @@ export class ExportManager {
         const dictNames = queries.getDictionaryNames(session);
         if (token.isCancellationRequested) return;
 
-        // 2. Gather all classes per dictionary
+        // 2. Gather all classes per dictionary, skipping user-managed ones
+        const managed = this.getUserManagedDictionaries();
         const plan: { dictIndex: number; dictLabel: string; dirPath: string; classes: string[] }[] = [];
         let totalClasses = 0;
         for (let i = 0; i < dictNames.length; i++) {
+          if (managed.has(dictNames[i])) continue;
           const dictIndex = i + 1; // Smalltalk 1-based
-          const dictLabel = `${dictIndex}-${dictNames[i]}`;
-          const dirPath = path.join(sessionRoot, dictLabel);
+          const dirPath = this.getDictPath(session, dictIndex, dictNames[i])!;
+          const dictLabel = path.basename(dirPath);
           const classes = queries.getClassNames(session, dictIndex);
           plan.push({ dictIndex, dictLabel, dirPath, classes });
           totalClasses += classes.length;
@@ -86,7 +149,7 @@ export class ExportManager {
         if (token.isCancellationRequested) return;
 
         // 3. Make existing files writable so we can overwrite them
-        this.setPermissions(sessionRoot, 0o644);
+        this.setPermissions(sessionRoot, 0o644, managed);
 
         // 4. Create all dictionary directories (even empty ones) and export classes
         const newFiles = new Set<string>();
@@ -139,7 +202,7 @@ export class ExportManager {
         }
 
         // 6. Remove stale dictionary directories (dictionaries that no longer exist)
-        this.removeStaleDictDirs(sessionRoot, currentDictDirs);
+        this.removeStaleDictDirs(sessionRoot, currentDictDirs, managed);
 
         // 7. Track exported files
         this.exportedFiles.set(session.id, newFiles);
@@ -164,7 +227,7 @@ export class ExportManager {
   markReadOnly(session: ActiveSession): void {
     const sessionRoot = this.getSessionRoot(session);
     if (!sessionRoot || !fs.existsSync(sessionRoot)) return;
-    this.setPermissions(sessionRoot, 0o444);
+    this.setPermissions(sessionRoot, 0o444, this.getUserManagedDictionaries());
   }
 
   /**
@@ -173,13 +236,14 @@ export class ExportManager {
   markWritable(session: ActiveSession): void {
     const sessionRoot = this.getSessionRoot(session);
     if (!sessionRoot || !fs.existsSync(sessionRoot)) return;
-    this.setPermissions(sessionRoot, 0o644);
+    this.setPermissions(sessionRoot, 0o644, this.getUserManagedDictionaries());
   }
 
   /**
    * Recursively set file permissions on all .gs files under a directory.
+   * Skips user-managed dictionary directories at the top level.
    */
-  private setPermissions(dir: string, mode: number): void {
+  private setPermissions(dir: string, mode: number, managed?: Set<string>): void {
     if (!fs.existsSync(dir)) return;
     const stat = fs.statSync(dir);
     if (!stat.isDirectory()) return;
@@ -188,6 +252,12 @@ export class ExportManager {
       const full = path.join(dir, entry);
       const entryStat = fs.statSync(full);
       if (entryStat.isDirectory()) {
+        // Skip user-managed dictionary directories
+        if (managed) {
+          const dictMatch = entry.match(/^\d+-(.*)/);
+          const dictName = dictMatch ? dictMatch[1] : entry;
+          if (managed.has(dictName)) continue;
+        }
         this.setPermissions(full, mode);
       } else if (entry.endsWith('.gs')) {
         try {
@@ -199,17 +269,25 @@ export class ExportManager {
 
   /**
    * Remove dictionary directories under sessionRoot that are not in the current set.
-   * This handles renamed or removed dictionaries without touching valid empty ones.
+   * Preserves user-managed dictionary directories.
    */
-  private removeStaleDictDirs(sessionRoot: string, currentDirs: Set<string>): void {
+  private removeStaleDictDirs(sessionRoot: string, currentDirs: Set<string>, managed?: Set<string>): void {
     if (!fs.existsSync(sessionRoot)) return;
     for (const entry of fs.readdirSync(sessionRoot)) {
       const full = path.join(sessionRoot, entry);
-      if (fs.statSync(full).isDirectory() && !currentDirs.has(full)) {
-        try {
-          fs.rmSync(full, { recursive: true, force: true });
-        } catch { /* ignore */ }
+      if (!fs.statSync(full).isDirectory()) continue;
+      if (currentDirs.has(full)) continue;
+
+      // Preserve user-managed dictionary directories
+      if (managed) {
+        const dictMatch = entry.match(/^\d+-(.*)/);
+        const dictName = dictMatch ? dictMatch[1] : entry;
+        if (managed.has(dictName)) continue;
       }
+
+      try {
+        fs.rmSync(full, { recursive: true, force: true });
+      } catch { /* ignore */ }
     }
   }
 

@@ -7,8 +7,7 @@ AKeyWordPart = KeyWord Primary UnaryMessages { ABinaryMessage }
 AMessage = [ UnaryMessages ] [ ABinaryMessages ] [ AKeyWordMessage ]
 AnyTerm = Operand [ Operator Operand ]
 Array = '(' { ArrayItem } ')'
-ArrayItem = Number | SymbolArrayItem | SymbolLiteral | StringLiteral |
-CharacterLiteral | Array | ArrayLiteral | ByteArrayLiteral
+ArrayItem = Number | SymbolArrayItem | SymbolLiteral | StringLiteral | CharacterLiteral | Array | ArrayLiteral | ByteArrayLiteral
 ArrayLiteral = '#' Array
 Assignment = VariableName ':=' Statement | VariableName ' _ ' Statement
 BinaryMessage = [ EnvSpecifier | RubyEnvSpecifier ] BinarySelector Primary [ UnaryMessages ]
@@ -20,8 +19,7 @@ ByteArrayLiteral = '#' '[' [ Number { Number } ] ']'
 CascadeMessage = UnaryMessage | BinaryMessage | KeyWordMessage
 CurlyArrayBuilder = '{' [ AExpression { '.' AExpression } ] '}'
 Expression = Primary [ Message { ';' CascadeMessage } ]
-KeyWordMessage = [ EnvSpecifier | RubyEnvSpecifier ] KeyWordPart {
-KeyWordPart }
+KeyWordMessage = [ EnvSpecifier | RubyEnvSpecifier ] KeyWordPart { KeyWordPart }
 KeyWordPart = KeyWord Primary UnaryMessages { BinaryMessage }
 KeyWordPattern = KeyWord VariableName { KeyWord VariableName }
 KeyWordPragma = PragmaPair [ PragmaPair ]
