@@ -28,6 +28,14 @@ import { FileInManager } from './fileInManager';
 import { showTranscript } from './transcriptChannel';
 import { GemStoneCodeLensProvider } from './gemstoneCodeLensProvider';
 import * as queries from './browserQueries';
+import { SysadminStorage } from './sysadminStorage';
+import { VersionManager } from './versionManager';
+import { VersionTreeProvider, VersionItem } from './versionTreeProvider';
+import { DatabaseManager } from './databaseManager';
+import { DatabaseTreeProvider, DatabaseNode } from './databaseTreeProvider';
+import { ProcessManager } from './processManager';
+import { ProcessTreeProvider } from './processTreeProvider';
+import { SharedMemoryTreeProvider } from './sharedMemoryTreeProvider';
 
 let client: LanguageClient;
 let sessionManager: SessionManager;
@@ -782,6 +790,242 @@ export function activate(context: vscode.ExtensionContext) {
       const editor = vscode.window.activeTextEditor;
       if (!editor) return;
       selectorBreakpointManager.toggleBreakpointAtCursor(editor);
+    }),
+  );
+
+  // ── SysAdmin ──────────────────────────────────────────────
+  const sysadminStorage = new SysadminStorage();
+  const processManager = new ProcessManager(sysadminStorage);
+  const versionManager = new VersionManager(sysadminStorage);
+  const databaseManager = new DatabaseManager(sysadminStorage, processManager);
+
+  // Shared Memory (macOS only)
+  if (process.platform === 'darwin') {
+    const sharedMemoryProvider = new SharedMemoryTreeProvider();
+    context.subscriptions.push(
+      vscode.window.createTreeView('gemstoneSharedMemory', {
+        treeDataProvider: sharedMemoryProvider,
+      })
+    );
+    sharedMemoryProvider.registerCommands(context);
+  }
+
+  // Versions
+  const versionProvider = new VersionTreeProvider(versionManager);
+  context.subscriptions.push(
+    vscode.window.createTreeView('gemstoneVersions', {
+      treeDataProvider: versionProvider,
+    })
+  );
+
+  // Databases
+  const databaseProvider = new DatabaseTreeProvider(sysadminStorage, processManager);
+  context.subscriptions.push(
+    vscode.window.createTreeView('gemstoneDatabases', {
+      treeDataProvider: databaseProvider,
+      showCollapseAll: true,
+    })
+  );
+
+  // Processes
+  const processProvider = new ProcessTreeProvider(processManager);
+  context.subscriptions.push(
+    vscode.window.createTreeView('gemstoneProcesses', {
+      treeDataProvider: processProvider,
+    })
+  );
+
+  // Refresh process state on initial load
+  processManager.refreshProcesses();
+
+  // Helper to refresh databases + processes together
+  function refreshAdminViews() {
+    processManager.refreshProcesses();
+    databaseProvider.refresh();
+    processProvider.refresh();
+  }
+
+  // ── SysAdmin Commands ───────────────────────────────────
+  context.subscriptions.push(
+    vscode.commands.registerCommand('gemstone.refreshVersions', () => {
+      versionProvider.loadVersions();
+    }),
+
+    vscode.commands.registerCommand('gemstone.downloadVersion', async (item: VersionItem) => {
+      const version = item.version;
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Downloading GemStone ${version.version}...`,
+          cancellable: true,
+        },
+        async (progress, token) => {
+          await versionManager.download(version, progress, token);
+        },
+      );
+      vscode.window.showInformationMessage(`GemStone ${version.version} downloaded.`);
+      versionProvider.loadVersions();
+    }),
+
+    vscode.commands.registerCommand('gemstone.deleteDownload', async (item: VersionItem) => {
+      const confirmed = await vscode.window.showWarningMessage(
+        `Delete download of GemStone ${item.version.version}?`,
+        { modal: true },
+        'Delete',
+      );
+      if (confirmed !== 'Delete') return;
+      await versionManager.deleteDownload(item.version);
+      versionProvider.loadVersions();
+    }),
+
+    vscode.commands.registerCommand('gemstone.extractVersion', async (item: VersionItem) => {
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Extracting GemStone ${item.version.version}...`,
+        },
+        async (progress) => {
+          await versionManager.extract(item.version, progress);
+        },
+      );
+      vscode.window.showInformationMessage(`GemStone ${item.version.version} extracted.`);
+      versionProvider.loadVersions();
+    }),
+
+    vscode.commands.registerCommand('gemstone.deleteExtracted', async (item: VersionItem) => {
+      const confirmed = await vscode.window.showWarningMessage(
+        `Delete extracted GemStone ${item.version.version}? This cannot be undone.`,
+        { modal: true },
+        'Delete',
+      );
+      if (confirmed !== 'Delete') return;
+      await versionManager.deleteExtracted(item.version);
+      versionProvider.loadVersions();
+    }),
+
+    vscode.commands.registerCommand('gemstone.openVersionFolder', (item: VersionItem) => {
+      const gsPath = sysadminStorage.getGemstonePath(item.version.version);
+      if (gsPath) {
+        vscode.env.openExternal(vscode.Uri.file(gsPath));
+      }
+    }),
+
+    vscode.commands.registerCommand('gemstone.createDatabase', async () => {
+      const db = await databaseManager.createDatabase();
+      if (db) {
+        refreshAdminViews();
+        vscode.window.showInformationMessage(`Database "${db.dirName}" created.`);
+      }
+    }),
+
+    vscode.commands.registerCommand('gemstone.deleteDatabase', async (node: DatabaseNode) => {
+      if (node.kind !== 'database') return;
+      const deleted = await databaseManager.deleteDatabase(node.db);
+      if (deleted) {
+        refreshAdminViews();
+      }
+    }),
+
+    vscode.commands.registerCommand('gemstone.refreshDatabases', () => {
+      refreshAdminViews();
+    }),
+
+    vscode.commands.registerCommand('gemstone.startStone', async (node: DatabaseNode) => {
+      if (node.kind !== 'stone') return;
+      try {
+        await processManager.startStone(node.db);
+        vscode.window.showInformationMessage(`Stone "${node.db.config.stoneName}" started.`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        vscode.window.showErrorMessage(msg);
+      }
+      refreshAdminViews();
+    }),
+
+    vscode.commands.registerCommand('gemstone.stopStone', async (node: DatabaseNode) => {
+      if (node.kind !== 'stone') return;
+      try {
+        await processManager.stopStone(node.db);
+        vscode.window.showInformationMessage(`Stone "${node.db.config.stoneName}" stopped.`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        vscode.window.showErrorMessage(msg);
+      }
+      refreshAdminViews();
+    }),
+
+    vscode.commands.registerCommand('gemstone.startNetldi', async (node: DatabaseNode) => {
+      if (node.kind !== 'netldi') return;
+      try {
+        await processManager.startNetldi(node.db);
+        vscode.window.showInformationMessage(`NetLDI "${node.db.config.ldiName}" started.`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        vscode.window.showErrorMessage(msg);
+      }
+      refreshAdminViews();
+    }),
+
+    vscode.commands.registerCommand('gemstone.stopNetldi', async (node: DatabaseNode) => {
+      if (node.kind !== 'netldi') return;
+      try {
+        await processManager.stopNetldi(node.db);
+        vscode.window.showInformationMessage(`NetLDI "${node.db.config.ldiName}" stopped.`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        vscode.window.showErrorMessage(msg);
+      }
+      refreshAdminViews();
+    }),
+
+    vscode.commands.registerCommand('gemstone.openDbInFinder', (node: DatabaseNode) => {
+      if (!node || node.kind !== 'database') return;
+      vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(node.db.path));
+    }),
+
+    vscode.commands.registerCommand('gemstone.openDbTerminal', (node: DatabaseNode) => {
+      if (!node || node.kind !== 'database') return;
+      processManager.openTerminal(node.db);
+    }),
+
+    vscode.commands.registerCommand('gemstone.createLoginFromDb', async (node: DatabaseNode) => {
+      if (!node || node.kind !== 'database') return;
+      const db = node.db;
+      const login = {
+        label: `${db.config.stoneName} (local)`,
+        version: db.config.version,
+        gem_host: 'localhost',
+        stone: db.config.stoneName,
+        gs_user: 'DataCurator',
+        gs_password: 'swordfish',
+        netldi: db.config.ldiName,
+        host_user: '',
+        host_password: '',
+        exportPath: '',
+      };
+      // Auto-detect GCI library path
+      const gsPath = sysadminStorage.getGemstonePath(db.config.version);
+      if (gsPath) {
+        const ext = process.platform === 'darwin' ? 'dylib' : process.platform === 'win32' ? 'dll' : 'so';
+        const fs = await import('fs');
+        const libPath = path.join(gsPath, 'lib', `libgcits-${db.config.version}-64.${ext}`);
+        if (fs.existsSync(libPath)) {
+          await storage.setGciLibraryPath(db.config.version, libPath);
+        }
+      }
+      LoginEditorPanel.show(storage, treeProvider, login);
+    }),
+
+    vscode.commands.registerCommand('gemstone.refreshProcesses', () => {
+      processProvider.refresh();
+    }),
+
+    vscode.commands.registerCommand('gemstone.replaceExtent', async (node: DatabaseNode) => {
+      if (node.kind !== 'stone') return;
+      const replaced = await databaseManager.replaceExtent(node.db);
+      if (replaced) {
+        refreshAdminViews();
+      }
     }),
   );
 }

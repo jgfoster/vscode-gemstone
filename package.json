@@ -2,7 +2,7 @@
   "name": "gemstone-ide",
   "displayName": "GemStone Smalltalk IDE",
 	"description": "GemStone/S IDE for Visual Studio Code",
-  "version": "1.0.5",
+  "version": "1.1.0",
   "publisher": "gemtalksystems",
   "license": "MIT",
   "author": "James Foster",
@@ -114,6 +114,11 @@
             "items": { "type": "string" },
             "default": [],
             "description": "Dictionary names managed by the user. These are never overwritten by export from GemStone. All other dictionaries are exported normally."
+          },
+          "gemstone.rootPath": {
+            "type": "string",
+            "default": "~/Documents/GemStone",
+            "description": "Root directory for GemStone installations and databases. Supports ~ for home directory."
           },
           "gemstone.logins": {
             "type": "array",
@@ -248,6 +253,28 @@
     "views": {
       "gemstone": [
         {
+          "id": "gemstoneSharedMemory",
+          "name": "Shared Memory",
+          "type": "tree",
+          "when": "isMac",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "gemstoneVersions",
+          "name": "Versions",
+          "type": "tree"
+        },
+        {
+          "id": "gemstoneDatabases",
+          "name": "Databases",
+          "type": "tree"
+        },
+        {
+          "id": "gemstoneProcesses",
+          "name": "Processes",
+          "type": "tree"
+        },
+        {
           "id": "gemstoneLogins",
           "name": "Logins",
           "type": "tree",
@@ -271,6 +298,18 @@
       {
         "view": "gemstoneInspector",
         "contents": "No objects inspected yet.\nSelect code and press Cmd+I to inspect."
+      },
+      {
+        "view": "gemstoneVersions",
+        "contents": "Loading versions...\n[Refresh](command:gemstone.refreshVersions)"
+      },
+      {
+        "view": "gemstoneDatabases",
+        "contents": "No databases found.\n[Create Database](command:gemstone.createDatabase)"
+      },
+      {
+        "view": "gemstoneProcesses",
+        "contents": "No running GemStone processes.\n[Refresh](command:gemstone.refreshProcesses)"
       }
     ],
     "commands": [
@@ -415,6 +454,114 @@
         "title": "Toggle Selector Breakpoint",
         "category": "GemStone",
         "icon": "$(debug-breakpoint)"
+      },
+      {
+        "command": "gemstone.refreshVersions",
+        "title": "Refresh Versions",
+        "category": "GemStone Admin",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "gemstone.downloadVersion",
+        "title": "Download",
+        "category": "GemStone Admin",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "gemstone.deleteDownload",
+        "title": "Delete Download",
+        "category": "GemStone Admin",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "gemstone.extractVersion",
+        "title": "Extract",
+        "category": "GemStone Admin",
+        "icon": "$(package)"
+      },
+      {
+        "command": "gemstone.deleteExtracted",
+        "title": "Delete Extracted Version",
+        "category": "GemStone Admin",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "gemstone.openVersionFolder",
+        "title": "Open in File Manager",
+        "category": "GemStone Admin",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "gemstone.createDatabase",
+        "title": "Create Database",
+        "category": "GemStone Admin",
+        "icon": "$(add)"
+      },
+      {
+        "command": "gemstone.deleteDatabase",
+        "title": "Delete Database",
+        "category": "GemStone Admin",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "gemstone.refreshDatabases",
+        "title": "Refresh Databases",
+        "category": "GemStone Admin",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "gemstone.startStone",
+        "title": "Start Stone",
+        "category": "GemStone Admin",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "gemstone.stopStone",
+        "title": "Stop Stone",
+        "category": "GemStone Admin",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "gemstone.startNetldi",
+        "title": "Start NetLDI",
+        "category": "GemStone Admin",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "gemstone.stopNetldi",
+        "title": "Stop NetLDI",
+        "category": "GemStone Admin",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "gemstone.openDbInFinder",
+        "title": "Reveal in Finder",
+        "category": "GemStone Admin",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "gemstone.openDbTerminal",
+        "title": "Open Terminal",
+        "category": "GemStone Admin",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "gemstone.createLoginFromDb",
+        "title": "Create Login",
+        "category": "GemStone Admin",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "gemstone.refreshProcesses",
+        "title": "Refresh Processes",
+        "category": "GemStone Admin",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "gemstone.replaceExtent",
+        "title": "Replace Extent",
+        "category": "GemStone Admin",
+        "icon": "$(replace-all)"
       }
     ],
     "menus": {
@@ -427,6 +574,26 @@
         {
           "command": "gemstone.clearInspector",
           "when": "view == gemstoneInspector",
+          "group": "navigation"
+        },
+        {
+          "command": "gemstone.refreshVersions",
+          "when": "view == gemstoneVersions",
+          "group": "navigation"
+        },
+        {
+          "command": "gemstone.createDatabase",
+          "when": "view == gemstoneDatabases",
+          "group": "navigation@1"
+        },
+        {
+          "command": "gemstone.refreshDatabases",
+          "when": "view == gemstoneDatabases",
+          "group": "navigation@2"
+        },
+        {
+          "command": "gemstone.refreshProcesses",
+          "when": "view == gemstoneProcesses",
           "group": "navigation"
         }
       ],
@@ -482,6 +649,78 @@
           "command": "gemstone.removeInspectorItem",
           "when": "view == gemstoneInspector && viewItem == gemstoneInspectorRoot",
           "group": "inline@1"
+        },
+        {
+          "command": "gemstone.downloadVersion",
+          "when": "view == gemstoneVersions && viewItem == gemstoneVersion",
+          "group": "inline@1"
+        },
+        {
+          "command": "gemstone.extractVersion",
+          "when": "view == gemstoneVersions && viewItem == gemstoneVersionDownloaded",
+          "group": "inline@2"
+        },
+        {
+          "command": "gemstone.openVersionFolder",
+          "when": "view == gemstoneVersions && viewItem =~ /gemstoneVersion.*Extracted/",
+          "group": "inline@3"
+        },
+        {
+          "command": "gemstone.extractVersion",
+          "when": "view == gemstoneVersions && viewItem == gemstoneVersionDownloadedExtracted",
+          "group": "inline@2"
+        },
+        {
+          "command": "gemstone.deleteDownload",
+          "when": "view == gemstoneVersions && viewItem =~ /gemstoneVersion.*Downloaded/"
+        },
+        {
+          "command": "gemstone.deleteExtracted",
+          "when": "view == gemstoneVersions && viewItem =~ /gemstoneVersion.*Extracted/"
+        },
+        {
+          "command": "gemstone.startStone",
+          "when": "view == gemstoneDatabases && viewItem == gemstoneDbStoneStopped",
+          "group": "inline@1"
+        },
+        {
+          "command": "gemstone.replaceExtent",
+          "when": "view == gemstoneDatabases && viewItem == gemstoneDbStoneStopped",
+          "group": "inline@2"
+        },
+        {
+          "command": "gemstone.stopStone",
+          "when": "view == gemstoneDatabases && viewItem == gemstoneDbStoneRunning",
+          "group": "inline@1"
+        },
+        {
+          "command": "gemstone.startNetldi",
+          "when": "view == gemstoneDatabases && viewItem == gemstoneDbNetldiStopped",
+          "group": "inline@1"
+        },
+        {
+          "command": "gemstone.stopNetldi",
+          "when": "view == gemstoneDatabases && viewItem == gemstoneDbNetldiRunning",
+          "group": "inline@1"
+        },
+        {
+          "command": "gemstone.openDbInFinder",
+          "when": "view == gemstoneDatabases && viewItem == gemstoneDb",
+          "group": "inline@2"
+        },
+        {
+          "command": "gemstone.openDbTerminal",
+          "when": "view == gemstoneDatabases && viewItem == gemstoneDb",
+          "group": "inline@3"
+        },
+        {
+          "command": "gemstone.createLoginFromDb",
+          "when": "view == gemstoneDatabases && viewItem == gemstoneDb",
+          "group": "inline@4"
+        },
+        {
+          "command": "gemstone.deleteDatabase",
+          "when": "view == gemstoneDatabases && viewItem == gemstoneDb"
         }
       ],
       "editor/context": [
