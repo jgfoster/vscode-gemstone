@@ -35,7 +35,7 @@ import { DatabaseManager } from './databaseManager';
 import { DatabaseTreeProvider, DatabaseNode } from './databaseTreeProvider';
 import { ProcessManager } from './processManager';
 import { ProcessTreeProvider } from './processTreeProvider';
-import { SharedMemoryTreeProvider } from './sharedMemoryTreeProvider';
+import { OsConfigTreeProvider } from './sharedMemoryTreeProvider';
 
 let client: LanguageClient;
 let sessionManager: SessionManager;
@@ -403,6 +403,15 @@ export function activate(context: vscode.ExtensionContext) {
         }
         await storage.setGciLibraryPath(login.version, gciPath);
       }
+
+      // The in-process GCI library reads GEMSTONE_GLOBAL_DIR to find the
+      // NetLDI lock file (which encodes the port it is listening on).
+      // Set both variables from sysadminStorage so the login can succeed
+      // even though the VSCode/Electron process doesn't inherit them.
+      process.env.GEMSTONE_GLOBAL_DIR = sysadminStorage.getRootPath();
+      const gsInstallPath = sysadminStorage.getGemstonePath(login.version)
+        ?? path.dirname(path.dirname(gciPath));
+      process.env.GEMSTONE = gsInstallPath;
 
       try {
         const session = sessionManager.login(login, gciPath);
@@ -799,15 +808,15 @@ export function activate(context: vscode.ExtensionContext) {
   const versionManager = new VersionManager(sysadminStorage);
   const databaseManager = new DatabaseManager(sysadminStorage, processManager);
 
-  // Shared Memory (macOS only)
-  if (process.platform === 'darwin') {
-    const sharedMemoryProvider = new SharedMemoryTreeProvider();
+  // OS Configuration (macOS and Linux)
+  if (process.platform === 'darwin' || process.platform === 'linux') {
+    const osConfigProvider = new OsConfigTreeProvider();
     context.subscriptions.push(
       vscode.window.createTreeView('gemstoneSharedMemory', {
-        treeDataProvider: sharedMemoryProvider,
+        treeDataProvider: osConfigProvider,
       })
     );
-    sharedMemoryProvider.registerCommands(context);
+    osConfigProvider.registerCommands(context);
   }
 
   // Versions

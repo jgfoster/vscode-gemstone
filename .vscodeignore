@@ -1,6 +1,7 @@
 .vscode/**
 gemstone
 node_modules/**
+!node_modules/koffi/**
 client/node_modules/**
 server/node_modules/**
 client/src/**

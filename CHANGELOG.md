@@ -4,6 +4,23 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-03-02
+
+### Fixed
+
+- **Linux support** — extension now runs on Linux in addition to macOS
+- Pre-load `libnetldi` with `RTLD_GLOBAL` on Linux so the GCI library can resolve `HostCreateThread`
+- Include the `koffi` native module in the packaged extension (`.vscodeignore` fix)
+- Set `GEMSTONE` and `GEMSTONE_GLOBAL_DIR` environment variables at login so the in-process GCI library can locate the NetLDI lock file
+- Reset the open-file limit (`ulimit -n 1024`) when spawning GemStone processes on Linux to prevent shared page cache sizing issues caused by Electron's high default limit
+- Replace `curl`-based version download with native Node.js `https` (with redirect handling) for portability
+- Use `spawnSync` instead of `execSync` for `unzip` with proper error handling
+
+### Changed
+
+- **Configure OS** view (formerly "Shared Memory") — now available on Linux in addition to macOS; detects shared memory via `sysctl kernel.shmmax`/`kernel.shmall` on Linux
+- **RemoveIPC check** (Linux) — detects whether `RemoveIPC=no` is set in systemd logind configuration; provides a one-click setup script to prevent systemd from destroying GemStone shared memory on logout
+
 ## [1.1.0] - 2026-02-28
 
 ### Added

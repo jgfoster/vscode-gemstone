@@ -180,7 +180,13 @@ export class ProcessManager {
     return new Promise((resolve, reject) => {
       appendSysadmin(`\n--- ${label} ---`);
       showSysadmin();
-      const proc = spawn(cmd, args, { env });
+      // On Linux, VSCode's Electron process inherits an enormous open-file limit
+      // (~1 billion) which GemStone uses in its internal size calculations for
+      // the shared page cache. Reset it to the typical Linux default (1024) so
+      // GemStone behaves as it would when launched from a normal terminal.
+      const proc = process.platform === 'linux'
+        ? spawn('/bin/bash', ['-c', 'ulimit -n 1024; exec "$@"', '--', cmd, ...args], { env })
+        : spawn(cmd, args, { env });
       let output = '';
 
       proc.stdout.on('data', (data: Buffer) => {

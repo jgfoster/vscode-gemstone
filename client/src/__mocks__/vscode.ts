@@ -177,6 +177,7 @@ export const window = {
   onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: () => {} })),
   onDidChangeTextEditorSelection: vi.fn(() => ({ dispose: () => {} })),
   onDidChangeVisibleTextEditors: vi.fn(() => ({ dispose: () => {} })),
+  createTerminal: vi.fn((_name: string) => ({ show: vi.fn(), sendText: vi.fn() })),
   showInputBox: vi.fn(),
   showQuickPick: vi.fn(),
   tabGroups: {

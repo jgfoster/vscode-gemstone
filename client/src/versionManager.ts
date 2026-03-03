@@ -2,7 +2,7 @@ import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { spawn, execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import { SysadminStorage } from './sysadminStorage';
 import { GemStoneVersion } from './sysadminTypes';
 import { appendSysadmin, showSysadmin } from './sysadminChannel';
@@ -62,40 +62,73 @@ export class VersionManager {
     this.storage.ensureRootPath();
     const targetPath = path.join(this.storage.getRootPath(), version.fileName);
 
-    return new Promise<void>((resolve, reject) => {
-      const proc = spawn('curl', ['-L', '-o', targetPath, '-#', version.url]);
+    const cleanup = () => {
+      if (fs.existsSync(targetPath)) {
+        fs.unlinkSync(targetPath);
+      }
+    };
 
-      token.onCancellationRequested(() => {
-        proc.kill();
-        if (fs.existsSync(targetPath)) {
-          fs.unlinkSync(targetPath);
-        }
-        reject(new Error('Download cancelled'));
-      });
+    const doDownload = (url: string): Promise<void> => {
+      return new Promise<void>((resolve, reject) => {
+        const file = fs.createWriteStream(targetPath);
+        let cancelled = false;
 
-      proc.stderr.on('data', (data: Buffer) => {
-        const text = data.toString();
-        const pctMatch = text.match(/([\d.]+)%/);
-        if (pctMatch) {
-          progress.report({ message: `${pctMatch[1]}%` });
-        }
-      });
+        const cancel = token.onCancellationRequested(() => {
+          cancelled = true;
+          request.destroy();
+          file.close(() => cleanup());
+          cancel.dispose();
+          reject(new Error('Download cancelled'));
+        });
 
-      proc.on('close', (code) => {
-        if (code !== 0) {
-          if (fs.existsSync(targetPath)) {
-            fs.unlinkSync(targetPath);
+        const request = https.get(url, (res) => {
+          if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            file.close(() => {
+              if (!cancelled) {
+                doDownload(res.headers.location!).then(resolve, reject);
+              }
+            });
+            return;
           }
-          reject(new Error(`curl exited with code ${code}`));
-        } else {
-          resolve();
-        }
-      });
+          if (res.statusCode !== 200) {
+            file.close(() => cleanup());
+            reject(new Error(`HTTP ${res.statusCode} downloading ${url}`));
+            return;
+          }
 
-      proc.on('error', (err) => {
-        reject(err);
+          const total = parseInt(res.headers['content-length'] ?? '0', 10);
+          let received = 0;
+
+          res.on('data', (chunk: Buffer) => {
+            received += chunk.length;
+            if (total > 0) {
+              progress.report({ message: `${Math.round((received / total) * 100)}%` });
+            }
+          });
+
+          res.pipe(file);
+
+          file.on('finish', () => {
+            cancel.dispose();
+            resolve();
+          });
+
+          file.on('error', (err) => {
+            cleanup();
+            cancel.dispose();
+            reject(err);
+          });
+        });
+
+        request.on('error', (err) => {
+          file.close(() => cleanup());
+          cancel.dispose();
+          reject(err);
+        });
       });
-    });
+    };
+
+    return doDownload(version.url);
   }
 
   /** Extract a downloaded version */
@@ -157,7 +190,13 @@ export class VersionManager {
     progress: vscode.Progress<{ message?: string }>,
   ): Promise<void> {
     progress.report({ message: 'Extracting zip...' });
-    execSync(`unzip -o "${zipPath}" -d "${destDir}"`);
+    const result = spawnSync('unzip', ['-o', zipPath, '-d', destDir], { stdio: 'ignore' });
+    if (result.error) {
+      throw result.error;
+    }
+    if (result.status !== 0) {
+      throw new Error(`unzip failed with exit code ${result.status}`);
+    }
     appendSysadmin(`Extracted ${path.basename(zipPath)} to ${destDir}`);
   }
 

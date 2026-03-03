@@ -2,7 +2,7 @@
   "name": "gemstone-ide",
   "displayName": "GemStone Smalltalk IDE",
 	"description": "GemStone/S IDE for Visual Studio Code",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "publisher": "gemtalksystems",
   "license": "MIT",
   "author": "James Foster",
@@ -254,9 +254,9 @@
       "gemstone": [
         {
           "id": "gemstoneSharedMemory",
-          "name": "Shared Memory",
+          "name": "Configure OS",
           "type": "tree",
-          "when": "isMac",
+          "when": "isMac || isLinux",
           "visibility": "collapsed"
         },
         {
@@ -679,12 +679,12 @@
           "when": "view == gemstoneVersions && viewItem =~ /gemstoneVersion.*Extracted/"
         },
         {
-          "command": "gemstone.startStone",
+          "command": "gemstone.replaceExtent",
           "when": "view == gemstoneDatabases && viewItem == gemstoneDbStoneStopped",
           "group": "inline@1"
         },
         {
-          "command": "gemstone.replaceExtent",
+          "command": "gemstone.startStone",
           "when": "view == gemstoneDatabases && viewItem == gemstoneDbStoneStopped",
           "group": "inline@2"
         },
@@ -833,9 +833,9 @@
     "bundle": "node esbuild.mjs",
     "watch": "tsc -b -w client/tsconfig.json server/tsconfig.json",
     "test": "npm run test:server && npm run test:client",
-    "test:server": "cd server && npx vitest run",
-    "test:client": "cd client && npx vitest run",
-    "test:gci": "cd client && npx vitest run --config vitest.gci.config.ts",
+    "test:server": "cd server && NODE_OPTIONS=--experimental-require-module npx vitest run",
+    "test:client": "cd client && NODE_OPTIONS=--experimental-require-module npx vitest run",
+    "test:gci": "cd client && NODE_OPTIONS=--experimental-require-module npx vitest run --config vitest.gci.config.ts",
     "package": "vsce package"
   },
   "devDependencies": {

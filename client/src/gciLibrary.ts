@@ -1,4 +1,5 @@
 import koffi from 'koffi';
+import * as path from 'path';
 
 // OopType is uint64_t in C; koffi maps this to BigInt in JS
 const OopType = 'uint64';
@@ -149,6 +150,7 @@ function toBigInt(value: number | bigint): bigint {
 
 export class GciLibrary {
   private lib: koffi.IKoffiLib;
+  private _netldiLib: koffi.IKoffiLib | undefined;
   private _GciTsVersion: koffi.KoffiFunction;
   private _GciTsOopIsSpecial: koffi.KoffiFunction;
   private _GciTsFetchSpecialClass: koffi.KoffiFunction;
@@ -255,6 +257,17 @@ export class GciLibrary {
   private _GciTimeStampMsStr: koffi.KoffiFunction;
 
   constructor(libraryPath: string) {
+    if (process.platform === 'linux') {
+      // libgcits has an undefined reference to HostCreateThread, which is
+      // defined in libnetldi. On Linux, dlopen uses RTLD_LOCAL by default,
+      // so libnetldi must be loaded with RTLD_GLOBAL first to make
+      // HostCreateThread visible when libgcits is resolved.
+      const netldiPath = path.join(
+        path.dirname(libraryPath),
+        path.basename(libraryPath).replace(/^libgcits-/, 'libnetldi-'),
+      );
+      this._netldiLib = koffi.load(netldiPath, { global: true });
+    }
     this.lib = koffi.load(libraryPath);
     this._GciTsVersion = this.lib.func(`unsigned int GciTsVersion(_Out_ char *buf, size_t bufSize)`);
     this._GciTsOopIsSpecial = this.lib.func(`int GciTsOopIsSpecial(${OopType} oop)`);
