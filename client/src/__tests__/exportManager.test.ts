@@ -417,6 +417,38 @@ describe('ExportManager', () => {
     });
   });
 
+  describe('Globals read-only for non-SystemUser', () => {
+    it('marks Globals files as read-only after export for DataCurator', async () => {
+      const session = createMockSession({ gs_user: 'DataCurator' });
+      await manager.exportSession(session);
+
+      const sessionRoot = manager.getSessionRoot(session)!;
+      const globalsFile = path.join(sessionRoot, '2-Globals', 'Array.gs');
+      const stat = fs.statSync(globalsFile);
+      expect(stat.mode & 0o222).toBe(0); // no write bits
+    });
+
+    it('leaves UserGlobals files writable for DataCurator', async () => {
+      const session = createMockSession({ gs_user: 'DataCurator' });
+      await manager.exportSession(session);
+
+      const sessionRoot = manager.getSessionRoot(session)!;
+      const userFile = path.join(sessionRoot, '1-UserGlobals', 'MyClass.gs');
+      const stat = fs.statSync(userFile);
+      expect(stat.mode & 0o200).not.toBe(0); // owner write bit set
+    });
+
+    it('leaves Globals files writable for SystemUser', async () => {
+      const session = createMockSession({ gs_user: 'SystemUser' });
+      await manager.exportSession(session);
+
+      const sessionRoot = manager.getSessionRoot(session)!;
+      const globalsFile = path.join(sessionRoot, '2-Globals', 'Array.gs');
+      const stat = fs.statSync(globalsFile);
+      expect(stat.mode & 0o200).not.toBe(0); // owner write bit set
+    });
+  });
+
   describe('per-login exportPath template', () => {
     it('getResolvedTemplate uses login exportPath when set', () => {
       const session = createMockSession({ exportPath: '{workspaceRoot}/smalltalk/{dictName}' });

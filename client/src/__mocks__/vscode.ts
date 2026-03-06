@@ -295,6 +295,12 @@ export const FileChangeType = {
   Deleted: 3,
 };
 
+// ── FilePermission mock ──────────────────────────────────
+
+export const FilePermission = {
+  Readonly: 1,
+};
+
 // ── Position & Location mock ──────────────────────────────
 
 export class Position {

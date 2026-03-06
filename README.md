@@ -1,4 +1,4 @@
-# GemStone Smalltalk IDE
+# Jasper — A Visual Studio Code Extension for a GemStone Smalltalk IDE
 
 A full-featured GemStone/S 64 Bit development environment for Visual Studio Code. Write, browse, debug, and test GemStone Smalltalk code — and manage your GemStone infrastructure — all from a single editor.
 
@@ -209,6 +209,8 @@ Fine-tune the Smalltalk formatter under `gemstoneSmalltalk.formatter.*`:
 | `gemstone.exportPath` | `""` | Root path for class file export (supports `{workspaceRoot}`) |
 | `gemstone.userManagedDictionaries` | `[]` | Dictionary names excluded from export |
 | `gemstone.maxEnvironment` | 0 | Method environments to display in browser |
+
+> **Tip:** VS Code's Quick Open file search (Cmd+P / Ctrl+P) and the title bar search respect `.gitignore` by default, so exported `.gs` files in gitignored directories won't appear in search results. To include them, set `"search.useIgnoreFiles": false` in your VS Code settings. If there are some ignored things you want to continue to exclude, you can tell VS Code to exclude certain paths with the `files.exclude` setting.
 
 ## GCI Library
 

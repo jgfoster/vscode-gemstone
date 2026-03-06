@@ -3,12 +3,26 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { DatabaseYaml, GemStoneDatabase } from './sysadminTypes';
+import { needsWsl, getWslInfo, wslPathToWindows, windowsPathToWsl } from './wslBridge';
 
 export class SysadminStorage {
   getRootPath(): string {
     const config = vscode.workspace.getConfiguration('gemstone');
     const raw = config.get<string>('rootPath', '~/Documents/GemStone');
+    if (needsWsl()) {
+      const wslHome = getWslInfo().homeDir || '/root';
+      return wslPathToWindows(raw.replace(/^~/, wslHome));
+    }
     return raw.replace(/^~/, os.homedir());
+  }
+
+  /** Get the root path as a WSL Linux path (for use in WSL commands) */
+  getWslRootPath(): string {
+    if (!needsWsl()) return this.getRootPath();
+    const config = vscode.workspace.getConfiguration('gemstone');
+    const raw = config.get<string>('rootPath', '~/Documents/GemStone');
+    const wslHome = getWslInfo().homeDir || '/root';
+    return raw.replace(/^~/, wslHome);
   }
 
   ensureRootPath(): void {
@@ -27,6 +41,7 @@ export class SysadminStorage {
     const arch = process.arch === 'arm64' ? 'arm64' : 'x86_64';
     if (process.platform === 'darwin') return `${arch}.Darwin`;
     if (process.platform === 'linux') return `${arch}.Linux`;
+    if (needsWsl() && getWslInfo().available) return `${arch}.Linux`;
     return undefined;
   }
 
@@ -45,6 +60,15 @@ export class SysadminStorage {
     const suffix = this.getPlatformSuffix();
     const dir = path.join(this.getRootPath(), `GemStone64Bit${version}${suffix}`);
     return fs.existsSync(dir) ? dir : undefined;
+  }
+
+  /** Get the GEMSTONE path as a WSL Linux path (for use in WSL commands) */
+  getWslGemstonePath(version: string): string | undefined {
+    if (!needsWsl()) return this.getGemstonePath(version);
+    // Check existence via the UNC path
+    if (!this.getGemstonePath(version)) return undefined;
+    const suffix = this.getPlatformSuffix();
+    return `${this.getWslRootPath()}/GemStone64Bit${version}${suffix}`;
   }
 
   /** Scan for db-* directories containing database.yaml */

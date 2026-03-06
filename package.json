@@ -1,6 +1,6 @@
 {
   "name": "gemstone-ide",
-  "displayName": "GemStone Smalltalk IDE",
+  "displayName": "Jasper: A GemStone Smalltalk IDE",
 	"description": "GemStone/S IDE for Visual Studio Code",
   "version": "1.1.1",
   "publisher": "gemtalksystems",
@@ -256,23 +256,27 @@
           "id": "gemstoneSharedMemory",
           "name": "Configure OS",
           "type": "tree",
+          "icon": "$(memory)",
           "when": "isMac || isLinux",
           "visibility": "collapsed"
         },
         {
           "id": "gemstoneVersions",
           "name": "Versions",
-          "type": "tree"
+          "type": "tree",
+          "icon": "$(versions)"
         },
         {
           "id": "gemstoneDatabases",
           "name": "Databases",
-          "type": "tree"
+          "type": "tree",
+          "icon": "$(database)"
         },
         {
           "id": "gemstoneProcesses",
           "name": "Processes",
-          "type": "tree"
+          "type": "tree",
+          "icon": "$(server-process)"
         },
         {
           "id": "gemstoneLogins",
@@ -301,15 +305,33 @@
       },
       {
         "view": "gemstoneVersions",
-        "contents": "Loading versions...\n[Refresh](command:gemstone.refreshVersions)"
+        "contents": "GemStone system administration requires Windows Subsystem for Linux (WSL2).\n[Install WSL](https://learn.microsoft.com/en-us/windows/wsl/install)",
+        "when": "gemstone.isWindows && !gemstone.wslAvailable"
+      },
+      {
+        "view": "gemstoneVersions",
+        "contents": "Loading versions...\n[Refresh](command:gemstone.refreshVersions)",
+        "when": "!gemstone.isWindows || gemstone.wslAvailable"
       },
       {
         "view": "gemstoneDatabases",
-        "contents": "No databases found.\n[Create Database](command:gemstone.createDatabase)"
+        "contents": "GemStone system administration requires Windows Subsystem for Linux (WSL2).\n[Install WSL](https://learn.microsoft.com/en-us/windows/wsl/install)",
+        "when": "gemstone.isWindows && !gemstone.wslAvailable"
+      },
+      {
+        "view": "gemstoneDatabases",
+        "contents": "No databases found.\n[Create Database](command:gemstone.createDatabase)",
+        "when": "!gemstone.isWindows || gemstone.wslAvailable"
       },
       {
         "view": "gemstoneProcesses",
-        "contents": "No running GemStone processes.\n[Refresh](command:gemstone.refreshProcesses)"
+        "contents": "GemStone system administration requires Windows Subsystem for Linux (WSL2).\n[Install WSL](https://learn.microsoft.com/en-us/windows/wsl/install)",
+        "when": "gemstone.isWindows && !gemstone.wslAvailable"
+      },
+      {
+        "view": "gemstoneProcesses",
+        "contents": "No running GemStone processes.\n[Refresh](command:gemstone.refreshProcesses)",
+        "when": "!gemstone.isWindows || gemstone.wslAvailable"
       }
     ],
     "commands": [
@@ -599,7 +621,7 @@
       ],
       "view/item/context": [
         {
-          "command": "gemstone.login",
+          "command": "gemstone.deleteLogin",
           "when": "view == gemstoneLogins",
           "group": "inline@1"
         },
@@ -609,7 +631,7 @@
           "group": "inline@2"
         },
         {
-          "command": "gemstone.deleteLogin",
+          "command": "gemstone.login",
           "when": "view == gemstoneLogins",
           "group": "inline@3"
         },
@@ -618,7 +640,7 @@
           "when": "view == gemstoneLogins"
         },
         {
-          "command": "gemstone.sessionCommit",
+          "command": "gemstone.sessionLogout",
           "when": "view == gemstoneSessions && viewItem == gemstoneSession",
           "group": "inline@1"
         },
@@ -628,7 +650,7 @@
           "group": "inline@2"
         },
         {
-          "command": "gemstone.sessionLogout",
+          "command": "gemstone.sessionCommit",
           "when": "view == gemstoneSessions && viewItem == gemstoneSession",
           "group": "inline@3"
         },

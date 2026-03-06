@@ -6,6 +6,7 @@ import { execSync, spawnSync } from 'child_process';
 import { SysadminStorage } from './sysadminStorage';
 import { GemStoneVersion } from './sysadminTypes';
 import { appendSysadmin, showSysadmin } from './sysadminChannel';
+import { needsWsl, wslSpawn, wslExecSync } from './wslBridge';
 
 export class VersionManager {
   constructor(private storage: SysadminStorage) {}
@@ -60,8 +61,41 @@ export class VersionManager {
     token: vscode.CancellationToken,
   ): Promise<void> {
     this.storage.ensureRootPath();
-    const targetPath = path.join(this.storage.getRootPath(), version.fileName);
+    const targetPath = needsWsl()
+      ? `${this.storage.getWslRootPath()}/${version.fileName}`
+      : path.join(this.storage.getRootPath(), version.fileName);
 
+    if (needsWsl()) {
+      // On Windows, download via curl inside WSL
+      return new Promise<void>((resolve, reject) => {
+        const proc = wslSpawn('curl', ['-L', '-o', targetPath, '-#', version.url]);
+
+        token.onCancellationRequested(() => {
+          proc.kill();
+          try { wslExecSync(`rm -f "${targetPath}"`); } catch { /* ignore */ }
+          reject(new Error('Download cancelled'));
+        });
+
+        proc.stderr?.on('data', (data: Buffer) => {
+          const text = data.toString();
+          const pctMatch = text.match(/([\d.]+)%/);
+          if (pctMatch) {
+            progress.report({ message: `${pctMatch[1]}%` });
+          }
+        });
+
+        proc.on('close', (code) => {
+          if (code !== 0) {
+            try { wslExecSync(`rm -f "${targetPath}"`); } catch { /* ignore */ }
+            reject(new Error(`curl exited with code ${code}`));
+          } else {
+            resolve();
+          }
+        });
+      });
+    }
+
+    // On macOS/Linux, download with native Node.js https
     const cleanup = () => {
       if (fs.existsSync(targetPath)) {
         fs.unlinkSync(targetPath);
@@ -136,12 +170,16 @@ export class VersionManager {
     version: GemStoneVersion,
     progress: vscode.Progress<{ message?: string }>,
   ): Promise<void> {
-    const rootPath = this.storage.getRootPath();
-    const filePath = path.join(rootPath, version.fileName);
-
     if (process.platform === 'darwin') {
+      const rootPath = this.storage.getRootPath();
+      const filePath = path.join(rootPath, version.fileName);
       await this.extractDmg(filePath, rootPath, progress);
     } else {
+      // Linux and Windows (via WSL) both use zip
+      const rootPath = needsWsl()
+        ? this.storage.getWslRootPath()
+        : this.storage.getRootPath();
+      const filePath = `${rootPath}/${version.fileName}`;
       await this.extractZip(filePath, rootPath, progress);
     }
   }
@@ -190,12 +228,16 @@ export class VersionManager {
     progress: vscode.Progress<{ message?: string }>,
   ): Promise<void> {
     progress.report({ message: 'Extracting zip...' });
-    const result = spawnSync('unzip', ['-o', zipPath, '-d', destDir], { stdio: 'ignore' });
-    if (result.error) {
-      throw result.error;
-    }
-    if (result.status !== 0) {
-      throw new Error(`unzip failed with exit code ${result.status}`);
+    if (needsWsl()) {
+      wslExecSync(`unzip -o "${zipPath}" -d "${destDir}"`);
+    } else {
+      const result = spawnSync('unzip', ['-o', zipPath, '-d', destDir], { stdio: 'ignore' });
+      if (result.error) {
+        throw result.error;
+      }
+      if (result.status !== 0) {
+        throw new Error(`unzip failed with exit code ${result.status}`);
+      }
     }
     appendSysadmin(`Extracted ${path.basename(zipPath)} to ${destDir}`);
   }
@@ -213,9 +255,16 @@ export class VersionManager {
   async deleteExtracted(version: GemStoneVersion): Promise<void> {
     const gsPath = this.storage.getGemstonePath(version.version);
     if (gsPath && fs.existsSync(gsPath)) {
-      // Make writable first (GemStone sets some files read-only)
-      execSync(`chmod -R u+w "${gsPath}"`);
-      fs.rmSync(gsPath, { recursive: true });
+      if (needsWsl()) {
+        const wslPath = this.storage.getWslGemstonePath(version.version);
+        if (wslPath) {
+          wslExecSync(`chmod -R u+w "${wslPath}" && rm -rf "${wslPath}"`);
+        }
+      } else {
+        // Make writable first (GemStone sets some files read-only)
+        execSync(`chmod -R u+w "${gsPath}"`);
+        fs.rmSync(gsPath, { recursive: true });
+      }
       appendSysadmin(`Deleted extracted version: ${path.basename(gsPath)}`);
     }
   }

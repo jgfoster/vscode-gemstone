@@ -188,7 +188,16 @@ export class ExportManager {
           this.writing = false;
         }
 
-        // 5. Remove stale files (classes that no longer exist)
+        // 5. Mark Globals files read-only for non-SystemUser
+        if (session.login.gs_user !== 'SystemUser') {
+          for (const dict of plan) {
+            if (dictNames[dict.dictIndex - 1] === 'Globals') {
+              this.setPermissions(dict.dirPath, 0o444);
+            }
+          }
+        }
+
+        // 6. Remove stale files (classes that no longer exist)
         const previousFiles = this.exportedFiles.get(session.id);
         if (previousFiles) {
           for (const oldFile of previousFiles) {
@@ -201,10 +210,10 @@ export class ExportManager {
           }
         }
 
-        // 6. Remove stale dictionary directories (dictionaries that no longer exist)
+        // 7. Remove stale dictionary directories (dictionaries that no longer exist)
         this.removeStaleDictDirs(sessionRoot, currentDictDirs, managed);
 
-        // 7. Track exported files
+        // 8. Track exported files
         this.exportedFiles.set(session.id, newFiles);
 
         vscode.window.showInformationMessage(

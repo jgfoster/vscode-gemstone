@@ -19,16 +19,20 @@ vi.mock('../browserQueries', () => ({
   setClassComment: vi.fn(),
 }));
 
-import { Uri, FileSystemError } from '../__mocks__/vscode';
+import { Uri, FileSystemError, FilePermission } from '../__mocks__/vscode';
 import { GemStoneFileSystemProvider } from '../gemstoneFileSystemProvider';
 import { SessionManager } from '../sessionManager';
 import * as queries from '../browserQueries';
 
-function makeSessionManager() {
+function makeSession(id = 1, gs_user = 'DataCurator') {
+  return { id, gci: {}, handle: {}, login: { label: 'Test', gs_user }, stoneVersion: '3.7.2' };
+}
+
+function makeSessionManager(gs_user = 'DataCurator') {
+  const session = makeSession(1, gs_user);
   return {
-    getSessions: vi.fn(() => [
-      { id: 1, gci: {}, handle: {}, login: { label: 'Test' }, stoneVersion: '3.7.2' },
-    ]),
+    getSessions: vi.fn(() => [session]),
+    getSession: vi.fn((id: number) => id === 1 ? session : undefined),
   } as unknown as SessionManager;
 }
 
@@ -46,6 +50,32 @@ describe('GemStoneFileSystemProvider', () => {
       expect(stat.type).toBe(1); // FileType.File
       expect(stat.ctime).toBe(0);
       expect(stat.mtime).toBeGreaterThan(0);
+    });
+
+    it('marks Globals read-only for non-SystemUser', () => {
+      const stat = provider.stat(Uri.parse('gemstone://1/Globals/Array/instance/accessing/at%3A'));
+      expect(stat.permissions).toBe(FilePermission.Readonly);
+    });
+
+    it('marks Globals writable for SystemUser', () => {
+      const p = new GemStoneFileSystemProvider(makeSessionManager('SystemUser'));
+      const stat = p.stat(Uri.parse('gemstone://1/Globals/Array/instance/accessing/at%3A'));
+      expect(stat.permissions).toBeUndefined();
+    });
+
+    it('marks non-Globals dictionaries writable for all users', () => {
+      const stat = provider.stat(Uri.parse('gemstone://1/UserGlobals/MyClass/instance/accessing/foo'));
+      expect(stat.permissions).toBeUndefined();
+    });
+
+    it('marks Globals definitions read-only for non-SystemUser', () => {
+      const stat = provider.stat(Uri.parse('gemstone://1/Globals/Array/definition'));
+      expect(stat.permissions).toBe(FilePermission.Readonly);
+    });
+
+    it('marks Globals comments read-only for non-SystemUser', () => {
+      const stat = provider.stat(Uri.parse('gemstone://1/Globals/Array/comment'));
+      expect(stat.permissions).toBe(FilePermission.Readonly);
     });
   });
 
@@ -180,7 +210,10 @@ describe('GemStoneFileSystemProvider', () => {
 
   describe('session lookup', () => {
     it('throws Unavailable when session is gone', () => {
-      const mgr = { getSessions: vi.fn(() => []) } as unknown as SessionManager;
+      const mgr = {
+        getSessions: vi.fn(() => []),
+        getSession: vi.fn(() => undefined),
+      } as unknown as SessionManager;
       const p = new GemStoneFileSystemProvider(mgr);
       const uri = Uri.parse('gemstone://99/Globals/Array/definition');
       expect(() => p.readFile(uri)).toThrow();

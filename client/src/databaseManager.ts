@@ -5,6 +5,7 @@ import { SysadminStorage } from './sysadminStorage';
 import { ProcessManager } from './processManager';
 import { GemStoneDatabase } from './sysadminTypes';
 import { appendSysadmin } from './sysadminChannel';
+import { needsWsl, windowsPathToWsl } from './wslBridge';
 
 export class DatabaseManager {
   constructor(
@@ -75,6 +76,9 @@ export class DatabaseManager {
 
         progress.report({ message: 'Writing configuration...' });
 
+        // Config files are read by GemStone inside WSL, so paths must be Linux-side
+        const confPath = needsWsl() ? windowsPathToWsl(dbDir) : dbDir;
+
         // database.yaml
         fs.writeFileSync(path.join(dbDir, 'database.yaml'),
           `---\nbaseExtent: "${baseExtent}.dbf"\nldiName: "${ldiName}"\nstoneName: "${stoneName}"\nversion: "${version}"\n`);
@@ -93,16 +97,16 @@ export class DatabaseManager {
           `# Edit this file to change your stone configuration.\n` +
           `# For example, you might want a larger Shared Page Cache.\n\n` +
           `SHR_PAGE_CACHE_SIZE_KB = 100000;\n` +
-          `KEYFILE = "${dbDir}/conf/gemstone.key";\n`);
+          `KEYFILE = "${confPath}/conf/gemstone.key";\n`);
 
         // system.conf
         fs.writeFileSync(path.join(dbDir, 'conf', 'system.conf'),
           `# See $GEMSTONE/data/system.conf for descriptions of these lines.\n` +
           `# In general, this file should not be edited.\n` +
           `# You may customize the stone config file (stonename.conf) or gem.conf\n\n` +
-          `DBF_EXTENT_NAMES = "${dbDir}/data/extent0.dbf";\n` +
+          `DBF_EXTENT_NAMES = "${confPath}/data/extent0.dbf";\n` +
           `STN_TRAN_FULL_LOGGING = TRUE;\n` +
-          `STN_TRAN_LOG_DIRECTORIES = "${dbDir}/data/";\n` +
+          `STN_TRAN_LOG_DIRECTORIES = "${confPath}/data/";\n` +
           `STN_TRAN_LOG_SIZES = 1000;\n`);
 
         progress.report({ message: 'Copying key file...' });

@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
@@ -36,6 +37,7 @@ import { DatabaseTreeProvider, DatabaseNode } from './databaseTreeProvider';
 import { ProcessManager } from './processManager';
 import { ProcessTreeProvider } from './processTreeProvider';
 import { OsConfigTreeProvider } from './sharedMemoryTreeProvider';
+import { isWindows, getWslInfo } from './wslBridge';
 
 let client: LanguageClient;
 let sessionManager: SessionManager;
@@ -140,6 +142,21 @@ export function activate(context: vscode.ExtensionContext) {
       if (doc.uri.scheme === 'gemstone') {
         vscode.languages.setTextDocumentLanguage(doc, 'gemstone-smalltalk');
       }
+    })
+  );
+
+  // Lock editors for read-only .gs files (e.g. Globals for non-SystemUser)
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      if (!editor) return;
+      const { uri } = editor.document;
+      if (uri.scheme !== 'file' || !uri.fsPath.endsWith('.gs')) return;
+      try {
+        const stat = fs.statSync(uri.fsPath);
+        if ((stat.mode & 0o200) === 0) {
+          vscode.commands.executeCommand('workbench.action.files.setActiveEditorReadonlyInSession');
+        }
+      } catch { /* ignore */ }
     })
   );
 
@@ -803,6 +820,25 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // ── SysAdmin ──────────────────────────────────────────────
+  if (isWindows()) {
+    const wslInfo = getWslInfo();
+    vscode.commands.executeCommand('setContext', 'gemstone.isWindows', true);
+    vscode.commands.executeCommand('setContext', 'gemstone.wslAvailable', wslInfo.available);
+    if (!wslInfo.available) {
+      vscode.window.showWarningMessage(
+        'GemStone system administration features require Windows Subsystem for Linux (WSL2). ' +
+        'Install WSL with: wsl --install',
+        'Learn More',
+      ).then(choice => {
+        if (choice === 'Learn More') {
+          vscode.env.openExternal(
+            vscode.Uri.parse('https://learn.microsoft.com/en-us/windows/wsl/install'),
+          );
+        }
+      });
+    }
+  }
+
   const sysadminStorage = new SysadminStorage();
   const processManager = new ProcessManager(sysadminStorage);
   const versionManager = new VersionManager(sysadminStorage);
@@ -1013,13 +1049,17 @@ export function activate(context: vscode.ExtensionContext) {
         exportPath: '',
       };
       // Auto-detect GCI library path
-      const gsPath = sysadminStorage.getGemstonePath(db.config.version);
-      if (gsPath) {
-        const ext = process.platform === 'darwin' ? 'dylib' : process.platform === 'win32' ? 'dll' : 'so';
-        const fs = await import('fs');
-        const libPath = path.join(gsPath, 'lib', `libgcits-${db.config.version}-64.${ext}`);
-        if (fs.existsSync(libPath)) {
-          await storage.setGciLibraryPath(db.config.version, libPath);
+      // On Windows, the sysadmin install is Linux (in WSL) and only has .so files.
+      // The Windows .dll must be provided separately via the login editor.
+      if (!isWindows()) {
+        const gsPath = sysadminStorage.getGemstonePath(db.config.version);
+        if (gsPath) {
+          const ext = process.platform === 'darwin' ? 'dylib' : 'so';
+          const fs = await import('fs');
+          const libPath = path.join(gsPath, 'lib', `libgcits-${db.config.version}-64.${ext}`);
+          if (fs.existsSync(libPath)) {
+            await storage.setGciLibraryPath(db.config.version, libPath);
+          }
         }
       }
       LoginEditorPanel.show(storage, treeProvider, login);

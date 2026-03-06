@@ -112,13 +112,19 @@ export class GemStoneFileSystemProvider implements vscode.FileSystemProvider {
     return new vscode.Disposable(() => {});
   }
 
-  stat(_uri: vscode.Uri): vscode.FileStat {
-    return {
+  stat(uri: vscode.Uri): vscode.FileStat {
+    const stat: vscode.FileStat = {
       type: vscode.FileType.File,
       ctime: 0,
       mtime: Date.now(),
       size: 0,
     };
+    const parsed = parseUri(uri);
+    const session = this.sessionManager.getSession(parsed.sessionId);
+    if (session && parsed.dictName === 'Globals' && session.login.gs_user !== 'SystemUser') {
+      stat.permissions = vscode.FilePermission.Readonly;
+    }
+    return stat;
   }
 
   readDirectory(): [string, vscode.FileType][] {
