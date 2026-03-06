@@ -8,7 +8,10 @@ export interface GemStoneLogin {
   netldi: string;
   host_user: string;
   host_password: string;
-  exportPath: string;
+}
+
+export function loginLabel(login: Pick<GemStoneLogin, 'gs_user' | 'stone' | 'gem_host'>): string {
+  return `${login.gs_user} on ${login.stone} (${login.gem_host})`;
 }
 
 export const DEFAULT_LOGIN: GemStoneLogin = {
@@ -21,5 +24,4 @@ export const DEFAULT_LOGIN: GemStoneLogin = {
   netldi: 'gs64ldi',
   host_user: '',
   host_password: '',
-  exportPath: '',
 };

@@ -62,7 +62,6 @@ function createMockSession(overrides?: Partial<GemStoneLogin>): ActiveSession {
       netldi: 'gs64ldi',
       host_user: '',
       host_password: '',
-      exportPath: '',
       ...overrides,
     },
     stoneVersion: '3.7.2',
@@ -99,52 +98,11 @@ describe('ExportManager', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  describe('getExportRoot', () => {
-    it('returns {workspace}/gemstone by default', () => {
-      const root = manager.getExportRoot();
-      expect(root).toBe(path.join(tmpDir, 'gemstone'));
-    });
-
-    it('returns undefined when no workspace is open', () => {
-      const wsModule = vscode.workspace as unknown as { workspaceFolders: null };
-      wsModule.workspaceFolders = null;
-      expect(manager.getExportRoot()).toBeUndefined();
-    });
-
-    it('resolves a relative exportPath against the workspace root', () => {
-      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
-      mockVscode.__setConfigValue('exportPath', 'smalltalk');
-      expect(manager.getExportRoot()).toBe(path.join(tmpDir, 'smalltalk'));
-    });
-
-    it('returns an absolute exportPath as-is', () => {
-      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
-      mockVscode.__setConfigValue('exportPath', '/custom/absolute/path');
-      expect(manager.getExportRoot()).toBe('/custom/absolute/path');
-    });
-
-    it('expands {workspaceRoot} in exportPath', () => {
-      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
-      mockVscode.__setConfigValue('exportPath', '{workspaceRoot}/my-exports');
-      expect(manager.getExportRoot()).toBe(path.join(tmpDir, 'my-exports'));
-    });
-
-    it('returns undefined for relative exportPath when no workspace is open', () => {
-      const mockVscode = vscode as unknown as {
-        __setConfigValue: (key: string, value: unknown) => void;
-      };
-      mockVscode.__setConfigValue('exportPath', 'smalltalk');
-      const wsModule = vscode.workspace as unknown as { workspaceFolders: null };
-      wsModule.workspaceFolders = null;
-      expect(manager.getExportRoot()).toBeUndefined();
-    });
-  });
-
   describe('getSessionRoot', () => {
-    it('returns {exportRoot}/{host}/{stone}/{user}', () => {
+    it('returns {exportRoot}/{session}', () => {
       const session = createMockSession();
       const root = manager.getSessionRoot(session);
-      expect(root).toBe(path.join(tmpDir, 'gemstone', 'localhost', 'gs64stone', 'DataCurator'));
+      expect(root).toBe(path.join(tmpDir, 'gemstone', '1'));
     });
   });
 
@@ -449,32 +407,37 @@ describe('ExportManager', () => {
     });
   });
 
-  describe('per-login exportPath template', () => {
-    it('getResolvedTemplate uses login exportPath when set', () => {
-      const session = createMockSession({ exportPath: '{workspaceRoot}/smalltalk/{dictName}' });
+  describe('exportPath setting as template', () => {
+    it('getResolvedTemplate uses default when exportPath is empty', () => {
+      const session = createMockSession();
+      const template = manager.getResolvedTemplate(session);
+      expect(template).toBe(path.join(tmpDir, 'gemstone', '1', '{index}-{dictName}'));
+    });
+
+    it('getResolvedTemplate uses custom exportPath with variable substitution', () => {
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('exportPath', '{workspaceRoot}/smalltalk/{dictName}');
+      const session = createMockSession();
       const template = manager.getResolvedTemplate(session);
       expect(template).toBe(path.join(tmpDir, 'smalltalk', '{dictName}'));
     });
 
-    it('getResolvedTemplate falls back to default when login exportPath is empty', () => {
-      const session = createMockSession();
-      const template = manager.getResolvedTemplate(session);
-      expect(template).toBe(path.join(tmpDir, 'gemstone', 'localhost', 'gs64stone', 'DataCurator', '{index}-{dictName}'));
-    });
-
-    it('getResolvedTemplate resolves {host}, {stone}, {user} variables', () => {
+    it('getResolvedTemplate resolves {session}, {host}, {stone}, {user} variables', () => {
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('exportPath', '{workspaceRoot}/exports/{session}/{host}/{stone}/{user}/{dictName}');
       const session = createMockSession({
-        exportPath: '{workspaceRoot}/exports/{host}/{stone}/{user}/{dictName}',
         gem_host: 'myhost',
         stone: 'mystone',
         gs_user: 'myuser',
       });
       const template = manager.getResolvedTemplate(session);
-      expect(template).toBe(path.join(tmpDir, 'exports', 'myhost', 'mystone', 'myuser', '{dictName}'));
+      expect(template).toBe(path.join(tmpDir, 'exports', '1', 'myhost', 'mystone', 'myuser', '{dictName}'));
     });
 
-    it('getResolvedTemplate handles relative login exportPath', () => {
-      const session = createMockSession({ exportPath: 'smalltalk/{dictName}' });
+    it('getResolvedTemplate handles relative exportPath', () => {
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('exportPath', 'smalltalk/{dictName}');
+      const session = createMockSession();
       const template = manager.getResolvedTemplate(session);
       expect(template).toBe(path.join(tmpDir, 'smalltalk', '{dictName}'));
     });
@@ -482,30 +445,40 @@ describe('ExportManager', () => {
     it('getResolvedTemplate returns undefined for relative path with no workspace', () => {
       const wsModule = vscode.workspace as unknown as { workspaceFolders: null };
       wsModule.workspaceFolders = null;
-      const session = createMockSession({ exportPath: 'smalltalk/{dictName}' });
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('exportPath', 'smalltalk/{dictName}');
+      const session = createMockSession();
       expect(manager.getResolvedTemplate(session)).toBeUndefined();
     });
 
     it('getDictPath fully resolves the template', () => {
-      const session = createMockSession({ exportPath: '{workspaceRoot}/smalltalk/{dictName}' });
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('exportPath', '{workspaceRoot}/smalltalk/{dictName}');
+      const session = createMockSession();
       const dictPath = manager.getDictPath(session, 1, 'UserGlobals');
       expect(dictPath).toBe(path.join(tmpDir, 'smalltalk', 'UserGlobals'));
     });
 
     it('getDictPath resolves {index} in template', () => {
-      const session = createMockSession({ exportPath: '{workspaceRoot}/code/{index}-{dictName}' });
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('exportPath', '{workspaceRoot}/code/{index}-{dictName}');
+      const session = createMockSession();
       const dictPath = manager.getDictPath(session, 3, 'Published');
       expect(dictPath).toBe(path.join(tmpDir, 'code', '3-Published'));
     });
 
     it('getSessionRoot returns parent of dict directories', () => {
-      const session = createMockSession({ exportPath: '{workspaceRoot}/smalltalk/{dictName}' });
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('exportPath', '{workspaceRoot}/smalltalk/{dictName}');
+      const session = createMockSession();
       const root = manager.getSessionRoot(session);
       expect(root).toBe(path.join(tmpDir, 'smalltalk'));
     });
 
-    it('exports to custom paths using login exportPath', async () => {
-      const session = createMockSession({ exportPath: '{workspaceRoot}/smalltalk/{dictName}' });
+    it('exports to custom paths using exportPath setting', async () => {
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('exportPath', '{workspaceRoot}/smalltalk/{dictName}');
+      const session = createMockSession();
       await manager.exportSession(session);
 
       const root = manager.getSessionRoot(session)!;
@@ -515,24 +488,10 @@ describe('ExportManager', () => {
       expect(fs.existsSync(path.join(root, 'Globals', 'String.gs'))).toBe(true);
     });
 
-    it('uses global exportPath as root when login has no exportPath', () => {
-      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
-      mockVscode.__setConfigValue('exportPath', '{workspaceRoot}/my-exports');
-      const session = createMockSession();
-      const root = manager.getSessionRoot(session);
-      expect(root).toBe(path.join(tmpDir, 'my-exports', 'localhost', 'gs64stone', 'DataCurator'));
-    });
-
-    it('login exportPath takes precedence over global exportPath', () => {
-      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
-      mockVscode.__setConfigValue('exportPath', '{workspaceRoot}/global-exports');
-      const session = createMockSession({ exportPath: '{workspaceRoot}/login-exports/{dictName}' });
-      const root = manager.getSessionRoot(session);
-      expect(root).toBe(path.join(tmpDir, 'login-exports'));
-    });
-
     it('preserves user-managed directories with plain dict names', async () => {
-      const session = createMockSession({ exportPath: '{workspaceRoot}/smalltalk/{dictName}' });
+      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
+      mockVscode.__setConfigValue('exportPath', '{workspaceRoot}/smalltalk/{dictName}');
+      const session = createMockSession();
       const root = manager.getSessionRoot(session)!;
 
       // Pre-create a user-managed directory
@@ -540,13 +499,25 @@ describe('ExportManager', () => {
       fs.mkdirSync(managedDir, { recursive: true });
       fs.writeFileSync(path.join(managedDir, 'MyClass.gs'), 'user content');
 
-      const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
       mockVscode.__setConfigValue('userManagedDictionaries', ['UserGlobals']);
 
       await manager.exportSession(session);
 
       expect(fs.existsSync(managedDir)).toBe(true);
       expect(fs.readFileSync(path.join(managedDir, 'MyClass.gs'), 'utf-8')).toBe('user content');
+    });
+  });
+
+  describe('package.json export path description', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../package.json'), 'utf-8'));
+    const properties = pkg.contributes.configuration[0].properties;
+    const allVars = ['{workspaceRoot}', '{session}', '{host}', '{stone}', '{user}', '{index}', '{dictName}'];
+
+    it('gemstone.exportPath lists all variables', () => {
+      const desc = properties['gemstone.exportPath'].description;
+      for (const v of allVars) {
+        expect(desc).toContain(v);
+      }
     });
   });
 });

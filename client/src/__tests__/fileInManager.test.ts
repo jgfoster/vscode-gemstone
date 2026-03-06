@@ -48,7 +48,6 @@ function createMockSession(overrides?: Partial<GemStoneLogin>): ActiveSession {
       netldi: 'gs64ldi',
       host_user: '',
       host_password: '',
-      exportPath: '',
       ...overrides,
     },
     stoneVersion: '3.7.2',

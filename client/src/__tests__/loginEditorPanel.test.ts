@@ -36,12 +36,12 @@ describe('LoginEditorPanel', () => {
       );
     });
 
-    it('creates a panel titled with login label when editing', () => {
-      const login = makeLogin({ label: 'Production' });
+    it('creates a panel titled with login description when editing', () => {
+      const login = makeLogin({ gs_user: 'Admin', stone: 'prod', gem_host: 'db.example.com' });
       LoginEditorPanel.show(storage, treeProvider, login);
       expect(window.createWebviewPanel).toHaveBeenCalledWith(
         'gemstoneLoginEditor',
-        'Edit: Production',
+        'Edit: Admin on prod (db.example.com)',
         expect.any(Number),
         expect.any(Object),
       );
@@ -71,7 +71,6 @@ describe('LoginEditorPanel', () => {
       const html = panel.webview.html;
 
       expect(html).toContain('GemStone Login Parameters');
-      expect(html).toContain('id="label"');
       expect(html).toContain('id="version"');
       expect(html).toContain('id="gem_host"');
       expect(html).toContain('id="stone"');
@@ -99,6 +98,7 @@ describe('LoginEditorPanel', () => {
       expect(html).toContain('id="saveBtn"');
       expect(html).toContain('id="cancelBtn"');
     });
+
   });
 
   describe('message handling', () => {

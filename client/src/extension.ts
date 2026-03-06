@@ -9,6 +9,7 @@ import {
 } from 'vscode-languageclient/node';
 import { LoginStorage } from './loginStorage';
 import { LoginTreeProvider, GemStoneLoginItem } from './loginTreeProvider';
+import { loginLabel } from './loginTypes';
 import { LoginEditorPanel } from './loginEditorPanel';
 import { SessionManager } from './sessionManager';
 import { SessionTreeProvider, GemStoneSessionItem } from './sessionTreeProvider';
@@ -246,8 +247,8 @@ export function activate(context: vscode.ExtensionContext) {
   function updateStatusBar() {
     const session = sessionManager.getSelectedSession();
     if (session) {
-      statusBarItem.text = `$(database) ${session.login.label}`;
-      statusBarItem.tooltip = `GemStone: ${session.login.gs_user} in ${session.login.stone} (click to change)`;
+      statusBarItem.text = `$(database) ${loginLabel(session.login)}`;
+      statusBarItem.tooltip = 'GemStone: click to change session';
       statusBarItem.show();
       browserBarItem.show();
     } else if (sessionManager.getSessions().length > 0) {
@@ -351,20 +352,19 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand('gemstone.deleteLogin', async (item: GemStoneLoginItem) => {
       const confirmed = await vscode.window.showWarningMessage(
-        `Delete login "${item.login.label}"?`,
+        `Delete login "${loginLabel(item.login)}"?`,
         { modal: true },
         'Delete',
       );
       if (confirmed === 'Delete') {
-        await storage.deleteLogin(item.login.label);
+        await storage.deleteLogin(loginLabel(item.login));
         treeProvider.refresh();
       }
     }),
 
-    vscode.commands.registerCommand('gemstone.duplicateLogin', async (item: GemStoneLoginItem) => {
-      const copy = { ...item.login, label: `${item.login.label} (copy)` };
-      await storage.saveLogin(copy);
-      treeProvider.refresh();
+    vscode.commands.registerCommand('gemstone.duplicateLogin', (item: GemStoneLoginItem) => {
+      const copy = { ...item.login, label: '' };
+      LoginEditorPanel.show(storage, treeProvider, copy);
     }),
 
     vscode.commands.registerCommand('gemstone.login', async (item: GemStoneLoginItem) => {
@@ -1037,7 +1037,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (!node || node.kind !== 'database') return;
       const db = node.db;
       const login = {
-        label: `${db.config.stoneName} (local)`,
+        label: '',
         version: db.config.version,
         gem_host: 'localhost',
         stone: db.config.stoneName,
@@ -1046,7 +1046,6 @@ export function activate(context: vscode.ExtensionContext) {
         netldi: db.config.ldiName,
         host_user: '',
         host_password: '',
-        exportPath: '',
       };
       // Auto-detect GCI library path
       // On Windows, the sysadmin install is Linux (in WSL) and only has .so files.

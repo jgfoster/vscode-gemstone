@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { GemStoneLogin } from './loginTypes';
+import { GemStoneLogin, loginLabel } from './loginTypes';
 
 export class LoginStorage {
   getLogins(): GemStoneLogin[] {
@@ -10,8 +10,8 @@ export class LoginStorage {
   async saveLogin(login: GemStoneLogin, originalLabel?: string): Promise<void> {
     const config = vscode.workspace.getConfiguration('gemstone');
     const logins = [...this.getLogins()];
-    const matchLabel = originalLabel ?? login.label;
-    const index = logins.findIndex((l) => l.label === matchLabel);
+    const matchLabel = originalLabel ?? loginLabel(login);
+    const index = logins.findIndex((l) => loginLabel(l) === matchLabel);
 
     if (index >= 0) {
       logins[index] = login;
@@ -24,7 +24,7 @@ export class LoginStorage {
 
   async deleteLogin(label: string): Promise<void> {
     const config = vscode.workspace.getConfiguration('gemstone');
-    const logins = this.getLogins().filter((l) => l.label !== label);
+    const logins = this.getLogins().filter((l) => loginLabel(l) !== label);
     await config.update('logins', logins, vscode.ConfigurationTarget.Global);
   }
 

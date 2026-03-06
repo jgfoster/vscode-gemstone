@@ -57,46 +57,45 @@ describe('LoginTreeProvider', () => {
 });
 
 describe('GemStoneLoginItem', () => {
-  it('sets label from login', () => {
-    const item = new GemStoneLoginItem(makeLogin({ label: 'My Server' }));
-    expect(item.label).toBe('My Server');
+  it('sets label from login fields', () => {
+    const item = new GemStoneLoginItem(makeLogin({ gs_user: 'Admin', stone: 'prod', gem_host: 'db.example.com' }));
+    expect(item.label).toBe('Admin on prod (db.example.com)');
   });
 
-  it('shows gs_user@gem_host as description', () => {
+  it('shows version as description', () => {
     const item = new GemStoneLoginItem(
-      makeLogin({ label: 'Dev', gs_user: 'Admin', gem_host: 'db.example.com' }),
+      makeLogin({ gs_user: 'Admin', gem_host: 'db.example.com', version: '3.7.2' }),
     );
-    expect(item.description).toBe('Admin@db.example.com');
+    expect(item.description).toBe('3.7.2');
   });
 
-  it('shows tooltip with user, host, stone, and version', () => {
+  it('shows tooltip with generated label and version', () => {
     const item = new GemStoneLoginItem(
       makeLogin({
-        label: 'Dev',
         gs_user: 'Admin',
         gem_host: 'db.example.com',
         stone: 'mystone',
         version: '3.7.2',
       }),
     );
-    expect(item.tooltip).toBe('Admin@db.example.com:mystone (3.7.2)');
+    expect(item.tooltip).toBe('Admin on mystone (db.example.com) (3.7.2)');
   });
 
   it('handles empty fields gracefully', () => {
     const item = new GemStoneLoginItem(
-      makeLogin({ label: 'Empty', gs_user: '', gem_host: '', stone: '', version: '' }),
+      makeLogin({ gs_user: '', gem_host: '', stone: '', version: '' }),
     );
-    expect(item.description).toBe('@');
-    expect(item.tooltip).toBe('@: ()');
+    expect(item.description).toBe('');
+    expect(item.tooltip).toBe(' on  () ()');
   });
 
   it('sets contextValue for menu filtering', () => {
-    const item = new GemStoneLoginItem(makeLogin({ label: 'Test' }));
+    const item = new GemStoneLoginItem(makeLogin());
     expect(item.contextValue).toBe('gemstoneLogin');
   });
 
   it('sets command to edit the login', () => {
-    const item = new GemStoneLoginItem(makeLogin({ label: 'Test' }));
+    const item = new GemStoneLoginItem(makeLogin());
     expect(item.command).toEqual({
       command: 'gemstone.editLogin',
       title: 'Edit Login',
@@ -105,7 +104,7 @@ describe('GemStoneLoginItem', () => {
   });
 
   it('stores the login data on the item', () => {
-    const login = makeLogin({ label: 'Data', stone: 'custom' });
+    const login = makeLogin({ stone: 'custom' });
     const item = new GemStoneLoginItem(login);
     expect(item.login).toEqual(login);
   });

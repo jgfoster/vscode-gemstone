@@ -1,12 +1,13 @@
 import * as vscode from 'vscode';
 import { ActiveSession, SessionManager } from './sessionManager';
+import { loginLabel } from './loginTypes';
 
 export class GemStoneSessionItem extends vscode.TreeItem {
   constructor(public readonly activeSession: ActiveSession, isSelected: boolean) {
-    super(activeSession.login.label, vscode.TreeItemCollapsibleState.None);
-    const { id, login, stoneVersion } = activeSession;
-    this.description = `${id}: ${login.gs_user} in ${login.stone} (${stoneVersion}) on ${login.gem_host}`;
-    this.tooltip = `${id}: ${login.gs_user} in ${login.stone} (${stoneVersion}) on ${login.gem_host}`;
+    super(loginLabel(activeSession.login), vscode.TreeItemCollapsibleState.None);
+    const { id, stoneVersion } = activeSession;
+    this.description = `Session ${id} (${stoneVersion})`;
+    this.tooltip = `Session ${id}: ${loginLabel(activeSession.login)} (${stoneVersion})`;
     this.iconPath = new vscode.ThemeIcon(isSelected ? 'debug-start' : 'plug');
     this.contextValue = 'gemstoneSession';
   }

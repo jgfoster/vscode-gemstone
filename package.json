@@ -6,13 +6,13 @@
   "publisher": "gemtalksystems",
   "license": "MIT",
   "author": "James Foster",
-  "homepage": "https://github.com/jgfoster/vscode-gemstone#readme",
+  "homepage": "https://github.com/jgfoster/Jasper#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jgfoster/vscode-gemstone"
+    "url": "https://github.com/jgfoster/Jasper"
   },
   "bugs": {
-    "url": "https://github.com/jgfoster/vscode-gemstone/issues"
+    "url": "https://github.com/jgfoster/Jasper/issues"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -107,7 +107,7 @@
           "gemstone.exportPath": {
             "type": "string",
             "default": "",
-            "description": "Root path for exported class files. May be absolute, relative to the workspace root, or use {workspaceRoot} as a variable. Defaults to {workspaceRoot}/gemstone/"
+            "description": "Root path for exported class files. Variables: {workspaceRoot}, {session}, {host}, {stone}, {user}, {index}, {dictName}. Defaults to {workspaceRoot}/gemstone/{session}/{index}-{dictName}"
           },
           "gemstone.userManagedDictionaries": {
             "type": "array",
@@ -126,14 +126,7 @@
             "description": "GemStone/S 64 Bit login parameters",
             "items": {
               "type": "object",
-              "required": [
-                "label"
-              ],
               "properties": {
-                "label": {
-                  "type": "string",
-                  "description": "Display name for this login"
-                },
                 "version": {
                   "type": "string",
                   "description": "GemStone version (e.g. 3.7.2)"
@@ -165,10 +158,6 @@
                 "host_password": {
                   "type": "string",
                   "description": "Host OS password"
-                },
-                "exportPath": {
-                  "type": "string",
-                  "description": "Export path template for dictionaries. Variables: {workspaceRoot}, {host}, {stone}, {user}, {index}, {dictName}. Default: {workspaceRoot}/gemstone/{host}/{stone}/{user}/{index}-{dictName}"
                 }
               }
             }
@@ -176,7 +165,7 @@
         }
       },
       {
-        "title": "GemStone Smalltalk Formatter",
+        "title": "Smalltalk Formatter",
         "properties": {
           "gemstoneSmalltalk.formatter.spacesInsideParens": {
             "type": "boolean",

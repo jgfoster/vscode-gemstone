@@ -37,7 +37,6 @@ function createMockSession(): ActiveSession {
       netldi: 'gs64ldi',
       host_user: '',
       host_password: '',
-      exportPath: '',
     },
     stoneVersion: '3.7.2',
   };

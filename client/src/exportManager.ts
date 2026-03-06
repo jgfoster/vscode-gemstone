@@ -8,10 +8,10 @@ import * as queries from './browserQueries';
  * Manages exporting GemStone classes to local .gs files in Topaz file-out format.
  *
  * Default file structure:
- *   {workspaceRoot}/gemstone/{host}/{stone}/{user}/{index}-{dictName}/{ClassName}.gs
+ *   {workspaceRoot}/gemstone/{session}/{index}-{dictName}/{ClassName}.gs
  *
- * Each login may specify a custom `exportPath` template with variables:
- *   {workspaceRoot}, {host}, {stone}, {user}, {index}, {dictName}
+ * The `gemstone.exportPath` setting supports variables:
+ *   {workspaceRoot}, {session}, {host}, {stone}, {user}, {index}, {dictName}
  * e.g. {workspaceRoot}/smalltalk/{dictName}
  */
 export class ExportManager {
@@ -33,41 +33,22 @@ export class ExportManager {
   }
 
   /**
-   * Root directory for exports. Uses the `gemstone.exportPath` setting if set,
-   * otherwise defaults to {firstWorkspaceFolder}/gemstone.
-   */
-  getExportRoot(): string | undefined {
-    const config = vscode.workspace.getConfiguration('gemstone');
-    const custom = config.get<string>('exportPath', '').trim();
-    const folders = vscode.workspace.workspaceFolders;
-
-    if (custom) {
-      const wsRoot = folders?.[0]?.uri.fsPath;
-      // Support {workspaceRoot} variable substitution
-      const resolved = wsRoot ? custom.replace(/\{workspaceRoot}/g, wsRoot) : custom;
-      if (path.isAbsolute(resolved)) return resolved;
-      // Resolve relative paths against the first workspace folder
-      if (!wsRoot) return undefined;
-      return path.resolve(wsRoot, resolved);
-    }
-
-    if (!folders || folders.length === 0) return undefined;
-    return path.join(folders[0].uri.fsPath, 'gemstone');
-  }
-
-  /**
    * Resolved export path template for a session.
-   * Per-login `exportPath` takes precedence over the global setting.
+   * Uses the `gemstone.exportPath` setting with variable substitution.
    * Session-level variables are resolved; {index} and {dictName} remain as placeholders.
    */
   getResolvedTemplate(session: ActiveSession): string | undefined {
-    const { gem_host, stone, gs_user, exportPath: loginTemplate } = session.login;
+    const config = vscode.workspace.getConfiguration('gemstone');
+    const custom = config.get<string>('exportPath', '').trim();
+    const folders = vscode.workspace.workspaceFolders;
+    const wsRoot = folders?.[0]?.uri.fsPath;
+    const { gem_host, stone, gs_user } = session.login;
+    const sessionId = String(session.id);
 
-    if (loginTemplate?.trim()) {
-      const folders = vscode.workspace.workspaceFolders;
-      const wsRoot = folders?.[0]?.uri.fsPath;
-      let resolved = loginTemplate.trim()
+    if (custom) {
+      let resolved = custom
         .replace(/\{workspaceRoot}/g, wsRoot ?? '')
+        .replace(/\{session}/g, sessionId)
         .replace(/\{host}/g, gem_host)
         .replace(/\{stone}/g, stone)
         .replace(/\{user}/g, gs_user);
@@ -80,10 +61,9 @@ export class ExportManager {
       return resolved;
     }
 
-    // Default: global export root + standard session/dict structure
-    const root = this.getExportRoot();
-    if (!root) return undefined;
-    return path.join(root, gem_host, stone, gs_user, '{index}-{dictName}');
+    // Default: {workspaceRoot}/gemstone/{session}/{index}-{dictName}
+    if (!wsRoot) return undefined;
+    return path.join(wsRoot, 'gemstone', sessionId, '{index}-{dictName}');
   }
 
   /**

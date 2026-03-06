@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
-import { GemStoneLogin, DEFAULT_LOGIN } from './loginTypes';
+import { GemStoneLogin, DEFAULT_LOGIN, loginLabel } from './loginTypes';
 import { LoginStorage } from './loginStorage';
 import { LoginTreeProvider } from './loginTreeProvider';
 
@@ -24,7 +24,7 @@ export class LoginEditorPanel {
 
     const panel = vscode.window.createWebviewPanel(
       'gemstoneLoginEditor',
-      existingLogin ? `Edit: ${existingLogin.label}` : 'New GemStone Login',
+      existingLogin ? `Edit: ${loginLabel(existingLogin)}` : 'New GemStone Login',
       column,
       {
         enableScripts: true,
@@ -69,10 +69,7 @@ export class LoginEditorPanel {
   }
 
   private async handleSave(data: GemStoneLogin, originalLabel?: string): Promise<void> {
-    if (!data.label.trim()) {
-      vscode.window.showErrorMessage('Login label is required.');
-      return;
-    }
+    data.label = loginLabel(data);
     await this.storage.saveLogin(data, originalLabel);
     this.treeProvider.refresh();
     this.login = data;
@@ -172,11 +169,6 @@ export class LoginEditorPanel {
   <h2>GemStone Login Parameters</h2>
 
   <div class="field-group">
-    <label for="label">Label *</label>
-    <input type="text" id="label" placeholder="My GemStone Server">
-  </div>
-
-  <div class="field-group">
     <label for="version">GemStone Version</label>
     <input type="text" id="version" placeholder="3.7.2">
 
@@ -206,14 +198,6 @@ export class LoginEditorPanel {
     <input type="password" id="host_password">
   </div>
 
-  <div class="field-group">
-    <label for="exportPath">Export Path</label>
-    <input type="text" id="exportPath" placeholder="{workspaceRoot}/gemstone/{host}/{stone}/{user}/{index}-{dictName}">
-    <div style="margin-top: 4px; font-size: 0.9em; color: var(--vscode-descriptionForeground);">
-      Variables: <code>{workspaceRoot}</code> <code>{host}</code> <code>{stone}</code> <code>{user}</code> <code>{index}</code> <code>{dictName}</code>
-    </div>
-  </div>
-
   <div class="button-row">
     <button id="saveBtn">Save</button>
     <button id="cancelBtn" class="secondary">Cancel</button>
@@ -221,7 +205,7 @@ export class LoginEditorPanel {
 
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
-    const fields = ['label','version','gem_host','stone','gs_user','gs_password','netldi','host_user','host_password','exportPath'];
+    const fields = ['version','gem_host','stone','gs_user','gs_password','netldi','host_user','host_password'];
     let originalLabel = null;
 
     vscode.postMessage({ command: 'requestData' });

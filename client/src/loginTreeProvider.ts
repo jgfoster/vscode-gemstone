@@ -1,12 +1,12 @@
 import * as vscode from 'vscode';
-import { GemStoneLogin } from './loginTypes';
+import { GemStoneLogin, loginLabel } from './loginTypes';
 import { LoginStorage } from './loginStorage';
 
 export class GemStoneLoginItem extends vscode.TreeItem {
   constructor(public readonly login: GemStoneLogin) {
-    super(login.label, vscode.TreeItemCollapsibleState.None);
-    this.description = `${login.gs_user || ''}@${login.gem_host || ''}`;
-    this.tooltip = `${login.gs_user || ''}@${login.gem_host || ''}:${login.stone || ''} (${login.version || ''})`;
+    super(loginLabel(login), vscode.TreeItemCollapsibleState.None);
+    this.description = login.version || '';
+    this.tooltip = `${loginLabel(login)} (${login.version || ''})`;
     this.iconPath = new vscode.ThemeIcon('server');
     this.contextValue = 'gemstoneLogin';
     this.command = {

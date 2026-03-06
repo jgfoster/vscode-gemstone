@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { GciLibrary, GciError } from './gciLibrary';
-import { GemStoneLogin } from './loginTypes';
+import { GemStoneLogin, loginLabel } from './loginTypes';
 import { logInfo } from './gciLog';
 
 export interface ActiveSession {
@@ -58,8 +58,8 @@ export class SessionManager {
     }
 
     const items = sessions.map(s => ({
-      label: s.login.label,
-      description: `${s.id}: ${s.login.gs_user} in ${s.login.stone} on ${s.login.gem_host}`,
+      label: loginLabel(s.login),
+      description: `Session ${s.id}`,
       session: s,
     }));
     const pick = await vscode.window.showQuickPick(items, {
@@ -80,6 +80,16 @@ export class SessionManager {
   }
 
   login(login: GemStoneLogin, libraryPath: string): ActiveSession {
+    // The default export path includes {session}, so multiple sessions are safe.
+    // A custom exportPath without {session} risks file conflicts between sessions.
+    const customPath = vscode.workspace.getConfiguration('gemstone').get<string>('exportPath', '').trim();
+    if (this.sessions.size > 0 && customPath && !customPath.includes('{session}')) {
+      throw new Error(
+        'Only one session is allowed at a time when the export path does not include {session}. ' +
+        'Log out of the current session before logging in again, or add {session} to your export path.',
+      );
+    }
+
     const gci = this.getGciLibrary(libraryPath);
 
     const stoneNrs = `!tcp@${login.gem_host}#server!${login.stone}`;

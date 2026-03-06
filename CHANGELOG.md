@@ -4,6 +4,24 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+### Added
+
+- **Windows support (WSL)** — system administration features (versions, databases, processes) now work on Windows by bridging commands through WSL2; auto-detects WSL availability and shows setup guidance when not installed
+- **WSL bridge module** — path conversion between Windows UNC and WSL Linux paths, command spawning and synchronous execution routed through `wsl.exe`
+- **Read-only Globals** — exported `.gs` files in the `Globals` dictionary are marked read-only (file permissions + VS Code read-only mode) for non-`SystemUser` sessions; `gemstone://` virtual files also report `FilePermission.Readonly`
+
+### Changed
+
+- Renamed extension to "Jasper: A GemStone Smalltalk IDE"
+- **Auto-generated login labels** — login labels are now derived from `{user} on {stone} ({host})` instead of being manually entered; removed the label text field from the login editor
+- **Simplified export paths** — removed per-login `exportPath` field; export path is now controlled solely by the global `gemstone.exportPath` setting with a new `{session}` variable; default changed from `{workspaceRoot}/gemstone/{host}/{stone}/{user}/...` to `{workspaceRoot}/gemstone/{session}/...`
+- **Duplicate login** now opens the login editor (pre-filled) instead of silently creating a copy
+- **Multi-session safety** — prevents multiple simultaneous logins when custom `exportPath` does not include `{session}`, avoiding file conflicts
+- Reordered inline buttons: logins show delete/duplicate/login (left-to-right); sessions show logout/abort/commit
+- Added icons to SysAdmin tree views (Configure OS, Versions, Databases, Processes)
+- Updated repository URLs from `vscode-gemstone` to `Jasper`
+- Renamed "GemStone Smalltalk Formatter" settings section to "Smalltalk Formatter"
+
 ## [1.1.1] - 2026-03-02
 
 ### Fixed
