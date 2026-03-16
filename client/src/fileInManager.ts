@@ -50,29 +50,20 @@ initialize
 }
 
 /**
- * Manages compiling .gs files back into GemStone on save.
+ * Manages file events for exported GemStone .gs files.
  *
- * Listens for `onDidSaveTextDocument` on `.gs` files under the export root,
- * parses the Topaz file-out format, and compiles each class definition and
- * method back into GemStone. Errors are shown in the Problems panel.
+ * Handles new class creation (file-in template) and class/dictionary deletion.
+ * Method editing is handled via the GemStoneFileSystemProvider (gemstone:// scheme).
  */
 export class FileInManager {
-  private diagnostics: vscode.DiagnosticCollection;
   private disposables: vscode.Disposable[] = [];
 
   constructor(
     private sessionManager: SessionManager,
     private exportManager: ExportManager,
-  ) {
-    this.diagnostics = vscode.languages.createDiagnosticCollection('gemstone-filein');
-  }
+  ) {}
 
   register(context: vscode.ExtensionContext): void {
-    const saveSub = vscode.workspace.onDidSaveTextDocument((doc) => {
-      if (this.shouldHandle(doc)) {
-        this.handleSave(doc);
-      }
-    });
     const createSub = vscode.workspace.onDidCreateFiles((e) => {
       for (const file of e.files) {
         this.handleFileCreate(file);
@@ -83,15 +74,8 @@ export class FileInManager {
         this.handleFileDelete(file);
       }
     });
-    this.disposables.push(saveSub, createSub, deleteSub);
-    context.subscriptions.push(saveSub, createSub, deleteSub, this.diagnostics);
-  }
-
-  private shouldHandle(document: vscode.TextDocument): boolean {
-    if (document.uri.scheme !== 'file') return false;
-    if (!document.uri.fsPath.endsWith('.gs')) return false;
-    if (this.exportManager.isWriting) return false;
-    return this.resolveSessionFromPath(document.uri.fsPath) !== undefined;
+    this.disposables.push(createSub, deleteSub);
+    context.subscriptions.push(createSub, deleteSub);
   }
 
   private handleFileCreate(uri: vscode.Uri): void {
@@ -198,51 +182,6 @@ export class FileInManager {
     return idx > 0 ? idx : undefined;
   }
 
-  private handleSave(document: vscode.TextDocument): void {
-    const session = this.resolveSessionFromPath(document.uri.fsPath);
-    if (!session) return;
-
-    // Skip file-in if the language server has reported syntax errors
-    const langDiags = vscode.languages.getDiagnostics(document.uri);
-    const syntaxErrors = langDiags.filter(
-      (d) => d.source === 'gemstone-smalltalk' && d.severity === vscode.DiagnosticSeverity.Error,
-    );
-    if (syntaxErrors.length > 0) {
-      this.diagnostics.delete(document.uri);
-      return;
-    }
-
-    const result = fileInClass(session, document.getText());
-
-    if (result.success) {
-      this.diagnostics.delete(document.uri);
-      const parts: string[] = [];
-      if (result.compiledClassDef) parts.push('class definition');
-      if (result.compiledMethods > 0) parts.push(`${result.compiledMethods} method(s)`);
-      vscode.window.showInformationMessage(
-        `Filed in ${parts.join(' + ')} for ${path.basename(document.uri.fsPath, '.gs')}.`,
-      );
-    } else {
-      const diags = result.errors.map((err) => {
-        const range = new vscode.Range(
-          new vscode.Position(err.line, 0),
-          new vscode.Position(err.line, Number.MAX_SAFE_INTEGER),
-        );
-        const diag = new vscode.Diagnostic(range, err.message, vscode.DiagnosticSeverity.Error);
-        diag.source = 'GemStone';
-        return diag;
-      });
-      this.diagnostics.set(document.uri, diags);
-
-      const errorCount = result.errors.length;
-      const compiled = result.compiledMethods + (result.compiledClassDef ? 1 : 0);
-      const msg = compiled > 0
-        ? `File-in: ${errorCount} error(s), ${compiled} item(s) compiled. See Problems panel.`
-        : `File-in failed with ${errorCount} error(s). See Problems panel.`;
-      vscode.window.showErrorMessage(msg);
-    }
-  }
-
   /**
    * Map a .gs file path back to the active session whose export area contains it.
    */
@@ -256,23 +195,27 @@ export class FileInManager {
   }
 
   /**
-   * Check if any open .gs files under a session's export root have unsaved changes.
+   * Check if any open .gs files or gemstone:// method editors for this session
+   * have unsaved changes (to warn before commit/abort).
    */
   hasUnsavedChanges(session: ActiveSession): boolean {
     const sessionRoot = this.exportManager.getSessionRoot(session);
-    if (!sessionRoot) return false;
 
-    return vscode.workspace.textDocuments.some(
-      (doc) =>
-        doc.isDirty &&
-        doc.uri.scheme === 'file' &&
-        doc.uri.fsPath.endsWith('.gs') &&
-        doc.uri.fsPath.startsWith(sessionRoot),
-    );
+    return vscode.workspace.textDocuments.some((doc) => {
+      if (!doc.isDirty) return false;
+      // gemstone:// method editor for this session
+      if (doc.uri.scheme === 'gemstone' && parseInt(doc.uri.authority, 10) === session.id) {
+        return true;
+      }
+      // .gs file under session root (read-only but could be dirty if user bypassed)
+      if (sessionRoot && doc.uri.scheme === 'file' && doc.uri.fsPath.startsWith(sessionRoot)) {
+        return true;
+      }
+      return false;
+    });
   }
 
   dispose(): void {
     for (const d of this.disposables) d.dispose();
-    this.diagnostics.dispose();
   }
 }

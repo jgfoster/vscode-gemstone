@@ -193,6 +193,50 @@ describe('browserQueries', () => {
     });
   });
 
+  describe('getGlobalsForDictionary', () => {
+    it('parses tab-separated globals results', () => {
+      const payload = '_remoteNil\tUndefinedObject\tremoteNil\nAllUsers\tUserProfileSet\tanUserProfileSet(...)\n';
+      const session = createMockSession(payload);
+
+      const results = queries.getGlobalsForDictionary(session, 1);
+
+      expect(results).toHaveLength(2);
+      expect(results[0]).toEqual({ name: '_remoteNil', className: 'UndefinedObject', value: 'remoteNil' });
+      expect(results[1]).toEqual({ name: 'AllUsers', className: 'UserProfileSet', value: 'anUserProfileSet(...)' });
+    });
+
+    it('returns empty array for empty result', () => {
+      const session = createMockSession('');
+      expect(queries.getGlobalsForDictionary(session, 1)).toEqual([]);
+    });
+
+    it('skips lines without two tabs', () => {
+      const payload = 'noTabs\noneTab\tonly\n_remoteNil\tUndefinedObject\tremoteNil\n';
+      const session = createMockSession(payload);
+
+      const results = queries.getGlobalsForDictionary(session, 1);
+      expect(results).toHaveLength(1);
+      expect(results[0].name).toBe('_remoteNil');
+    });
+
+    it('preserves tabs within the value field', () => {
+      const payload = 'SomeGlobal\tArray\tvalue\twith\ttabs\n';
+      const session = createMockSession(payload);
+
+      const results = queries.getGlobalsForDictionary(session, 1);
+      expect(results[0].value).toBe('value\twith\ttabs');
+    });
+
+    it('embeds the dictIndex in the Smalltalk code', () => {
+      const session = createMockSession('');
+      queries.getGlobalsForDictionary(session, 3);
+
+      const mockExec = session.gci.GciTsExecuteFetchBytes as ReturnType<typeof vi.fn>;
+      const code = mockExec.mock.calls[0][1] as string;
+      expect(code).toContain('symbolList at: 3');
+    });
+  });
+
   describe('searchMethodSource', () => {
     it('parses tab-separated method results', () => {
       const payload = 'Globals\tString\t0\tsubarray\taccessing\n';

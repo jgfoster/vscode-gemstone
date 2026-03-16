@@ -149,6 +149,48 @@ ws contents`;
   return results;
 }
 
+export interface GlobalEntry {
+  name: string;
+  className: string;
+  value: string;
+}
+
+export function getGlobalsForDictionary(
+  session: ActiveSession, dictIndex: number,
+): GlobalEntry[] {
+  const code = `| ws dict |
+dict := System myUserProfile symbolList at: ${dictIndex}.
+ws := WriteStream on: Unicode7 new.
+dict keysAndValuesDo: [:k :v |
+  v isBehavior ifFalse: [
+    | ps |
+    ps := [v printString] on: Error do: [:e | '<error: ' , e messageText , '>'].
+    ps size > 120 ifTrue: [ps := (ps copyFrom: 1 to: 120) , '...'].
+    ws nextPutAll: k asString; tab;
+       nextPutAll: v class name; tab;
+       nextPutAll: ps; lf]].
+ws contents`;
+
+  const raw = executeFetchString(
+    session, `getGlobalsForDictionary(dictIndex: ${dictIndex})`, code,
+  );
+
+  const results: GlobalEntry[] = [];
+  for (const line of raw.split('\n')) {
+    if (!line) continue;
+    const firstTab = line.indexOf('\t');
+    if (firstTab < 0) continue;
+    const secondTab = line.indexOf('\t', firstTab + 1);
+    if (secondTab < 0) continue;
+    results.push({
+      name: line.substring(0, firstTab),
+      className: line.substring(firstTab + 1, secondTab),
+      value: line.substring(secondTab + 1),
+    });
+  }
+  return results;
+}
+
 export function getMethodCategories(
   session: ActiveSession, className: string, isMeta: boolean
 ): string[] {
@@ -260,6 +302,27 @@ export function getClassComment(
 ): string {
   const code = `${className} comment`;
   return executeFetchString(session, `getClassComment(${className})`, code);
+}
+
+export function getSuperclassDictName(
+  session: ActiveSession, dictIndex: number, className: string,
+): string {
+  const code = `| cls sc result |
+cls := (System myUserProfile symbolList at: ${dictIndex}) at: #'${escapeString(className)}'.
+sc := cls superclass.
+sc isNil ifTrue: [''].
+sc ifNotNil: [
+  result := ''.
+  System myUserProfile symbolList do: [:d |
+    (d includesKey: sc name asSymbol) ifTrue: [result := d name]].
+  result]`;
+  return executeFetchString(session, `getSuperclassDictName(${className})`, code).trim();
+}
+
+export function canClassBeWritten(session: ActiveSession, className: string): boolean {
+  const code = `${className} canBeWritten printString`;
+  const result = executeFetchString(session, `canBeWritten(${className})`, code);
+  return result.trim() === 'true';
 }
 
 export function setClassComment(

@@ -241,30 +241,25 @@ describe('ExportManager', () => {
     });
   });
 
-  describe('markReadOnly / markWritable', () => {
-    it('marks all .gs files as read-only', async () => {
+  describe('all files read-only after export', () => {
+    it('marks all .gs files as read-only after export', async () => {
       const session = createMockSession();
       await manager.exportSession(session);
-      manager.markReadOnly(session);
 
       const sessionRoot = manager.getSessionRoot(session)!;
       const filePath = path.join(sessionRoot, '1-UserGlobals', 'MyClass.gs');
       const stat = fs.statSync(filePath);
-      // Check that write bits are cleared (owner, group, other)
       expect(stat.mode & 0o222).toBe(0);
     });
 
-    it('marks all .gs files as writable', async () => {
+    it('marks Globals .gs files as read-only after export', async () => {
       const session = createMockSession();
       await manager.exportSession(session);
-      manager.markReadOnly(session);
-      manager.markWritable(session);
 
       const sessionRoot = manager.getSessionRoot(session)!;
-      const filePath = path.join(sessionRoot, '1-UserGlobals', 'MyClass.gs');
+      const filePath = path.join(sessionRoot, '2-Globals', 'Array.gs');
       const stat = fs.statSync(filePath);
-      // Check that owner write bit is set
-      expect(stat.mode & 0o200).not.toBe(0);
+      expect(stat.mode & 0o222).toBe(0);
     });
   });
 
@@ -340,10 +335,8 @@ describe('ExportManager', () => {
       expect(fs.readFileSync(path.join(managedDir, 'MyClass.gs'), 'utf-8')).toBe('user content');
     });
 
-    it('does not change permissions on user-managed directories', async () => {
+    it('does not change permissions on user-managed directories during export', async () => {
       const session = createMockSession();
-      await manager.exportSession(session);
-
       const sessionRoot = manager.getSessionRoot(session)!;
 
       // Pre-create a user-managed directory with a file
@@ -356,11 +349,10 @@ describe('ExportManager', () => {
       const mockVscode = vscode as unknown as { __setConfigValue: (key: string, value: unknown) => void };
       mockVscode.__setConfigValue('userManagedDictionaries', ['MyApp']);
 
-      // markReadOnly should skip managed directories
-      manager.markReadOnly(session);
+      await manager.exportSession(session);
 
       const stat = fs.statSync(filePath);
-      // Owner write bit should still be set
+      // Owner write bit should still be set (user-managed dir not touched)
       expect(stat.mode & 0o200).not.toBe(0);
     });
 
@@ -375,35 +367,25 @@ describe('ExportManager', () => {
     });
   });
 
-  describe('Globals read-only for non-SystemUser', () => {
-    it('marks Globals files as read-only after export for DataCurator', async () => {
-      const session = createMockSession({ gs_user: 'DataCurator' });
-      await manager.exportSession(session);
-
-      const sessionRoot = manager.getSessionRoot(session)!;
-      const globalsFile = path.join(sessionRoot, '2-Globals', 'Array.gs');
-      const stat = fs.statSync(globalsFile);
-      expect(stat.mode & 0o222).toBe(0); // no write bits
-    });
-
-    it('leaves UserGlobals files writable for DataCurator', async () => {
+  describe('all files read-only regardless of user', () => {
+    it('marks all files read-only for DataCurator', async () => {
       const session = createMockSession({ gs_user: 'DataCurator' });
       await manager.exportSession(session);
 
       const sessionRoot = manager.getSessionRoot(session)!;
       const userFile = path.join(sessionRoot, '1-UserGlobals', 'MyClass.gs');
-      const stat = fs.statSync(userFile);
-      expect(stat.mode & 0o200).not.toBe(0); // owner write bit set
+      const globalsFile = path.join(sessionRoot, '2-Globals', 'Array.gs');
+      expect(fs.statSync(userFile).mode & 0o222).toBe(0);
+      expect(fs.statSync(globalsFile).mode & 0o222).toBe(0);
     });
 
-    it('leaves Globals files writable for SystemUser', async () => {
+    it('marks all files read-only for SystemUser', async () => {
       const session = createMockSession({ gs_user: 'SystemUser' });
       await manager.exportSession(session);
 
       const sessionRoot = manager.getSessionRoot(session)!;
       const globalsFile = path.join(sessionRoot, '2-Globals', 'Array.gs');
-      const stat = fs.statSync(globalsFile);
-      expect(stat.mode & 0o200).not.toBe(0); // owner write bit set
+      expect(fs.statSync(globalsFile).mode & 0o222).toBe(0);
     });
   });
 
@@ -505,6 +487,67 @@ describe('ExportManager', () => {
 
       expect(fs.existsSync(managedDir)).toBe(true);
       expect(fs.readFileSync(path.join(managedDir, 'MyClass.gs'), 'utf-8')).toBe('user content');
+    });
+  });
+
+  describe('deleteSessionFiles', () => {
+    it('removes the session directory and its contents', async () => {
+      const session = createMockSession();
+      await manager.exportSession(session);
+
+      const sessionRoot = manager.getSessionRoot(session)!;
+      expect(fs.existsSync(sessionRoot)).toBe(true);
+
+      manager.deleteSessionFiles(session);
+
+      expect(fs.existsSync(sessionRoot)).toBe(false);
+    });
+
+    it('removes parent directory if empty after deletion', async () => {
+      const session = createMockSession();
+      await manager.exportSession(session);
+
+      const sessionRoot = manager.getSessionRoot(session)!;
+      const parent = path.dirname(sessionRoot);
+
+      manager.deleteSessionFiles(session);
+
+      expect(fs.existsSync(parent)).toBe(false);
+    });
+
+    it('preserves parent directory if other sessions exist', async () => {
+      const session1 = createMockSession();
+      session1.id = 1;
+      const session2 = createMockSession({ gem_host: 'host2' });
+      session2.id = 2;
+
+      await manager.exportSession(session1);
+      await manager.exportSession(session2);
+
+      const parent = path.dirname(manager.getSessionRoot(session1)!);
+
+      manager.deleteSessionFiles(session1);
+
+      expect(fs.existsSync(parent)).toBe(true);
+      expect(fs.existsSync(manager.getSessionRoot(session2)!)).toBe(true);
+    });
+
+    it('is a no-op when session root does not exist', () => {
+      const session = createMockSession();
+      // No export done — directory doesn't exist
+      expect(() => manager.deleteSessionFiles(session)).not.toThrow();
+    });
+
+    it('clears exported files tracking for the session', async () => {
+      const session = createMockSession();
+      await manager.exportSession(session);
+
+      manager.deleteSessionFiles(session);
+
+      // Re-export should work cleanly (no stale file tracking)
+      await manager.exportSession(session);
+      const sessionRoot = manager.getSessionRoot(session)!;
+      expect(fs.existsSync(path.join(sessionRoot, '1-UserGlobals', 'MyClass.gs'))).toBe(true);
     });
   });
 

@@ -2,16 +2,26 @@
 
 All notable changes to the **GemStone Smalltalk** extension will be documented in this file.
 
-## [Unreleased]
+## [1.2.0] - 2026-03-16
 
 ### Added
 
+- **Globals Browser** — selecting a dictionary in the System Browser opens a sortable "Globals" tab (below the browser) showing all non-class globals in that dictionary with Name, Class, and Value columns; double-clicking a row opens the global in the Inspector (or selects it if already present)
+- **Class Browser** — selecting a dictionary or class in the System Browser opens a "Class Definition" tab for creating, viewing, and editing class definitions; identity row (superclass dictionary, superclass, subclass name, in dictionary, category) across the top; variable lists (instance, class, class instance, pool dictionaries) side-by-side below; options grid with hint tooltips explaining each GemStone class option; new classes default superclass to `Globals >> Object`
 - **Windows support (WSL)** — system administration features (versions, databases, processes) now work on Windows by bridging commands through WSL2; auto-detects WSL availability and shows setup guidance when not installed
 - **WSL bridge module** — path conversion between Windows UNC and WSL Linux paths, command spawning and synchronous execution routed through `wsl.exe`
-- **Read-only Globals** — exported `.gs` files in the `Globals` dictionary are marked read-only (file permissions + VS Code read-only mode) for non-`SystemUser` sessions; `gemstone://` virtual files also report `FilePermission.Readonly`
+- **Browser-driven method editing** — clicking a method in the System Browser opens it in a dedicated editor tab (via `gemstone://` URI scheme) showing only that method's source; saving the tab compiles the method in GemStone via GCI; compile errors appear as VS Code diagnostics (red squiggles) without a modal popup
+- **Write-access check** — `gemstone://` editor tabs are marked read-only when the class cannot be written by the current user (`canBeWritten` is queried via GCI); new-class and new-method tabs are always writable
+- **Implementors/Senders navigate the Browser** — selecting a result from "Implementors of" or "Senders of" now navigates the System Browser's five columns to the chosen method in addition to opening the method editor tab; the browser panel is revealed without stealing focus from the editor
+- **Preview tabs for method editors** — method editor tabs open in VS Code preview mode (italic title) so navigating from method to method reuses the same tab; the tab becomes permanent once edited
 
 ### Changed
 
+- **Editor layout set by System Browser** — the top/bottom split layout is now applied by the System Browser when selecting a dictionary, ensuring panels appear in the correct order; previously set by the Globals Browser
+- **Removed `** GLOBALS **` category** — the System Browser's Class Categories column no longer shows a special `** GLOBALS **` entry; globals are now accessible via the dedicated Globals Browser tab
+- **All exported `.gs` files are read-only** — exported files are for search and navigation only; all editing happens through the System Browser's method editor tabs; file permissions are set to 0o444 after export regardless of dictionary or user
+- **`FileInManager` simplified** — removed save-interception machinery (`onWillSaveTextDocument`, content cache, differential compilation); file create/delete event handling is retained
+- **Commit/abort closes method editor tabs** — open `gemstone://` method editor tabs are closed when a session commits or aborts (stale after re-export); `hasUnsavedChanges` now also checks for dirty `gemstone://` docs so commit/abort warns correctly
 - Renamed extension to "Jasper: A GemStone Smalltalk IDE"
 - **Auto-generated login labels** — login labels are now derived from `{user} on {stone} ({host})` instead of being manually entered; removed the label text field from the login editor
 - **Simplified export paths** — removed per-login `exportPath` field; export path is now controlled solely by the global `gemstone.exportPath` setting with a new `{session}` variable; default changed from `{workspaceRoot}/gemstone/{host}/{stone}/{user}/...` to `{workspaceRoot}/gemstone/{session}/...`

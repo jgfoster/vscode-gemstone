@@ -168,14 +168,8 @@ export class ExportManager {
           this.writing = false;
         }
 
-        // 5. Mark Globals files read-only for non-SystemUser
-        if (session.login.gs_user !== 'SystemUser') {
-          for (const dict of plan) {
-            if (dictNames[dict.dictIndex - 1] === 'Globals') {
-              this.setPermissions(dict.dirPath, 0o444);
-            }
-          }
-        }
+        // 5. Mark all exported files read-only (files are for search/navigation only)
+        this.setPermissions(sessionRoot, 0o444, managed);
 
         // 6. Remove stale files (classes that no longer exist)
         const previousFiles = this.exportedFiles.get(session.id);
@@ -211,21 +205,29 @@ export class ExportManager {
   }
 
   /**
-   * Mark all exported files as read-only (on logout).
+   * Delete all exported files and the session directory on logout.
    */
-  markReadOnly(session: ActiveSession): void {
+  deleteSessionFiles(session: ActiveSession): void {
     const sessionRoot = this.getSessionRoot(session);
     if (!sessionRoot || !fs.existsSync(sessionRoot)) return;
-    this.setPermissions(sessionRoot, 0o444, this.getUserManagedDictionaries());
-  }
 
-  /**
-   * Mark all exported files as writable (before re-export).
-   */
-  markWritable(session: ActiveSession): void {
-    const sessionRoot = this.getSessionRoot(session);
-    if (!sessionRoot || !fs.existsSync(sessionRoot)) return;
-    this.setPermissions(sessionRoot, 0o644, this.getUserManagedDictionaries());
+    this.writing = true;
+    try {
+      fs.rmSync(sessionRoot, { recursive: true, force: true });
+    } finally {
+      this.writing = false;
+    }
+
+    this.exportedFiles.delete(session.id);
+
+    // Remove parent directory if empty (e.g., the 'gemstone' dir)
+    const parent = path.dirname(sessionRoot);
+    try {
+      const remaining = fs.readdirSync(parent);
+      if (remaining.length === 0) {
+        fs.rmdirSync(parent);
+      }
+    } catch { /* ignore */ }
   }
 
   /**

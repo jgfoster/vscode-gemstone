@@ -139,6 +139,26 @@ describe('InspectorTreeProvider', () => {
       provider.removeSessionItems(999);
       expect(listener).not.toHaveBeenCalled();
     });
+
+    it('findRootByLabel returns the matching root node', () => {
+      provider.addRoot(1, 100n, 'AllUsers');
+      provider.addRoot(1, 200n, 'SomeArray');
+
+      const found = provider.findRootByLabel('AllUsers');
+      expect(found).toBeDefined();
+      expect(found!.label).toBe('AllUsers');
+      expect(found!.oop).toBe(100n);
+    });
+
+    it('findRootByLabel returns undefined when no match exists', () => {
+      provider.addRoot(1, 100n, 'AllUsers');
+
+      expect(provider.findRootByLabel('NonExistent')).toBeUndefined();
+    });
+
+    it('findRootByLabel returns undefined when inspector is empty', () => {
+      expect(provider.findRootByLabel('AllUsers')).toBeUndefined();
+    });
   });
 
   describe('getTreeItem', () => {

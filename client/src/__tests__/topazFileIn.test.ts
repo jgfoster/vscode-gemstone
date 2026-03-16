@@ -9,7 +9,7 @@ vi.mock('vscode', () => ({
 import { ActiveSession } from '../sessionManager';
 import { GemStoneLogin } from '../loginTypes';
 import { BrowserQueryError } from '../browserQueries';
-import { parseTopazDocument, fileInClass } from '../topazFileIn';
+import { parseTopazDocument, fileInClass, parseFileStructure, fileInChangedRegions } from '../topazFileIn';
 import * as queries from '../browserQueries';
 
 vi.mock('../browserQueries', () => ({
@@ -20,6 +20,7 @@ vi.mock('../browserQueries', () => ({
   },
   compileClassDefinition: vi.fn(),
   compileMethod: vi.fn(() => 1000n),
+  deleteMethod: vi.fn(),
 }));
 
 function createMockSession(): ActiveSession {
@@ -349,7 +350,228 @@ name: aString
     expect(result.success).toBe(true);
     expect(result.compiledClassDef).toBe(true);
     expect(result.compiledMethods).toBe(3);
+    expect(result.deletedMethods).toBe(0);
     expect(queries.compileClassDefinition).toHaveBeenCalledTimes(1);
     expect(queries.compileMethod).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('parseFileStructure', () => {
+  it('parses class definition and methods with categories', () => {
+    const text = `run
+Object subclass: 'MyClass'
+  instVarNames: #(name)
+%
+category: 'accessing'
+method: MyClass
+name
+  ^ name
+%
+category: 'printing'
+method: MyClass
+printOn: aStream
+  aStream nextPutAll: name
+%`;
+    const parsed = parseFileStructure(text);
+    expect(parsed.classDef).toBeDefined();
+    expect(parsed.classDef!.text).toContain("subclass: 'MyClass'");
+    expect(parsed.methods).toHaveLength(2);
+    expect(parsed.methods[0].key.selector).toBe('name');
+    expect(parsed.methods[0].category).toBe('accessing');
+    expect(parsed.methods[1].key.selector).toBe('printOn: aStream');
+    expect(parsed.methods[1].category).toBe('printing');
+  });
+
+  it('distinguishes instance and class methods', () => {
+    const text = `classmethod: MyClass
+new
+  ^ super new
+%
+method: MyClass
+foo
+  ^ 42
+%`;
+    const parsed = parseFileStructure(text);
+    expect(parsed.methods).toHaveLength(2);
+    expect(parsed.methods[0].key.isMeta).toBe(true);
+    expect(parsed.methods[1].key.isMeta).toBe(false);
+  });
+});
+
+describe('fileInChangedRegions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (queries.compileClassDefinition as ReturnType<typeof vi.fn>).mockImplementation(() => {});
+    (queries.compileMethod as ReturnType<typeof vi.fn>).mockReturnValue(1000n);
+    (queries.deleteMethod as ReturnType<typeof vi.fn>).mockImplementation(() => {});
+  });
+
+  it('falls back to full fileInClass when oldContent is undefined', () => {
+    const text = `method: MyClass
+foo
+  ^ 42
+%`;
+    const session = createMockSession();
+    const result = fileInChangedRegions(session, undefined, text);
+
+    expect(result.success).toBe(true);
+    expect(result.compiledMethods).toBe(1);
+    expect(queries.compileMethod).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips compilation when nothing changed', () => {
+    const text = `category: 'accessing'
+method: MyClass
+name
+  ^ name
+%`;
+    const session = createMockSession();
+    const result = fileInChangedRegions(session, text, text);
+
+    expect(result.success).toBe(true);
+    expect(result.compiledMethods).toBe(0);
+    expect(result.compiledClassDef).toBe(false);
+    expect(queries.compileMethod).not.toHaveBeenCalled();
+  });
+
+  it('only compiles the changed method', () => {
+    const oldText = `category: 'accessing'
+method: MyClass
+name
+  ^ name
+%
+method: MyClass
+age
+  ^ age
+%`;
+    const newText = `category: 'accessing'
+method: MyClass
+name
+  ^ name asUppercase
+%
+method: MyClass
+age
+  ^ age
+%`;
+    const session = createMockSession();
+    const result = fileInChangedRegions(session, oldText, newText);
+
+    expect(result.success).toBe(true);
+    expect(result.compiledMethods).toBe(1);
+    expect(queries.compileMethod).toHaveBeenCalledTimes(1);
+    expect(queries.compileMethod).toHaveBeenCalledWith(
+      session, 'MyClass', false, 'accessing',
+      expect.stringContaining('asUppercase'), 0,
+    );
+  });
+
+  it('compiles method when category changes', () => {
+    const oldText = `category: 'accessing'
+method: MyClass
+name
+  ^ name
+%`;
+    const newText = `category: 'getters'
+method: MyClass
+name
+  ^ name
+%`;
+    const session = createMockSession();
+    const result = fileInChangedRegions(session, oldText, newText);
+
+    expect(result.success).toBe(true);
+    expect(result.compiledMethods).toBe(1);
+    expect(queries.compileMethod).toHaveBeenCalledWith(
+      session, 'MyClass', false, 'getters', expect.any(String), 0,
+    );
+  });
+
+  it('deletes methods removed from file when no errors', () => {
+    const oldText = `category: 'accessing'
+method: MyClass
+name
+  ^ name
+%
+method: MyClass
+age
+  ^ age
+%`;
+    const newText = `category: 'accessing'
+method: MyClass
+name
+  ^ name
+%`;
+    const session = createMockSession();
+    const result = fileInChangedRegions(session, oldText, newText);
+
+    expect(result.success).toBe(true);
+    expect(result.deletedMethods).toBe(1);
+    expect(queries.deleteMethod).toHaveBeenCalledWith(session, 'MyClass', false, 'age');
+  });
+
+  it('does not delete methods when there are compilation errors', () => {
+    (queries.compileMethod as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new BrowserQueryError('Syntax error', 1001);
+    });
+
+    const oldText = `category: 'accessing'
+method: MyClass
+name
+  ^ name
+%
+method: MyClass
+age
+  ^ age
+%`;
+    // Change 'name' method (will fail) and remove 'age' method
+    const newText = `category: 'accessing'
+method: MyClass
+name
+  ^ 1 +
+%`;
+    const session = createMockSession();
+    const result = fileInChangedRegions(session, oldText, newText);
+
+    expect(result.success).toBe(false);
+    expect(result.deletedMethods).toBe(0);
+    expect(queries.deleteMethod).not.toHaveBeenCalled();
+  });
+
+  it('compiles new class definition when changed', () => {
+    const oldText = `run
+Object subclass: 'MyClass'
+  instVarNames: #()
+%`;
+    const newText = `run
+Object subclass: 'MyClass'
+  instVarNames: #(name)
+%`;
+    const session = createMockSession();
+    const result = fileInChangedRegions(session, oldText, newText);
+
+    expect(result.success).toBe(true);
+    expect(result.compiledClassDef).toBe(true);
+    expect(queries.compileClassDefinition).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips class definition when unchanged', () => {
+    const classDef = `run
+Object subclass: 'MyClass'
+  instVarNames: #()
+%`;
+    const oldText = `${classDef}
+method: MyClass
+foo
+  ^ 1
+%`;
+    const newText = `${classDef}
+method: MyClass
+foo
+  ^ 2
+%`;
+    const session = createMockSession();
+    fileInChangedRegions(session, oldText, newText);
+
+    expect(queries.compileClassDefinition).not.toHaveBeenCalled();
   });
 });

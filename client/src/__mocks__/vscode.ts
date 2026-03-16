@@ -193,13 +193,50 @@ export const window = {
 
 // ── Workspace mock ─────────────────────────────────────────
 
+export const TextDocumentSaveReason = {
+  Manual: 1,
+  AfterDelay: 2,
+  FocusOut: 3,
+};
+
+export class TextEdit {
+  constructor(public range: Range, public newText: string) {}
+  static replace(range: Range, newText: string): TextEdit {
+    return new TextEdit(range, newText);
+  }
+  static insert(position: Position, newText: string): TextEdit {
+    return new TextEdit(new Range(position, position), newText);
+  }
+  static delete(range: Range): TextEdit {
+    return new TextEdit(range, '');
+  }
+}
+
+export class WorkspaceEdit {
+  private edits: Array<{ uri: Uri; edit: TextEdit }> = [];
+  replace(uri: Uri, range: Range, newText: string): void {
+    this.edits.push({ uri, edit: new TextEdit(range, newText) });
+  }
+  insert(uri: Uri, position: Position, newText: string): void {
+    this.edits.push({ uri, edit: TextEdit.insert(position, newText) });
+  }
+  delete(uri: Uri, range: Range): void {
+    this.edits.push({ uri, edit: TextEdit.delete(range) });
+  }
+}
+
 export const workspace = {
   getConfiguration,
   onDidChangeConfiguration: vi.fn(() => ({ dispose: () => {} })),
   onDidSaveTextDocument: vi.fn(() => ({ dispose: () => {} })),
+  onWillSaveTextDocument: vi.fn(() => ({ dispose: () => {} })),
   onDidCreateFiles: vi.fn(() => ({ dispose: () => {} })),
   onDidDeleteFiles: vi.fn(() => ({ dispose: () => {} })),
+  onDidOpenTextDocument: vi.fn(() => ({ dispose: () => {} })),
   registerTextDocumentContentProvider: vi.fn(() => ({ dispose: () => {} })),
+  registerFileSystemProvider: vi.fn(() => ({ dispose: () => {} })),
+  openTextDocument: vi.fn(async (_uri: unknown) => ({ uri: _uri, getText: vi.fn(() => ''), isDirty: false })),
+  applyEdit: vi.fn(async () => true),
   textDocuments: [] as unknown[],
 };
 
@@ -384,6 +421,11 @@ function createMockDiagnosticCollection() {
       store.delete(uri.toString());
     }),
     get: vi.fn((uri: { toString(): string }) => store.get(uri.toString())),
+    forEach: vi.fn((callback: (uri: Uri, diagnostics: unknown[], collection: unknown) => void) => {
+      store.forEach((_diags, uriStr) => {
+        callback(Uri.parse(uriStr), _diags as unknown[], undefined);
+      });
+    }),
     clear: vi.fn(() => store.clear()),
     dispose: vi.fn(),
     __store: store,

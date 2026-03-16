@@ -15,6 +15,8 @@ import { SessionManager } from './sessionManager';
 import { SessionTreeProvider, GemStoneSessionItem } from './sessionTreeProvider';
 import { CodeExecutor } from './codeExecutor';
 import { SystemBrowser } from './systemBrowser';
+import { GlobalsBrowser } from './globalsBrowser';
+import { ClassBrowser } from './classBrowser';
 import { GemStoneFileSystemProvider } from './gemstoneFileSystemProvider';
 import { GemStoneDebugSession } from './gemstoneDebugSession';
 import { InspectorTreeProvider, InspectorNode } from './inspectorTreeProvider';
@@ -323,23 +325,28 @@ export function activate(context: vscode.ExtensionContext) {
     if (!picked) return;
 
     const r = picked.result;
-    const side = r.isMeta ? 'class' : 'instance';
-    const uri = vscode.Uri.parse(
-      `gemstone://${session.id}` +
-      `/${encodeURIComponent(r.dictName)}` +
-      `/${encodeURIComponent(r.className)}` +
-      `/${side}` +
-      `/${encodeURIComponent(r.category)}` +
-      `/${encodeURIComponent(r.selector)}`
-    );
-    vscode.commands.executeCommand('gemstone.openDocument', uri);
+    // If a System Browser is open for this session, navigate it to the selected
+    // method (updates all 5 columns) and open the method editor from there.
+    // Otherwise fall back to opening the document directly.
+    if (!SystemBrowser.navigateTo(session.id, r)) {
+      const side = r.isMeta ? 'class' : 'instance';
+      const uri = vscode.Uri.parse(
+        `gemstone://${session.id}` +
+        `/${encodeURIComponent(r.dictName)}` +
+        `/${encodeURIComponent(r.className)}` +
+        `/${side}` +
+        `/${encodeURIComponent(r.category)}` +
+        `/${encodeURIComponent(r.selector)}`
+      );
+      vscode.commands.executeCommand('gemstone.openDocument', uri);
+    }
   }
 
   // ── Commands ───────────────────────────────────────────
   context.subscriptions.push(
     vscode.commands.registerCommand('gemstone.openDocument', async (uri: vscode.Uri) => {
       const doc = await vscode.workspace.openTextDocument(uri);
-      await vscode.window.showTextDocument(doc, { preview: false });
+      await vscode.window.showTextDocument(doc, { preview: true });
     }),
 
     vscode.commands.registerCommand('gemstone.addLogin', () => {
@@ -458,6 +465,7 @@ export function activate(context: vscode.ExtensionContext) {
           vscode.window.showInformationMessage(
             `Session ${item.activeSession.id}: Commit succeeded.`
           );
+          gemstoneFs.closeTabsForSession(item.activeSession.id);
           await exportManager.refreshSession(item.activeSession);
           SystemBrowser.refresh(item.activeSession.id);
         } else {
@@ -486,6 +494,7 @@ export function activate(context: vscode.ExtensionContext) {
           vscode.window.showInformationMessage(
             `Session ${item.activeSession.id}: Abort succeeded.`
           );
+          gemstoneFs.closeTabsForSession(item.activeSession.id);
           await exportManager.refreshSession(item.activeSession);
           SystemBrowser.refresh(item.activeSession.id);
         } else {
@@ -507,10 +516,13 @@ export function activate(context: vscode.ExtensionContext) {
       SystemBrowser.show(session, exportManager);
     }),
 
-    vscode.commands.registerCommand('gemstone.sessionLogout', (item: GemStoneSessionItem) => {
+    vscode.commands.registerCommand('gemstone.sessionLogout', async (item: GemStoneSessionItem) => {
       const session = item.activeSession;
-      exportManager.markReadOnly(session);
+      gemstoneFs.closeTabsForSession(session.id);
+      exportManager.deleteSessionFiles(session);
       SystemBrowser.disposeForSession(session.id);
+      GlobalsBrowser.disposeForSession(session.id);
+      ClassBrowser.disposeForSession(session.id);
       sessionManager.logout(session.id);
       sessionTreeProvider.refresh();
       inspectorProvider.removeSessionItems(session.id);
@@ -570,6 +582,11 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('gemstone.inspectGlobal', async (args: { className: string }) => {
+      const existing = inspectorProvider.findRootByLabel(args.className);
+      if (existing) {
+        await inspectorView.reveal(existing, { select: true, focus: true });
+        return;
+      }
       await codeExecutor.inspectExpression(inspectorProvider, args.className, args.className);
     }),
 

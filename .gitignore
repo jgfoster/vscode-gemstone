@@ -6,3 +6,4 @@ out/
 .claude/
 .vscode/settings.json
 gemstone
+tsconfig.tsbuildinfo

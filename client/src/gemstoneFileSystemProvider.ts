@@ -106,6 +106,8 @@ export class GemStoneFileSystemProvider implements vscode.FileSystemProvider {
   private _onDidChangeFile = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
   readonly onDidChangeFile = this._onDidChangeFile.event;
 
+  private diagnostics = vscode.languages.createDiagnosticCollection('gemstone-method');
+
   constructor(private sessionManager: SessionManager) {}
 
   watch(): vscode.Disposable {
@@ -120,9 +122,16 @@ export class GemStoneFileSystemProvider implements vscode.FileSystemProvider {
       size: 0,
     };
     const parsed = parseUri(uri);
+    // New documents are always writable — no existing class to check
+    if (parsed.kind === 'new-class' || parsed.kind === 'new-method') return stat;
     const session = this.sessionManager.getSession(parsed.sessionId);
-    if (session && parsed.dictName === 'Globals' && session.login.gs_user !== 'SystemUser') {
-      stat.permissions = vscode.FilePermission.Readonly;
+    if (!session) return stat;
+    try {
+      if (!queries.canClassBeWritten(session, parsed.className)) {
+        stat.permissions = vscode.FilePermission.Readonly;
+      }
+    } catch {
+      // If the query fails (e.g., session busy), allow editing
     }
     return stat;
   }
@@ -219,16 +228,40 @@ export class GemStoneFileSystemProvider implements vscode.FileSystemProvider {
           break;
       }
 
-      this._onDidChangeFile.fire([{
-        type: vscode.FileChangeType.Changed,
-        uri,
-      }]);
+      this.diagnostics.delete(uri);
+      this._onDidChangeFile.fire([{ type: vscode.FileChangeType.Changed, uri }]);
     } catch (e: unknown) {
       if (e instanceof BrowserQueryError) {
-        vscode.window.showErrorMessage(`Error: ${e.message}`);
-        throw vscode.FileSystemError.NoPermissions(uri);
+        // Parse line number from GCI error message (e.g. "... (line 3, ...")
+        const lineMatch = e.message.match(/line\s+(\d+)/i);
+        const lineNum = lineMatch ? parseInt(lineMatch[1], 10) - 1 : 0;
+        const range = new vscode.Range(
+          new vscode.Position(Math.max(0, lineNum), 0),
+          new vscode.Position(Math.max(0, lineNum), Number.MAX_SAFE_INTEGER),
+        );
+        const diag = new vscode.Diagnostic(range, e.message, vscode.DiagnosticSeverity.Error);
+        diag.source = 'GemStone';
+        this.diagnostics.set(uri, [diag]);
+        // Do not rethrow — VS Code considers the save complete; old method still
+        // lives in GemStone. The user sees the red squiggle and can fix and re-save.
+        return;
       }
       throw e;
+    }
+  }
+
+  /**
+   * Close all open editor tabs for a given session (scheme: gemstone, authority: sessionId).
+   */
+  closeTabsForSession(sessionId: number): void {
+    const auth = String(sessionId);
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        const input = tab.input as { uri?: vscode.Uri } | undefined;
+        if (input?.uri?.scheme === 'gemstone' && input.uri.authority === auth) {
+          vscode.window.tabGroups.close(tab);
+        }
+      }
     }
   }
 

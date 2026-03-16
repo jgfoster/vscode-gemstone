@@ -160,6 +160,7 @@ export interface FileInResult {
   errors: FileInError[];
   compiledMethods: number;
   compiledClassDef: boolean;
+  deletedMethods: number;
 }
 
 /**
@@ -241,5 +242,167 @@ export function fileInClass(
     errors,
     compiledMethods,
     compiledClassDef,
+    deletedMethods: 0,
+  };
+}
+
+// ── Differential File-In ──────────────────────────────────
+
+interface MethodKey {
+  className: string;
+  isMeta: boolean;
+  selector: string;
+}
+
+interface ParsedMethod {
+  key: MethodKey;
+  text: string;
+  category: string;
+  region: TopazRegion;
+}
+
+export interface ParsedFile {
+  classDef?: { text: string; region: TopazRegion };
+  methods: ParsedMethod[];
+}
+
+function methodKeyString(key: MethodKey): string {
+  return `${key.className}${key.isMeta ? ' class' : ''}>>${key.selector}`;
+}
+
+/**
+ * Parse a Topaz file-out into structured class definition and methods,
+ * tracking the effective category for each method.
+ */
+export function parseFileStructure(content: string): ParsedFile {
+  const regions = parseTopazDocument(content);
+  const methods: ParsedMethod[] = [];
+  let classDef: ParsedFile['classDef'];
+  let currentCategory = 'as yet unclassified';
+
+  for (const region of regions) {
+    if (region.kind === 'topaz') {
+      for (const line of region.text.split('\n')) {
+        const catMatch = line.match(/^category:\s*'([^']*)'/i);
+        if (catMatch) currentCategory = catMatch[1];
+      }
+      continue;
+    }
+
+    if (region.kind === 'smalltalk-code' && region.text.includes('subclass:')) {
+      classDef = { text: region.text, region };
+      continue;
+    }
+
+    if (region.kind === 'smalltalk-method' && region.className) {
+      const isMeta = region.command === 'classmethod';
+      const selector = region.text.split('\n')[0]?.trim() || '';
+      methods.push({
+        key: { className: region.className, isMeta, selector },
+        text: region.text,
+        category: currentCategory,
+        region,
+      });
+    }
+  }
+
+  return { classDef, methods };
+}
+
+/**
+ * Parse old and new file content, compile only changed/new regions,
+ * and delete methods that were removed. Falls back to full `fileInClass`
+ * when no old content is available.
+ */
+export function fileInChangedRegions(
+  session: ActiveSession,
+  oldContent: string | undefined,
+  newContent: string,
+  environmentId: number = 0,
+): FileInResult {
+  if (oldContent === undefined) {
+    return fileInClass(session, newContent, environmentId);
+  }
+
+  const oldFile = parseFileStructure(oldContent);
+  const newFile = parseFileStructure(newContent);
+
+  const errors: FileInError[] = [];
+  let compiledMethods = 0;
+  let compiledClassDef = false;
+  let deletedMethods = 0;
+
+  // Compile class definition if changed
+  if (newFile.classDef) {
+    if (oldFile.classDef?.text !== newFile.classDef.text) {
+      try {
+        queries.compileClassDefinition(session, newFile.classDef.text);
+        compiledClassDef = true;
+      } catch (e: unknown) {
+        const msg = e instanceof BrowserQueryError ? e.message : String(e);
+        errors.push({ message: msg, line: newFile.classDef.region.startLine });
+      }
+    }
+  }
+
+  // Build map of old methods
+  const oldMethodMap = new Map<string, ParsedMethod>();
+  for (const m of oldFile.methods) {
+    oldMethodMap.set(methodKeyString(m.key), m);
+  }
+
+  // Compile changed or new methods
+  const newMethodKeys = new Set<string>();
+  for (const m of newFile.methods) {
+    const keyStr = methodKeyString(m.key);
+    newMethodKeys.add(keyStr);
+    const oldMethod = oldMethodMap.get(keyStr);
+
+    if (!oldMethod || oldMethod.text !== m.text || oldMethod.category !== m.category) {
+      try {
+        queries.compileMethod(
+          session, m.key.className, m.key.isMeta, m.category, m.text, environmentId,
+        );
+        compiledMethods++;
+      } catch (e: unknown) {
+        const msg = e instanceof BrowserQueryError ? e.message : String(e);
+        errors.push({
+          message: msg,
+          line: m.region.startLine,
+          className: m.key.className,
+          selector: m.key.selector,
+        });
+      }
+    }
+  }
+
+  // Delete methods removed from file (only if no compilation errors)
+  if (errors.length === 0) {
+    for (const [keyStr, oldMethod] of oldMethodMap) {
+      if (!newMethodKeys.has(keyStr)) {
+        try {
+          queries.deleteMethod(
+            session, oldMethod.key.className, oldMethod.key.isMeta, oldMethod.key.selector,
+          );
+          deletedMethods++;
+        } catch (e: unknown) {
+          const msg = e instanceof BrowserQueryError ? e.message : String(e);
+          errors.push({
+            message: msg,
+            line: 0,
+            className: oldMethod.key.className,
+            selector: oldMethod.key.selector,
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    success: errors.length === 0,
+    errors,
+    compiledMethods,
+    compiledClassDef,
+    deletedMethods,
   };
 }

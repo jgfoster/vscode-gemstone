@@ -27,6 +27,10 @@ export class InspectorTreeProvider implements vscode.TreeDataProvider<InspectorN
 
   constructor(private sessionManager: SessionManager) {}
 
+  findRootByLabel(label: string): InspectorNode | undefined {
+    return this.roots.find(r => r.label === label);
+  }
+
   addRoot(sessionId: number, oop: bigint, label: string): void {
     this.roots.push({ sessionId, oop, label, isRoot: true, kind: 'root' });
     this._onDidChangeTreeData.fire(undefined);

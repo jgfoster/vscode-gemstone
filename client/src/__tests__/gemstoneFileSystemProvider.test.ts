@@ -17,12 +17,14 @@ vi.mock('../browserQueries', () => ({
   compileMethod: vi.fn(() => 1n),
   compileClassDefinition: vi.fn(),
   setClassComment: vi.fn(),
+  canClassBeWritten: vi.fn(() => true),
 }));
 
-import { Uri, FileSystemError, FilePermission } from '../__mocks__/vscode';
+import { Uri, FileSystemError, FilePermission, window, languages } from '../__mocks__/vscode';
 import { GemStoneFileSystemProvider } from '../gemstoneFileSystemProvider';
 import { SessionManager } from '../sessionManager';
 import * as queries from '../browserQueries';
+import { BrowserQueryError } from '../browserQueries';
 
 function makeSession(id = 1, gs_user = 'DataCurator') {
   return { id, gci: {}, handle: {}, login: { label: 'Test', gs_user }, stoneVersion: '3.7.2' };
@@ -52,30 +54,58 @@ describe('GemStoneFileSystemProvider', () => {
       expect(stat.mtime).toBeGreaterThan(0);
     });
 
-    it('marks Globals read-only for non-SystemUser', () => {
+    it('calls canClassBeWritten for method URIs', () => {
+      provider.stat(Uri.parse('gemstone://1/Globals/Array/instance/accessing/at%3A'));
+      expect(queries.canClassBeWritten).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }), 'Array');
+    });
+
+    it('returns writable when canClassBeWritten returns true', () => {
+      vi.mocked(queries.canClassBeWritten).mockReturnValue(true);
+      const stat = provider.stat(Uri.parse('gemstone://1/Globals/Array/instance/accessing/at%3A'));
+      expect(stat.permissions).toBeUndefined();
+    });
+
+    it('returns read-only when canClassBeWritten returns false', () => {
+      vi.mocked(queries.canClassBeWritten).mockReturnValue(false);
       const stat = provider.stat(Uri.parse('gemstone://1/Globals/Array/instance/accessing/at%3A'));
       expect(stat.permissions).toBe(FilePermission.Readonly);
     });
 
-    it('marks Globals writable for SystemUser', () => {
-      const p = new GemStoneFileSystemProvider(makeSessionManager('SystemUser'));
-      const stat = p.stat(Uri.parse('gemstone://1/Globals/Array/instance/accessing/at%3A'));
-      expect(stat.permissions).toBeUndefined();
-    });
-
-    it('marks non-Globals dictionaries writable for all users', () => {
-      const stat = provider.stat(Uri.parse('gemstone://1/UserGlobals/MyClass/instance/accessing/foo'));
-      expect(stat.permissions).toBeUndefined();
-    });
-
-    it('marks Globals definitions read-only for non-SystemUser', () => {
+    it('returns read-only for class definitions when canClassBeWritten returns false', () => {
+      vi.mocked(queries.canClassBeWritten).mockReturnValue(false);
       const stat = provider.stat(Uri.parse('gemstone://1/Globals/Array/definition'));
       expect(stat.permissions).toBe(FilePermission.Readonly);
     });
 
-    it('marks Globals comments read-only for non-SystemUser', () => {
+    it('returns read-only for class comments when canClassBeWritten returns false', () => {
+      vi.mocked(queries.canClassBeWritten).mockReturnValue(false);
       const stat = provider.stat(Uri.parse('gemstone://1/Globals/Array/comment'));
       expect(stat.permissions).toBe(FilePermission.Readonly);
+    });
+
+    it('allows editing when canClassBeWritten throws (e.g., session busy)', () => {
+      vi.mocked(queries.canClassBeWritten).mockImplementation(() => { throw new BrowserQueryError('Session busy'); });
+      const stat = provider.stat(Uri.parse('gemstone://1/Globals/Array/instance/accessing/at%3A'));
+      expect(stat.permissions).toBeUndefined();
+    });
+
+    it('always returns writable for new-class URIs without calling canClassBeWritten', () => {
+      const stat = provider.stat(Uri.parse('gemstone://1/UserGlobals/new-class'));
+      expect(stat.permissions).toBeUndefined();
+      expect(queries.canClassBeWritten).not.toHaveBeenCalled();
+    });
+
+    it('always returns writable for new-method URIs without calling canClassBeWritten', () => {
+      const stat = provider.stat(Uri.parse('gemstone://1/Globals/Array/instance/accessing/new-method'));
+      expect(stat.permissions).toBeUndefined();
+      expect(queries.canClassBeWritten).not.toHaveBeenCalled();
+    });
+
+    it('returns writable when session is not found', () => {
+      const mgr = { getSessions: vi.fn(() => []), getSession: vi.fn(() => undefined) } as unknown as SessionManager;
+      const p = new GemStoneFileSystemProvider(mgr);
+      const stat = p.stat(Uri.parse('gemstone://99/Globals/Array/instance/accessing/at%3A'));
+      expect(stat.permissions).toBeUndefined();
     });
   });
 
@@ -205,6 +235,143 @@ describe('GemStoneFileSystemProvider', () => {
           expect.objectContaining({ type: 1, uri }),
         ]),
       );
+    });
+  });
+
+  describe('writeFile diagnostics', () => {
+    const encode = (s: string) => new TextEncoder().encode(s);
+
+    function getDiagCollection() {
+      // The provider creates the collection during field initialization (constructor),
+      // which runs after vi.clearAllMocks() in the outer beforeEach.
+      return vi.mocked(languages.createDiagnosticCollection).mock.results[0].value;
+    }
+
+    it('does not throw on BrowserQueryError — shows diagnostic instead', () => {
+      vi.mocked(queries.compileMethod).mockImplementationOnce(() => {
+        throw new BrowserQueryError('Syntax error near line 3, column 5', 100);
+      });
+      const uri = Uri.parse('gemstone://1/Globals/Array/instance/accessing/at%3A');
+      expect(() => {
+        provider.writeFile(uri, encode('bad code'), { create: false, overwrite: true });
+      }).not.toThrow();
+    });
+
+    it('sets a diagnostic on compile failure', () => {
+      vi.mocked(queries.compileMethod).mockImplementationOnce(() => {
+        throw new BrowserQueryError('Syntax error near line 3, column 5', 100);
+      });
+      const uri = Uri.parse('gemstone://1/Globals/Array/instance/accessing/at%3A');
+      provider.writeFile(uri, encode('bad code'), { create: false, overwrite: true });
+
+      const collection = getDiagCollection();
+      expect(collection.set).toHaveBeenCalledWith(
+        uri,
+        expect.arrayContaining([
+          expect.objectContaining({ message: 'Syntax error near line 3, column 5' }),
+        ]),
+      );
+    });
+
+    it('parses line number from error message for the diagnostic range', () => {
+      vi.mocked(queries.compileMethod).mockImplementationOnce(() => {
+        throw new BrowserQueryError('Error at line 5: unexpected token', 0);
+      });
+      const uri = Uri.parse('gemstone://1/Globals/Array/instance/accessing/at%3A');
+      provider.writeFile(uri, encode('bad code'), { create: false, overwrite: true });
+
+      const collection = getDiagCollection();
+      const [[, diags]] = (collection.set as ReturnType<typeof vi.fn>).mock.calls;
+      expect(diags[0].range.start.line).toBe(4); // line 5 → 0-indexed = 4
+    });
+
+    it('uses line 0 when no line number in the error message', () => {
+      vi.mocked(queries.compileMethod).mockImplementationOnce(() => {
+        throw new BrowserQueryError('Generic compile error', 0);
+      });
+      const uri = Uri.parse('gemstone://1/Globals/Array/instance/accessing/at%3A');
+      provider.writeFile(uri, encode('bad code'), { create: false, overwrite: true });
+
+      const collection = getDiagCollection();
+      const [[, diags]] = (collection.set as ReturnType<typeof vi.fn>).mock.calls;
+      expect(diags[0].range.start.line).toBe(0);
+    });
+
+    it('clears diagnostics on successful compile', () => {
+      const uri = Uri.parse('gemstone://1/Globals/Array/instance/accessing/at%3A');
+      provider.writeFile(uri, encode('at: index\n  ^self basicAt: index'), { create: false, overwrite: true });
+
+      const collection = getDiagCollection();
+      expect(collection.delete).toHaveBeenCalledWith(uri);
+      expect(collection.set).not.toHaveBeenCalled();
+    });
+
+    it('rethrows non-BrowserQueryError exceptions', () => {
+      vi.mocked(queries.compileMethod).mockImplementationOnce(() => {
+        throw new Error('Unexpected internal error');
+      });
+      const uri = Uri.parse('gemstone://1/Globals/Array/instance/accessing/at%3A');
+      expect(() => {
+        provider.writeFile(uri, encode('bad code'), { create: false, overwrite: true });
+      }).toThrow('Unexpected internal error');
+    });
+  });
+
+  describe('closeTabsForSession', () => {
+    beforeEach(() => {
+      (window.tabGroups.all as unknown[]).length = 0;
+    });
+
+    it('closes tabs belonging to the given session', () => {
+      const tab1 = { input: { uri: Uri.parse('gemstone://1/Globals/Array/instance/accessing/size') } };
+      const tab2 = { input: { uri: Uri.parse('gemstone://1/UserGlobals/MyClass/instance/init/initialize') } };
+      (window.tabGroups.all as unknown[]).push({ tabs: [tab1, tab2] });
+
+      provider.closeTabsForSession(1);
+
+      expect(window.tabGroups.close).toHaveBeenCalledWith(tab1);
+      expect(window.tabGroups.close).toHaveBeenCalledWith(tab2);
+      expect(window.tabGroups.close).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not close tabs belonging to a different session', () => {
+      const tab1 = { input: { uri: Uri.parse('gemstone://1/Globals/Array/instance/accessing/size') } };
+      const tab2 = { input: { uri: Uri.parse('gemstone://2/Globals/Array/instance/accessing/size') } };
+      (window.tabGroups.all as unknown[]).push({ tabs: [tab1, tab2] });
+
+      provider.closeTabsForSession(1);
+
+      expect(window.tabGroups.close).toHaveBeenCalledWith(tab1);
+      expect(window.tabGroups.close).not.toHaveBeenCalledWith(tab2);
+      expect(window.tabGroups.close).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not close non-gemstone tabs', () => {
+      const tab1 = { input: { uri: Uri.parse('file:///path/to/file.gs') } };
+      (window.tabGroups.all as unknown[]).push({ tabs: [tab1] });
+
+      provider.closeTabsForSession(1);
+
+      expect(window.tabGroups.close).not.toHaveBeenCalled();
+    });
+
+    it('handles tabs without a URI input gracefully', () => {
+      const tab1 = { input: undefined };
+      const tab2 = { input: {} };
+      (window.tabGroups.all as unknown[]).push({ tabs: [tab1, tab2] });
+
+      expect(() => provider.closeTabsForSession(1)).not.toThrow();
+      expect(window.tabGroups.close).not.toHaveBeenCalled();
+    });
+
+    it('searches across multiple tab groups', () => {
+      const tab1 = { input: { uri: Uri.parse('gemstone://1/Globals/Array/instance/accessing/size') } };
+      const tab2 = { input: { uri: Uri.parse('gemstone://1/UserGlobals/MyClass/instance/init/initialize') } };
+      (window.tabGroups.all as unknown[]).push({ tabs: [tab1] }, { tabs: [tab2] });
+
+      provider.closeTabsForSession(1);
+
+      expect(window.tabGroups.close).toHaveBeenCalledTimes(2);
     });
   });
 

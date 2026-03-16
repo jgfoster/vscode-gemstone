@@ -11,6 +11,7 @@ vi.mock('../topazFileIn', () => ({
     errors: [],
     compiledMethods: 2,
     compiledClassDef: true,
+    deletedMethods: 0,
   })),
 }));
 
@@ -72,15 +73,16 @@ function createMockExportManager(overrides: {
   } as unknown as ExportManager;
 }
 
-function createMockDocument(fsPath: string, options: { scheme?: string; isDirty?: boolean; text?: string } = {}): vscode.TextDocument {
+function createMockDocument(fsPath: string, options: { scheme?: string; isDirty?: boolean; authority?: string } = {}): vscode.TextDocument {
   return {
     uri: {
       scheme: options.scheme ?? 'file',
       fsPath,
-      toString: () => `file://${fsPath}`,
+      authority: options.authority ?? '',
+      toString: () => `${options.scheme ?? 'file'}://${fsPath}`,
     },
     isDirty: options.isDirty ?? false,
-    getText: vi.fn(() => options.text ?? 'method: MyClass\nfoo\n  ^ 42\n%\n'),
+    getText: vi.fn(() => ''),
   } as unknown as vscode.TextDocument;
 }
 
@@ -97,6 +99,7 @@ describe('FileInManager', () => {
       errors: [],
       compiledMethods: 2,
       compiledClassDef: true,
+      deletedMethods: 0,
     });
     mockSession = createMockSession();
     mockSessionManager = createMockSessionManager([mockSession]);
@@ -178,11 +181,23 @@ describe('FileInManager', () => {
       expect(manager.hasUnsavedChanges(mockSession)).toBe(false);
     });
 
-    it('returns false for dirty non-.gs files', () => {
-      const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/notes.txt',
-        { isDirty: true },
-      );
+    it('returns true for dirty gemstone:// method editors for this session', () => {
+      const doc = {
+        uri: { scheme: 'gemstone', authority: '1', fsPath: '', toString: () => 'gemstone://1/...' },
+        isDirty: true,
+        getText: vi.fn(() => ''),
+      } as unknown as vscode.TextDocument;
+      (vscode.workspace as unknown as { textDocuments: unknown[] }).textDocuments = [doc];
+
+      expect(manager.hasUnsavedChanges(mockSession)).toBe(true);
+    });
+
+    it('returns false for dirty gemstone:// editors for a different session', () => {
+      const doc = {
+        uri: { scheme: 'gemstone', authority: '99', fsPath: '', toString: () => 'gemstone://99/...' },
+        isDirty: true,
+        getText: vi.fn(() => ''),
+      } as unknown as vscode.TextDocument;
       (vscode.workspace as unknown as { textDocuments: unknown[] }).textDocuments = [doc];
 
       expect(manager.hasUnsavedChanges(mockSession)).toBe(false);
@@ -190,195 +205,10 @@ describe('FileInManager', () => {
 
     it('returns false when session root is undefined', () => {
       (mockExportManager.getSessionRoot as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+      const doc = createMockDocument('/some/path/MyClass.gs', { isDirty: true });
+      (vscode.workspace as unknown as { textDocuments: unknown[] }).textDocuments = [doc];
+
       expect(manager.hasUnsavedChanges(mockSession)).toBe(false);
-    });
-  });
-
-  describe('register + handleSave', () => {
-    let savedHandler: (doc: vscode.TextDocument) => void;
-
-    beforeEach(() => {
-      (vscode.workspace.onDidSaveTextDocument as ReturnType<typeof vi.fn>).mockImplementation(
-        (handler: (doc: vscode.TextDocument) => void) => {
-          savedHandler = handler;
-          return { dispose: () => {} };
-        },
-      );
-      const context = { subscriptions: [] } as unknown as vscode.ExtensionContext;
-      manager.register(context);
-    });
-
-    it('compiles on save and shows success message', () => {
-      const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
-      );
-      savedHandler(doc);
-
-      expect(fileInClass).toHaveBeenCalledWith(mockSession, doc.getText());
-      expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-        expect.stringContaining('Filed in'),
-      );
-    });
-
-    it('shows error message and sets diagnostics on failure', () => {
-      (fileInClass as ReturnType<typeof vi.fn>).mockReturnValue({
-        success: false,
-        errors: [{ message: 'Syntax error', line: 3, className: 'MyClass', selector: 'foo' }],
-        compiledMethods: 0,
-        compiledClassDef: false,
-      });
-
-      const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
-      );
-      savedHandler(doc);
-
-      expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-        expect.stringContaining('error'),
-      );
-      // Diagnostics should be set
-      const diagCollection = vscode.languages.createDiagnosticCollection as ReturnType<typeof vi.fn>;
-      const collection = diagCollection.mock.results[0].value;
-      expect(collection.set).toHaveBeenCalled();
-    });
-
-    it('clears diagnostics on successful save', () => {
-      const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
-      );
-      savedHandler(doc);
-
-      const diagCollection = vscode.languages.createDiagnosticCollection as ReturnType<typeof vi.fn>;
-      const collection = diagCollection.mock.results[0].value;
-      expect(collection.delete).toHaveBeenCalledWith(doc.uri);
-    });
-
-    it('skips non-.gs files', () => {
-      const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/notes.txt',
-      );
-      savedHandler(doc);
-
-      expect(fileInClass).not.toHaveBeenCalled();
-    });
-
-    it('skips files outside export root', () => {
-      const doc = createMockDocument('/other/path/MyClass.gs');
-      savedHandler(doc);
-
-      expect(fileInClass).not.toHaveBeenCalled();
-    });
-
-    it('skips when isWriting is true', () => {
-      (mockExportManager as unknown as { isWriting: boolean }).isWriting = true;
-      // Need to get the actual property descriptor working
-      Object.defineProperty(mockExportManager, 'isWriting', { get: () => true });
-
-      const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
-      );
-      savedHandler(doc);
-
-      expect(fileInClass).not.toHaveBeenCalled();
-    });
-
-    it('skips non-file scheme documents', () => {
-      const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
-        { scheme: 'gemstone' },
-      );
-      savedHandler(doc);
-
-      expect(fileInClass).not.toHaveBeenCalled();
-    });
-
-    it('silently skips when no matching session found', () => {
-      mockSessionManager = createMockSessionManager([]);
-      manager = new FileInManager(mockSessionManager, mockExportManager);
-      // Re-register to get new handler
-      (vscode.workspace.onDidSaveTextDocument as ReturnType<typeof vi.fn>).mockImplementation(
-        (handler: (doc: vscode.TextDocument) => void) => {
-          savedHandler = handler;
-          return { dispose: () => {} };
-        },
-      );
-      const context = { subscriptions: [] } as unknown as vscode.ExtensionContext;
-      manager.register(context);
-
-      const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
-      );
-      savedHandler(doc);
-
-      expect(fileInClass).not.toHaveBeenCalled();
-      expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
-    });
-
-    it('skips file-in when language server reports syntax errors', () => {
-      (vscode.languages.getDiagnostics as ReturnType<typeof vi.fn>).mockReturnValue([
-        {
-          source: 'gemstone-smalltalk',
-          severity: vscode.DiagnosticSeverity.Error,
-          message: 'Unexpected token',
-          range: new vscode.Range(0, 0, 0, 10),
-        },
-      ]);
-
-      const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
-      );
-      savedHandler(doc);
-
-      expect(fileInClass).not.toHaveBeenCalled();
-      // Should clear any stale file-in diagnostics
-      const diagCollection = vscode.languages.createDiagnosticCollection as ReturnType<typeof vi.fn>;
-      const collection = diagCollection.mock.results[0].value;
-      expect(collection.delete).toHaveBeenCalledWith(doc.uri);
-
-      // Reset mock
-      (vscode.languages.getDiagnostics as ReturnType<typeof vi.fn>).mockReturnValue([]);
-    });
-
-    it('proceeds with file-in when language server reports only warnings', () => {
-      (vscode.languages.getDiagnostics as ReturnType<typeof vi.fn>).mockReturnValue([
-        {
-          source: 'gemstone-smalltalk',
-          severity: vscode.DiagnosticSeverity.Warning,
-          message: 'Unused variable',
-          range: new vscode.Range(0, 0, 0, 10),
-        },
-      ]);
-
-      const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
-      );
-      savedHandler(doc);
-
-      expect(fileInClass).toHaveBeenCalled();
-
-      // Reset mock
-      (vscode.languages.getDiagnostics as ReturnType<typeof vi.fn>).mockReturnValue([]);
-    });
-
-    it('proceeds with file-in when diagnostics are from other sources', () => {
-      (vscode.languages.getDiagnostics as ReturnType<typeof vi.fn>).mockReturnValue([
-        {
-          source: 'some-other-linter',
-          severity: vscode.DiagnosticSeverity.Error,
-          message: 'Some error',
-          range: new vscode.Range(0, 0, 0, 10),
-        },
-      ]);
-
-      const doc = createMockDocument(
-        '/workspace/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/MyClass.gs',
-      );
-      savedHandler(doc);
-
-      expect(fileInClass).toHaveBeenCalled();
-
-      // Reset mock
-      (vscode.languages.getDiagnostics as ReturnType<typeof vi.fn>).mockReturnValue([]);
     });
   });
 

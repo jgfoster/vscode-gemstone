@@ -6,6 +6,8 @@ import { ActiveSession } from './sessionManager';
 import { ExportManager } from './exportManager';
 import { parseTopazDocument } from './topazFileIn';
 import * as queries from './browserQueries';
+import { GlobalsBrowser } from './globalsBrowser';
+import { ClassBrowser } from './classBrowser';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -113,6 +115,19 @@ export class SystemBrowser {
     if (browsers) {
       for (const browser of [...browsers]) browser.panel.dispose();
     }
+  }
+
+  /**
+   * Navigate the browser to a specific method from external search results
+   * (e.g. Implementors of / Senders of). Returns true if at least one browser
+   * was found and navigated (meaning the caller does NOT need to open the file
+   * separately), false if no browser is open for this session.
+   */
+  static navigateTo(sessionId: number, result: queries.MethodSearchResult): boolean {
+    const browsers = SystemBrowser.panels.get(sessionId);
+    if (!browsers || browsers.size === 0) return false;
+    for (const browser of browsers) browser.handleNavigateTo(result);
+    return true;
   }
 
   private constructor(
@@ -360,9 +375,6 @@ export class SystemBrowser {
         case 'ctxRunTests':
           this.handleRunTests();
           break;
-        case 'ctxInspectGlobal':
-          this.handleInspectGlobal();
-          break;
         case 'ctxNewMethod':
           this.handleNewMethod();
           break;
@@ -425,7 +437,7 @@ export class SystemBrowser {
     });
   }
 
-  private handleSelectDictionary(dictIndex: number): void {
+  private async handleSelectDictionary(dictIndex: number): Promise<void> {
     this.state.selectedDictIndex = dictIndex;
     this.state.selectedCategory = null;
     this.state.selectedClass = null;
@@ -443,17 +455,27 @@ export class SystemBrowser {
       }
     }
     const sorted = [...categorySet].sort();
-    const hasGlobals = entries.some(e => !e.isClass);
     this.state.classCategories = [
       '** ALL CLASSES **',
       ...sorted,
-      ...(hasGlobals ? ['** GLOBALS **'] : []),
     ];
 
     this.panel.webview.postMessage({
       command: 'loadClassCategories',
       items: this.state.classCategories,
     });
+
+    const dictName = this.state.dictionaries[dictIndex - 1];
+    // Set the editor layout before creating panels so they appear in the right order
+    await vscode.commands.executeCommand('vscode.setEditorLayout', {
+      orientation: 1, // vertical (top/bottom)
+      groups: [{ size: 0.6 }, { size: 0.4 }],
+    });
+    try {
+      await GlobalsBrowser.showOrUpdate(this.session, dictName, dictIndex);
+    } catch (e) { this.postError(e); }
+    ClassBrowser.showOrUpdate(this.session, this.state.dictionaries, dictIndex, null)
+      .catch(e => this.postError(e));
   }
 
   private handleSelectCategory(category: string): void {
@@ -468,9 +490,7 @@ export class SystemBrowser {
 
     const entries = this.getCachedDictEntries(dictIndex);
     let names: string[];
-    if (category === '** GLOBALS **') {
-      names = entries.filter(e => !e.isClass).map(e => e.name);
-    } else if (category === '** ALL CLASSES **') {
+    if (category === '** ALL CLASSES **') {
       names = entries.filter(e => e.isClass).map(e => e.name);
     } else {
       names = entries
@@ -491,16 +511,14 @@ export class SystemBrowser {
     this.state.selectedMethod = null;
     this.panel.title = `Browser: ${className}`;
 
-    if (this.state.selectedCategory === '** GLOBALS **') {
-      // Non-class global — inspect it instead of browsing methods
-      vscode.commands.executeCommand('gemstone.inspectGlobal', { className });
-      this.panel.webview.postMessage({ command: 'loadMethodCategories', items: [] });
-      this.panel.webview.postMessage({ command: 'loadMethods', items: [] });
-      return;
-    }
-
     this.loadMethodCategories();
     this.openClassFile(className);
+
+    const dictIndex = this.state.selectedDictIndex;
+    if (dictIndex) {
+      ClassBrowser.showOrUpdate(this.session, this.state.dictionaries, dictIndex, className)
+        .catch(e => this.postError(e));
+    }
   }
 
   private handleToggleSide(isMeta: boolean): void {
@@ -553,6 +571,74 @@ export class SystemBrowser {
     if (!className) return;
 
     this.openClassFile(className, selector, this.state.isMeta);
+  }
+
+  private handleNavigateTo(result: queries.MethodSearchResult): void {
+    const { dictName, className, isMeta, category, selector } = result;
+
+    // Find 1-based dict index
+    const dictIndex = this.state.dictionaries.indexOf(dictName) + 1;
+    if (dictIndex === 0) return; // Dict not known yet
+
+    // Reveal the panel without stealing focus from the method editor
+    this.panel.reveal(undefined, true);
+
+    // Update dictionary if changed
+    if (this.state.selectedDictIndex !== dictIndex) {
+      this.handleSelectDictionary(dictIndex);
+      this.panel.webview.postMessage({ command: 'selectDictionaryItem', index: dictIndex });
+    }
+
+    // Ensure the class is visible — switch to "** ALL CLASSES **" if needed
+    if (!this.state.classes.includes(className)) {
+      this.handleSelectCategory('** ALL CLASSES **');
+      this.panel.webview.postMessage({ command: 'selectCategoryItem', name: '** ALL CLASSES **' });
+    }
+
+    // Update class state (without calling handleSelectClass, which would open the .gs file)
+    if (this.state.selectedClass !== className) {
+      this.state.selectedClass = className;
+      this.state.selectedMethodCategory = null;
+      this.state.selectedMethod = null;
+      this.panel.title = `Browser: ${className}`;
+      this.loadMethodCategories();
+    }
+
+    // Update instance/class side if changed
+    if (this.state.isMeta !== isMeta) {
+      this.handleToggleSide(isMeta);
+    }
+
+    // Update method category if changed
+    if (this.state.selectedMethodCategory !== category) {
+      this.handleSelectMethodCategory(category);
+    }
+
+    // Select the method and refresh all webview columns
+    this.state.selectedMethod = selector;
+    this.panel.webview.postMessage({
+      command: 'loadClassCategories',
+      items: this.state.classCategories,
+      selected: this.state.selectedCategory,
+    });
+    this.panel.webview.postMessage({
+      command: 'loadClasses',
+      items: this.state.classes,
+      selected: className,
+    });
+    this.panel.webview.postMessage({
+      command: 'loadMethodCategories',
+      items: this.state.methodCategories,
+      selected: category,
+    });
+    this.panel.webview.postMessage({
+      command: 'loadMethods',
+      items: this.state.methods,
+      selected: selector,
+    });
+
+    // Open the method in the editor
+    this.openClassFile(className, selector, isMeta);
   }
 
   private handleRefresh(): void {
@@ -905,11 +991,6 @@ export class SystemBrowser {
     vscode.commands.executeCommand('gemstone.runSunitClass', { className });
   }
 
-  private handleInspectGlobal(): void {
-    const className = this.state.selectedClass;
-    if (!className) return;
-    vscode.commands.executeCommand('gemstone.inspectGlobal', { className });
-  }
 
   private handleNewMethod(): void {
     const dictIndex = this.state.selectedDictIndex;
@@ -1143,82 +1224,46 @@ export class SystemBrowser {
     selector?: string,
     isMeta?: boolean,
   ): Promise<void> {
-    const sessionRoot = this.exportManager.getSessionRoot(this.session);
-    if (!sessionRoot) return;
-
     const dictIndex = this.state.selectedDictIndex;
     if (!dictIndex) return;
 
     const dictName = this.state.dictionaries[dictIndex - 1];
-    const dictLabel = `${dictIndex}-${dictName}`;
-    const filePath = path.join(sessionRoot, dictLabel, `${className}.gs`);
-
-    if (!fs.existsSync(filePath)) return;
-
-    const uri = vscode.Uri.file(filePath);
-
-    // Reuse the editor group where a browser file is already shown,
-    // so the user can drag it to the bottom and subsequent opens stay there.
     const viewColumn = await this.getBrowserViewColumn();
 
-    // Suppress cursor sync while we programmatically open/scroll the editor
-    this.syncingFromBrowser = true;
-
     if (!selector) {
-      // Open at top (class definition)
+      // Open the read-only .gs file for class-level navigation
+      const sessionRoot = this.exportManager.getSessionRoot(this.session);
+      if (!sessionRoot) return;
+      const filePath = path.join(sessionRoot, `${dictIndex}-${dictName}`, `${className}.gs`);
+      if (!fs.existsSync(filePath)) return;
       this.clearDimming();
-      vscode.window.showTextDocument(uri, {
-        viewColumn,
-        preview: false,
-      }).then(() => {
-        this.syncingFromBrowser = false;
-      });
+      vscode.window.showTextDocument(vscode.Uri.file(filePath), { viewColumn, preview: false });
       return;
     }
 
-    // Parse file and find the matching method
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const regions = parseTopazDocument(content);
-
-    const targetCommand = isMeta ? 'classmethod' : 'method';
-    const matchingRegion = regions.find(r => {
-      if (r.kind !== 'smalltalk-method') return false;
-      if (r.command !== targetCommand) return false;
-      if (r.className !== className) return false;
-      const firstLine = r.text.split('\n')[0]?.trim() ?? '';
-      return extractSelector(firstLine) === selector;
-    });
-
-    if (!matchingRegion) {
-      this.syncingFromBrowser = false;
-      return;
-    }
-
-    vscode.window.showTextDocument(uri, {
-      viewColumn,
-      preview: false,
-    }).then(editor => {
-      editor.selection = new vscode.Selection(
-        matchingRegion.startLine, 0,
-        matchingRegion.startLine, 0,
-      );
-      const revealLine = Math.max(0, matchingRegion.startLine - 2);
-      editor.revealRange(
-        new vscode.Range(revealLine, 0, revealLine, 0),
-        vscode.TextEditorRevealType.AtTop,
-      );
-      this.applyDimming(editor, matchingRegion.startLine, matchingRegion.endLine);
-      this.syncingFromBrowser = false;
-    });
+    // Open the method in a gemstone:// editor tab (editable, one method at a time)
+    const side = isMeta ? 'class' : 'instance';
+    const category = this.state.selectedMethodCategory ?? 'as yet unclassified';
+    const envQuery = this.state.selectedEnvId > 0 ? `?env=${this.state.selectedEnvId}` : '';
+    const uri = vscode.Uri.parse(
+      `gemstone://${this.session.id}/${encodeURIComponent(dictName)}/` +
+      `${encodeURIComponent(className)}/${side}/` +
+      `${encodeURIComponent(category)}/${encodeURIComponent(selector)}${envQuery}`
+    );
+    const doc = await vscode.workspace.openTextDocument(uri);
+    vscode.window.showTextDocument(doc, { viewColumn, preview: true });
   }
 
   private async getBrowserViewColumn(): Promise<vscode.ViewColumn> {
+    const sessionId = String(this.session.id);
     const sessionRoot = this.exportManager.getSessionRoot(this.session);
-    if (sessionRoot) {
-      for (const editor of vscode.window.visibleTextEditors) {
-        if (editor.document.uri.fsPath.startsWith(sessionRoot)) {
-          return editor.viewColumn ?? vscode.ViewColumn.Beside;
-        }
+    for (const editor of vscode.window.visibleTextEditors) {
+      const { scheme, authority, fsPath } = editor.document.uri;
+      if (scheme === 'gemstone' && authority === sessionId) {
+        return editor.viewColumn ?? vscode.ViewColumn.Beside;
+      }
+      if (sessionRoot && scheme === 'file' && fsPath.startsWith(sessionRoot)) {
+        return editor.viewColumn ?? vscode.ViewColumn.Beside;
       }
     }
     // No existing editor group — create a top/bottom split so the
@@ -1870,7 +1915,6 @@ export class SystemBrowser {
           { separator: true },
           { label: 'Browse References', action: () => vscode.postMessage({ command: 'ctxBrowseReferences', name: item.dataset.value }) },
           { label: 'Run SUnit Tests', action: () => vscode.postMessage({ command: 'ctxRunTests' }) },
-          { label: 'Inspect Global', action: () => vscode.postMessage({ command: 'ctxInspectGlobal' }) },
         ] : []),
       ]);
     });
@@ -1925,7 +1969,7 @@ export class SystemBrowser {
           break;
         case 'loadClassCategories':
           clearFrom('categories');
-          populateColumn(cols.categories, msg.items, ['** ALL CLASSES **', '** GLOBALS **']);
+          populateColumn(cols.categories, msg.items, ['** ALL CLASSES **']);
           if (msg.selected) selectItemInColumn(cols.categories, msg.selected);
           break;
         case 'loadClasses':

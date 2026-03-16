@@ -5,6 +5,7 @@ vi.mock('vscode', () => import('../__mocks__/vscode'));
 vi.mock('../browserQueries', () => ({
   getDictionaryNames: vi.fn(),
   getDictionaryEntries: vi.fn(),
+  getGlobalsForDictionary: vi.fn(),
   getClassEnvironments: vi.fn(),
   getClassHierarchy: vi.fn(),
   addDictionary: vi.fn(),
@@ -20,6 +21,20 @@ vi.mock('../browserQueries', () => ({
   referencesToObject: vi.fn(),
 }));
 
+vi.mock('../globalsBrowser', () => ({
+  GlobalsBrowser: {
+    showOrUpdate: vi.fn().mockResolvedValue(undefined),
+    disposeForSession: vi.fn(),
+  },
+}));
+
+vi.mock('../classBrowser', () => ({
+  ClassBrowser: {
+    showOrUpdate: vi.fn().mockResolvedValue(undefined),
+    disposeForSession: vi.fn(),
+  },
+}));
+
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return {
@@ -33,9 +48,11 @@ vi.mock('fs', async () => {
 
 import * as fs from 'fs';
 
-import { window, ViewColumn, TextEditorRevealType, Range, Selection, Position, commands, __setConfig, __resetConfig } from '../__mocks__/vscode';
+import { window, workspace, ViewColumn, TextEditorRevealType, Range, Selection, Position, commands, __setConfig, __resetConfig } from '../__mocks__/vscode';
 import { SystemBrowser, extractSelector } from '../systemBrowser';
 import * as queries from '../browserQueries';
+import { GlobalsBrowser } from '../globalsBrowser';
+import { ClassBrowser } from '../classBrowser';
 import type { ActiveSession } from '../sessionManager';
 import type { ExportManager } from '../exportManager';
 
@@ -147,6 +164,7 @@ describe('SystemBrowser', () => {
     });
 
     vi.mocked(queries.getDictionaryNames).mockReturnValue(['UserGlobals', 'Globals']);
+    vi.mocked(queries.getGlobalsForDictionary).mockReturnValue([]);
     vi.mocked(queries.getDictionaryEntries).mockReturnValue([
       { isClass: true, category: 'Kernel', name: 'Array' },
       { isClass: true, category: 'Kernel', name: 'Set' },
@@ -233,7 +251,7 @@ describe('SystemBrowser', () => {
       expect(queries.getDictionaryEntries).toHaveBeenCalledWith(session, 1);
       expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
         command: 'loadClassCategories',
-        items: ['** ALL CLASSES **', 'Collections', 'Kernel', '** GLOBALS **'],
+        items: ['** ALL CLASSES **', 'Collections', 'Kernel'],
       });
     });
 
@@ -399,90 +417,75 @@ describe('SystemBrowser', () => {
       expect(window.showTextDocument).not.toHaveBeenCalled();
     });
 
-    it('opens file at method line when selecting a method', async () => {
+    it('opens a gemstone:// method editor when selecting a method', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockReturnValue(gsContent);
 
       messageHandler({ command: 'selectClass', name: 'Array' });
       await vi.waitFor(() => {
         expect(window.showTextDocument).toHaveBeenCalled();
       });
       vi.mocked(window.showTextDocument).mockClear();
+      vi.mocked(workspace.openTextDocument).mockClear();
 
+      messageHandler({ command: 'selectMethodCategory', name: 'accessing' });
       messageHandler({ command: 'selectMethod', selector: 'size' });
       await vi.waitFor(() => {
-        expect(window.showTextDocument).toHaveBeenCalled();
+        expect(workspace.openTextDocument).toHaveBeenCalled();
       });
 
+      const uri = (workspace.openTextDocument as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(uri.scheme).toBe('gemstone');
+      expect(uri.path).toContain('/Array/instance/');
+      expect(uri.path).toContain('/size');
       expect(window.showTextDocument).toHaveBeenCalledWith(
-        expect.objectContaining({ path: '/tmp/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals/Array.gs' }),
-        expect.objectContaining({
-          preview: false,
-        }),
+        expect.anything(),
+        expect.objectContaining({ preview: true }),
       );
     });
 
-    it('scrolls to two lines above the method so the category is visible', async () => {
+    it('includes the method category in the gemstone:// URI', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockReturnValue(gsContent);
 
       messageHandler({ command: 'selectClass', name: 'Array' });
-      await vi.waitFor(() => {
-        expect(window.showTextDocument).toHaveBeenCalled();
-      });
+      await vi.waitFor(() => { expect(window.showTextDocument).toHaveBeenCalled(); });
+      vi.mocked(workspace.openTextDocument).mockClear();
 
-      // 'size' method starts at line 10; reveal should be at line 8
+      messageHandler({ command: 'selectMethodCategory', name: 'accessing' });
       messageHandler({ command: 'selectMethod', selector: 'size' });
-      await vi.waitFor(() => {
-        expect(vi.mocked(window.showTextDocument).mock.calls.length).toBeGreaterThanOrEqual(2);
-      });
+      await vi.waitFor(() => { expect(workspace.openTextDocument).toHaveBeenCalled(); });
 
-      const editor = await vi.mocked(window.showTextDocument).mock.results.at(-1)!.value;
-      expect(editor.revealRange).toHaveBeenCalledWith(
-        new Range(8, 0, 8, 0),
-        TextEditorRevealType.AtTop,
-      );
+      const uri = (workspace.openTextDocument as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(uri.path).toContain('accessing');
     });
 
-    it('sets cursor on the method line without passing selection to showTextDocument', async () => {
+    it('uses class side in URI when isMeta is true', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockReturnValue(gsContent);
 
       messageHandler({ command: 'selectClass', name: 'Array' });
-      await vi.waitFor(() => {
-        expect(window.showTextDocument).toHaveBeenCalled();
-      });
+      await vi.waitFor(() => { expect(window.showTextDocument).toHaveBeenCalled(); });
+      messageHandler({ command: 'toggleSide', isMeta: true });
+      vi.mocked(workspace.openTextDocument).mockClear();
 
-      messageHandler({ command: 'selectMethod', selector: 'size' });
-      await vi.waitFor(() => {
-        expect(vi.mocked(window.showTextDocument).mock.calls.length).toBeGreaterThanOrEqual(2);
-      });
+      messageHandler({ command: 'selectMethodCategory', name: 'instance creation' });
+      messageHandler({ command: 'selectMethod', selector: 'new' });
+      await vi.waitFor(() => { expect(workspace.openTextDocument).toHaveBeenCalled(); });
 
-      // showTextDocument should NOT receive a selection option (avoids VS Code centering)
-      const lastCall = vi.mocked(window.showTextDocument).mock.calls.at(-1) as unknown[];
-      expect(lastCall[1]).not.toHaveProperty('selection');
-
-      // Instead, the editor's selection should be set directly on the method start line
-      const editor = await vi.mocked(window.showTextDocument).mock.results.at(-1)!.value;
-      expect(editor.selection.start).toEqual(new Position(10, 0));
-      expect(editor.selection.end).toEqual(new Position(10, 0));
+      const uri = (workspace.openTextDocument as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(uri.path).toContain('/class/');
     });
 
-    it('does not open file when method not found', async () => {
+    it('opens a gemstone:// editor even when method is not found in the .gs file', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockReturnValue('run\n"empty"\n%\n');
-      messageHandler({ command: 'selectClass', name: 'Array' });
-      await vi.waitFor(() => {
-        expect(window.showTextDocument).toHaveBeenCalled();
-      });
-      vi.mocked(window.showTextDocument).mockClear();
 
-      // Try to open a method that doesn't exist in the file
+      messageHandler({ command: 'selectClass', name: 'Array' });
+      await vi.waitFor(() => { expect(window.showTextDocument).toHaveBeenCalled(); });
+      vi.mocked(workspace.openTextDocument).mockClear();
+
       messageHandler({ command: 'selectMethod', selector: 'nonExistentMethod' });
-      // openClassFile returns before showTextDocument when method not found,
-      // but we need to let the async getBrowserViewColumn resolve first
-      await new Promise(resolve => setTimeout(resolve, 0));
-      expect(window.showTextDocument).not.toHaveBeenCalled();
+      await vi.waitFor(() => { expect(workspace.openTextDocument).toHaveBeenCalled(); });
+
+      const uri = (workspace.openTextDocument as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(uri.scheme).toBe('gemstone');
     });
 
     it('reuses the editor group where a browser file is already open', async () => {
@@ -583,7 +586,7 @@ describe('SystemBrowser', () => {
       });
       expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
         command: 'loadClassCategories',
-        items: ['** ALL CLASSES **', 'Collections', 'Kernel', '** GLOBALS **'],
+        items: ['** ALL CLASSES **', 'Collections', 'Kernel'],
         selected: '** ALL CLASSES **',
       });
       expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
@@ -884,13 +887,6 @@ describe('SystemBrowser', () => {
       );
     });
 
-    it('delegates inspect to command', () => {
-      messageHandler({ command: 'ctxInspectGlobal' });
-      expect(commands.executeCommand).toHaveBeenCalledWith(
-        'gemstone.inspectGlobal',
-        { className: 'Array' },
-      );
-    });
   });
 
   describe('method category context menu', () => {
@@ -1053,79 +1049,40 @@ describe('SystemBrowser', () => {
     });
   });
 
-  describe('non-class globals', () => {
+  describe('GlobalsBrowser and ClassBrowser integration', () => {
     beforeEach(() => {
       SystemBrowser.show(session, exportManager);
       messageHandler({ command: 'ready' });
       messageHandler({ command: 'selectDictionary', index: 1 });
     });
 
-    it('shows GLOBALS category when dictionary has non-class entries', () => {
-      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
-        command: 'loadClassCategories',
-        items: ['** ALL CLASSES **', 'Collections', 'Kernel', '** GLOBALS **'],
-      });
-    });
-
-    it('does not show GLOBALS category when no non-class entries exist', () => {
-      vi.mocked(queries.getDictionaryEntries).mockReturnValue([
-        { isClass: true, category: 'Kernel', name: 'Array' },
-      ]);
-      vi.mocked(mockPanel.webview.postMessage).mockClear();
-
-      messageHandler({ command: 'selectDictionary', index: 2 });
-
-      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
-        command: 'loadClassCategories',
-        items: ['** ALL CLASSES **', 'Kernel'],
-      });
-    });
-
-    it('lists non-class globals when GLOBALS is selected', () => {
-      vi.mocked(mockPanel.webview.postMessage).mockClear();
-      messageHandler({ command: 'selectCategory', name: '** GLOBALS **' });
-
-      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
-        command: 'loadClasses',
-        items: ['AllUsers'],
-      });
-    });
-
-    it('inspects global on selectClass when GLOBALS category is active', () => {
-      messageHandler({ command: 'selectCategory', name: '** GLOBALS **' });
-      vi.mocked(mockPanel.webview.postMessage).mockClear();
-
-      messageHandler({ command: 'selectClass', name: 'AllUsers' });
-
-      expect(commands.executeCommand).toHaveBeenCalledWith(
-        'gemstone.inspectGlobal',
-        { className: 'AllUsers' },
+    it('opens GlobalsBrowser when a dictionary is selected', () => {
+      expect(vi.mocked(GlobalsBrowser.showOrUpdate)).toHaveBeenCalledWith(
+        session, 'UserGlobals', 1,
       );
     });
 
-    it('clears method columns when selecting a global', () => {
-      messageHandler({ command: 'selectCategory', name: '** GLOBALS **' });
-      vi.mocked(mockPanel.webview.postMessage).mockClear();
+    it('opens ClassBrowser with null className when a dictionary is selected', () => {
+      expect(vi.mocked(ClassBrowser.showOrUpdate)).toHaveBeenCalledWith(
+        session, ['UserGlobals', 'Globals'], 1, null,
+      );
+    });
 
-      messageHandler({ command: 'selectClass', name: 'AllUsers' });
-
+    it('does not include ** GLOBALS ** in class categories', () => {
       expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
-        command: 'loadMethodCategories',
-        items: [],
-      });
-      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
-        command: 'loadMethods',
-        items: [],
+        command: 'loadClassCategories',
+        items: ['** ALL CLASSES **', 'Collections', 'Kernel'],
       });
     });
 
-    it('does not load environments when selecting a global', () => {
-      messageHandler({ command: 'selectCategory', name: '** GLOBALS **' });
-      vi.mocked(queries.getClassEnvironments).mockClear();
+    it('opens ClassBrowser with className when a class is selected', () => {
+      vi.mocked(ClassBrowser.showOrUpdate).mockClear();
+      messageHandler({ command: 'selectCategory', name: '** ALL CLASSES **' });
+      messageHandler({ command: 'selectClass', name: 'Array' });
 
-      messageHandler({ command: 'selectClass', name: 'AllUsers' });
-
-      expect(queries.getClassEnvironments).not.toHaveBeenCalled();
+      expect(vi.mocked(ClassBrowser.showOrUpdate)).toHaveBeenCalledWith(
+        session, ['UserGlobals', 'Globals'], 1, 'Array',
+      );
     });
   });
 
@@ -1277,6 +1234,100 @@ describe('SystemBrowser', () => {
     it('does nothing when no browser exists for the session', () => {
       // No browser has been created — should not throw
       SystemBrowser.refresh(999);
+    });
+  });
+
+  describe('navigateTo', () => {
+    const result: queries.MethodSearchResult = {
+      dictName: 'UserGlobals',
+      className: 'Array',
+      isMeta: false,
+      category: 'Accessing',
+      selector: 'name',
+    };
+
+    beforeEach(() => {
+      SystemBrowser.show(session, exportManager);
+      messageHandler({ command: 'ready' }); // populates state.dictionaries
+      vi.mocked(mockPanel.webview.postMessage).mockClear();
+    });
+
+    it('returns false when no browser is open for the session', () => {
+      expect(SystemBrowser.navigateTo(999, result)).toBe(false);
+    });
+
+    it('returns true when a browser is open for the session', () => {
+      expect(SystemBrowser.navigateTo(session.id, result)).toBe(true);
+    });
+
+    it('reveals the panel with preserveFocus so the editor keeps focus', () => {
+      SystemBrowser.navigateTo(session.id, result);
+      expect(mockPanel.reveal).toHaveBeenCalledWith(undefined, true);
+    });
+
+    it('does nothing when the dictName is not in the loaded dictionaries', () => {
+      const unknown = { ...result, dictName: 'UnknownDict' };
+      SystemBrowser.navigateTo(session.id, unknown);
+      expect(mockPanel.reveal).not.toHaveBeenCalled();
+      expect(workspace.openTextDocument).not.toHaveBeenCalled();
+    });
+
+    it('updates the panel title to the selected class', () => {
+      SystemBrowser.navigateTo(session.id, result);
+      expect(mockPanel.title).toBe('Browser: Array');
+    });
+
+    it('posts loadClasses with the selected class', () => {
+      SystemBrowser.navigateTo(session.id, result);
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ command: 'loadClasses', selected: 'Array' }),
+      );
+    });
+
+    it('posts loadMethodCategories with the selected category', () => {
+      SystemBrowser.navigateTo(session.id, result);
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ command: 'loadMethodCategories', selected: 'Accessing' }),
+      );
+    });
+
+    it('posts loadMethods with the selected selector', () => {
+      SystemBrowser.navigateTo(session.id, result);
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ command: 'loadMethods', selected: 'name' }),
+      );
+    });
+
+    it('opens the method in a gemstone:// preview tab', async () => {
+      SystemBrowser.navigateTo(session.id, result);
+      await vi.waitFor(() => expect(workspace.openTextDocument).toHaveBeenCalled());
+      const uri = vi.mocked(workspace.openTextDocument).mock.calls[0][0] as { scheme: string; path: string };
+      expect(uri.scheme).toBe('gemstone');
+      expect(uri.path).toContain('/Array/instance/');
+      expect(uri.path).toContain('/name');
+      expect(window.showTextDocument).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ preview: true }),
+      );
+    });
+
+    it('uses class side in the URI when isMeta is true', async () => {
+      const classSide = { ...result, isMeta: true, category: 'Instance Creation', selector: 'new' };
+      SystemBrowser.navigateTo(session.id, classSide);
+      await vi.waitFor(() => expect(workspace.openTextDocument).toHaveBeenCalled());
+      const uri = vi.mocked(workspace.openTextDocument).mock.calls[0][0] as { path: string };
+      expect(uri.path).toContain('/class/');
+    });
+
+    it('navigates all browsers open for the session', async () => {
+      // Open a second browser for the same session
+      SystemBrowser.show(session, exportManager);
+      const secondPanel = vi.mocked(window.createWebviewPanel).mock.results[1].value as typeof mockPanel;
+      messageHandler({ command: 'ready' }); // second browser shares messageHandler binding — skip; just check reveal count
+
+      SystemBrowser.navigateTo(session.id, result);
+      expect(mockPanel.reveal).toHaveBeenCalled();
+      expect(secondPanel.reveal).toHaveBeenCalled();
     });
   });
 
