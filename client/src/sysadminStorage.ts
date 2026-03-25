@@ -133,6 +133,32 @@ export class SysadminStorage {
     return versions;
   }
 
+  /** Check if an extracted version directory is a symlink (local version) */
+  isLocalVersion(version: string): boolean {
+    const suffix = this.getPlatformSuffix();
+    const dir = path.join(this.getRootPath(), `GemStone64Bit${version}${suffix}`);
+    try {
+      return fs.lstatSync(dir).isSymbolicLink();
+    } catch {
+      return false;
+    }
+  }
+
+  /** Read version.txt from a product directory, returns { version, date, description } */
+  static readVersionTxt(productPath: string): { version: string; date: string; description: string } | undefined {
+    const versionFile = path.join(productPath, 'version.txt');
+    if (!fs.existsSync(versionFile)) return undefined;
+    const lines = fs.readFileSync(versionFile, 'utf-8').trim().split('\n');
+    if (lines.length < 2) return undefined;
+    // Line 2: "3.7.6 Build: 2026-03-24T16:26:18-07:00 ..."
+    const match = lines[1].match(/^(\S+)\s+Build:\s+(\S+)/);
+    if (!match) return undefined;
+    const version = match[1];
+    const buildDate = match[2].split('T')[0]; // just the date portion
+    const description = lines.length >= 3 ? lines[2].trim() : '';
+    return { version, date: buildDate, description };
+  }
+
   /** Get available .dbf extent files from a version's bin/ directory */
   getAvailableExtents(version: string): string[] {
     const gsPath = this.getGemstonePath(version);

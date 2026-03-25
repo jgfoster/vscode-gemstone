@@ -29,6 +29,10 @@ export interface GemStoneVersion {
   downloaded: boolean;
   /** Whether the version has been extracted to rootPath */
   extracted: boolean;
+  /** Whether this is a locally registered version (symlink) */
+  local?: boolean;
+  /** Build description from version.txt (for local versions) */
+  buildDescription?: string;
 }
 
 export interface GemStoneProcess {

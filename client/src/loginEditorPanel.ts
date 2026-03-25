@@ -3,22 +3,51 @@ import * as crypto from 'crypto';
 import { GemStoneLogin, DEFAULT_LOGIN, loginLabel } from './loginTypes';
 import { LoginStorage } from './loginStorage';
 import { LoginTreeProvider } from './loginTreeProvider';
+import { SysadminStorage } from './sysadminStorage';
 
 export class LoginEditorPanel {
   private static currentPanel: LoginEditorPanel | undefined;
   private readonly panel: vscode.WebviewPanel;
   private disposables: vscode.Disposable[] = [];
 
+  /** Collect versions that have a GCI library available */
+  private static getAvailableVersions(storage: LoginStorage, sysadminStorage: SysadminStorage): string[] {
+    const versionSet = new Set<string>();
+    // Extracted versions have GCI libraries in their lib/ directory
+    for (const v of sysadminStorage.getExtractedVersions()) {
+      versionSet.add(v);
+    }
+    // Versions with manually configured GCI library paths
+    const config = vscode.workspace.getConfiguration('gemstone');
+    const gciLibraries = config.get<Record<string, string>>('gciLibraries', {});
+    for (const v of Object.keys(gciLibraries)) {
+      versionSet.add(v);
+    }
+    const versions = [...versionSet];
+    versions.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    return versions;
+  }
+
   static show(
     storage: LoginStorage,
     treeProvider: LoginTreeProvider,
     existingLogin?: GemStoneLogin,
+    sysadminStorage?: SysadminStorage,
   ): void {
     const column = vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.One;
+    const versions = sysadminStorage
+      ? LoginEditorPanel.getAvailableVersions(storage, sysadminStorage)
+      : [];
+
+    const login = existingLogin ?? {
+      ...DEFAULT_LOGIN,
+      version: versions[0] ?? '',
+    };
 
     if (LoginEditorPanel.currentPanel) {
       LoginEditorPanel.currentPanel.panel.reveal(column);
-      LoginEditorPanel.currentPanel.update(existingLogin ?? { ...DEFAULT_LOGIN });
+      LoginEditorPanel.currentPanel.versions = versions;
+      LoginEditorPanel.currentPanel.update(login);
       return;
     }
 
@@ -34,7 +63,7 @@ export class LoginEditorPanel {
     );
 
     LoginEditorPanel.currentPanel = new LoginEditorPanel(
-      panel, storage, treeProvider, existingLogin ?? { ...DEFAULT_LOGIN },
+      panel, storage, treeProvider, login, versions,
     );
   }
 
@@ -43,6 +72,7 @@ export class LoginEditorPanel {
     private storage: LoginStorage,
     private treeProvider: LoginTreeProvider,
     private login: GemStoneLogin,
+    private versions: string[],
   ) {
     this.panel = panel;
     this.update(login);
@@ -59,6 +89,7 @@ export class LoginEditorPanel {
             this.panel.webview.postMessage({
               command: 'loadData',
               data: this.login,
+              versions: this.versions,
             });
             break;
         }
@@ -80,7 +111,7 @@ export class LoginEditorPanel {
   private update(login: GemStoneLogin): void {
     this.login = login;
     this.panel.webview.html = this.getHtml();
-    this.panel.webview.postMessage({ command: 'loadData', data: login });
+    this.panel.webview.postMessage({ command: 'loadData', data: login, versions: this.versions });
   }
 
   private dispose(): void {
@@ -118,7 +149,7 @@ export class LoginEditorPanel {
       margin-bottom: 4px;
       font-weight: 600;
     }
-    input[type="text"], input[type="password"] {
+    select, input[type="text"], input[type="password"] {
       width: 100%;
       box-sizing: border-box;
       padding: 6px 8px;
@@ -129,7 +160,7 @@ export class LoginEditorPanel {
       font-family: var(--vscode-font-family);
       font-size: var(--vscode-font-size);
     }
-    input:focus {
+    select:focus, input:focus {
       outline: 1px solid var(--vscode-focusBorder);
       border-color: var(--vscode-focusBorder);
     }
@@ -170,7 +201,7 @@ export class LoginEditorPanel {
 
   <div class="field-group">
     <label for="version">GemStone Version</label>
-    <input type="text" id="version" placeholder="3.7.2">
+    <select id="version"></select>
 
     <label for="gem_host">Gem Host</label>
     <input type="text" id="gem_host" placeholder="localhost">
@@ -214,7 +245,25 @@ export class LoginEditorPanel {
       const msg = event.data;
       if (msg.command === 'loadData') {
         originalLabel = msg.data.label || null;
+        // Populate version dropdown
+        const versionSelect = document.getElementById('version');
+        const currentVersion = msg.data.version || '';
+        const versions = msg.versions || [];
+        versionSelect.innerHTML = '';
+        const versionSet = new Set(versions);
+        if (currentVersion && !versionSet.has(currentVersion)) {
+          versions.unshift(currentVersion);
+        }
+        for (const v of versions) {
+          const opt = document.createElement('option');
+          opt.value = v;
+          opt.textContent = v;
+          versionSelect.appendChild(opt);
+        }
+        versionSelect.value = currentVersion;
+        // Populate other fields
         for (const f of fields) {
+          if (f === 'version') continue;
           const el = document.getElementById(f);
           if (el) el.value = msg.data[f] || '';
         }

@@ -11,22 +11,32 @@ function formatSize(bytes: number): string {
 export class VersionItem extends vscode.TreeItem {
   constructor(public readonly version: GemStoneVersion) {
     super(version.version, vscode.TreeItemCollapsibleState.None);
-    this.description = `${formatSize(version.size)} | ${version.date}`;
 
-    let ctx = 'gemstoneVersion';
-    if (version.downloaded) ctx += 'Downloaded';
-    if (version.extracted) ctx += 'Extracted';
-    this.contextValue = ctx;
-
-    if (version.extracted) {
-      this.iconPath = new vscode.ThemeIcon('check', new vscode.ThemeColor('testing.iconPassed'));
-      this.tooltip = `${version.version} — extracted and ready to use`;
-    } else if (version.downloaded) {
-      this.iconPath = new vscode.ThemeIcon('cloud-download');
-      this.tooltip = `${version.version} — downloaded, not yet extracted`;
+    if (version.local) {
+      this.description = `(local) | ${version.date}`;
+      this.contextValue = 'gemstoneVersionLocal';
+      this.iconPath = new vscode.ThemeIcon('check', new vscode.ThemeColor('charts.purple'));
+      this.tooltip = version.buildDescription
+        ? `${version.version} — local build\n${version.buildDescription}`
+        : `${version.version} — local build`;
     } else {
-      this.iconPath = new vscode.ThemeIcon('cloud');
-      this.tooltip = `${version.version} — available for download`;
+      this.description = `${formatSize(version.size)} | ${version.date}`;
+
+      let ctx = 'gemstoneVersion';
+      if (version.downloaded) ctx += 'Downloaded';
+      if (version.extracted) ctx += 'Extracted';
+      this.contextValue = ctx;
+
+      if (version.extracted) {
+        this.iconPath = new vscode.ThemeIcon('check', new vscode.ThemeColor('testing.iconPassed'));
+        this.tooltip = `${version.version} — extracted and ready to use`;
+      } else if (version.downloaded) {
+        this.iconPath = new vscode.ThemeIcon('cloud-download');
+        this.tooltip = `${version.version} — downloaded, not yet extracted`;
+      } else {
+        this.iconPath = new vscode.ThemeIcon('cloud');
+        this.tooltip = `${version.version} — available for download`;
+      }
     }
   }
 }

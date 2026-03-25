@@ -497,6 +497,18 @@
         "icon": "$(trash)"
       },
       {
+        "command": "gemstone.registerLocalVersion",
+        "title": "Register Local Version…",
+        "category": "GemStone Admin",
+        "icon": "$(add)"
+      },
+      {
+        "command": "gemstone.unregisterLocalVersion",
+        "title": "Unregister Local Version",
+        "category": "GemStone Admin",
+        "icon": "$(trash)"
+      },
+      {
         "command": "gemstone.openVersionFolder",
         "title": "Open in File Manager",
         "category": "GemStone Admin",
@@ -588,9 +600,14 @@
           "group": "navigation"
         },
         {
+          "command": "gemstone.registerLocalVersion",
+          "when": "view == gemstoneVersions",
+          "group": "navigation@1"
+        },
+        {
           "command": "gemstone.refreshVersions",
           "when": "view == gemstoneVersions",
-          "group": "navigation"
+          "group": "navigation@2"
         },
         {
           "command": "gemstone.createDatabase",
@@ -677,6 +694,11 @@
           "group": "inline@3"
         },
         {
+          "command": "gemstone.openVersionFolder",
+          "when": "view == gemstoneVersions && viewItem == gemstoneVersionLocal",
+          "group": "inline@1"
+        },
+        {
           "command": "gemstone.extractVersion",
           "when": "view == gemstoneVersions && viewItem == gemstoneVersionDownloadedExtracted",
           "group": "inline@2"
@@ -687,7 +709,11 @@
         },
         {
           "command": "gemstone.deleteExtracted",
-          "when": "view == gemstoneVersions && viewItem =~ /gemstoneVersion.*Extracted/"
+          "when": "view == gemstoneVersions && viewItem =~ /gemstoneVersion.*Extracted/ && viewItem != gemstoneVersionLocal"
+        },
+        {
+          "command": "gemstone.unregisterLocalVersion",
+          "when": "view == gemstoneVersions && viewItem == gemstoneVersionLocal"
         },
         {
           "command": "gemstone.replaceExtent",

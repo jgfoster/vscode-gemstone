@@ -33,6 +33,7 @@ import { showTranscript } from './transcriptChannel';
 import { GemStoneCodeLensProvider } from './gemstoneCodeLensProvider';
 import * as queries from './browserQueries';
 import { SysadminStorage } from './sysadminStorage';
+import { appendSysadmin } from './sysadminChannel';
 import { VersionManager } from './versionManager';
 import { VersionTreeProvider, VersionItem } from './versionTreeProvider';
 import { DatabaseManager } from './databaseManager';
@@ -84,6 +85,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // ── Login Management ─────────────────────────────────────
   const storage = new LoginStorage();
+  const sysadminStorage = new SysadminStorage();
   const treeProvider = new LoginTreeProvider(storage);
 
   const treeView = vscode.window.createTreeView('gemstoneLogins', {
@@ -230,6 +232,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // ── Code Execution ─────────────────────────────────────
   const codeExecutor = new CodeExecutor(sessionManager);
+  context.subscriptions.push(codeExecutor);
 
   // ── Status Bar: Active Session ─────────────────────────
   const statusBarItem = vscode.window.createStatusBarItem(
@@ -350,11 +353,11 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('gemstone.addLogin', () => {
-      LoginEditorPanel.show(storage, treeProvider);
+      LoginEditorPanel.show(storage, treeProvider, undefined, sysadminStorage);
     }),
 
     vscode.commands.registerCommand('gemstone.editLogin', (item: GemStoneLoginItem) => {
-      LoginEditorPanel.show(storage, treeProvider, item.login);
+      LoginEditorPanel.show(storage, treeProvider, item.login, sysadminStorage);
     }),
 
     vscode.commands.registerCommand('gemstone.deleteLogin', async (item: GemStoneLoginItem) => {
@@ -371,10 +374,17 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand('gemstone.duplicateLogin', (item: GemStoneLoginItem) => {
       const copy = { ...item.login, label: '' };
-      LoginEditorPanel.show(storage, treeProvider, copy);
+      LoginEditorPanel.show(storage, treeProvider, copy, sysadminStorage);
     }),
 
     vscode.commands.registerCommand('gemstone.login', async (item: GemStoneLoginItem) => {
+      if (!vscode.workspace.workspaceFolders?.length) {
+        vscode.window.showErrorMessage(
+          'Please open a folder in the workspace before logging in to GemStone.',
+        );
+        return;
+      }
+
       const login = { ...item.login };
 
       if (!login.gs_password) {
@@ -397,6 +407,19 @@ export function activate(context: vscode.ExtensionContext) {
 
       // Ensure GCI library is configured for this version
       let gciPath = storage.getGciLibraryPath(login.version);
+
+      // Auto-detect from extracted version's lib/ directory
+      if (!gciPath) {
+        const gsPath = sysadminStorage.getGemstonePath(login.version);
+        if (gsPath) {
+          const ext = process.platform === 'win32' ? 'dll' : process.platform === 'darwin' ? 'dylib' : 'so';
+          const candidate = path.join(gsPath, 'lib', `libgcits-${login.version}-64.${ext}`);
+          if (fs.existsSync(candidate)) {
+            gciPath = candidate;
+          }
+        }
+      }
+
       if (!gciPath) {
         const filters: Record<string, string[]> =
           process.platform === 'win32'
@@ -856,7 +879,6 @@ export function activate(context: vscode.ExtensionContext) {
     }
   }
 
-  const sysadminStorage = new SysadminStorage();
   const processManager = new ProcessManager(sysadminStorage);
   const versionManager = new VersionManager(sysadminStorage);
   const databaseManager = new DatabaseManager(sysadminStorage, processManager);
@@ -961,6 +983,45 @@ export function activate(context: vscode.ExtensionContext) {
         'Delete',
       );
       if (confirmed !== 'Delete') return;
+      await versionManager.deleteExtracted(item.version);
+      versionProvider.loadVersions();
+    }),
+
+    vscode.commands.registerCommand('gemstone.registerLocalVersion', async () => {
+      const uris = await vscode.window.showOpenDialog({
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        openLabel: 'Select GemStone Product Directory',
+      });
+      if (!uris || uris.length === 0) return;
+      const productPath = uris[0].fsPath;
+      const info = SysadminStorage.readVersionTxt(productPath);
+      if (!info) {
+        vscode.window.showErrorMessage('No valid version.txt found in the selected directory.');
+        return;
+      }
+      const suffix = sysadminStorage.getPlatformSuffix();
+      const linkName = `GemStone64Bit${info.version}${suffix}`;
+      const linkPath = path.join(sysadminStorage.getRootPath(), linkName);
+      if (fs.existsSync(linkPath)) {
+        vscode.window.showErrorMessage(`Version ${info.version} already exists in ${sysadminStorage.getRootPath()}.`);
+        return;
+      }
+      sysadminStorage.ensureRootPath();
+      fs.symlinkSync(productPath, linkPath);
+      appendSysadmin(`Registered local version: ${info.version} → ${productPath}`);
+      vscode.window.showInformationMessage(`Registered local GemStone ${info.version} (${info.description || 'local build'}).`);
+      versionProvider.loadVersions();
+    }),
+
+    vscode.commands.registerCommand('gemstone.unregisterLocalVersion', async (item: VersionItem) => {
+      const confirmed = await vscode.window.showWarningMessage(
+        `Unregister local GemStone ${item.version.version}? This only removes the symlink, not the product directory.`,
+        { modal: true },
+        'Unregister',
+      );
+      if (confirmed !== 'Unregister') return;
       await versionManager.deleteExtracted(item.version);
       versionProvider.loadVersions();
     }),
@@ -1078,7 +1139,7 @@ export function activate(context: vscode.ExtensionContext) {
           }
         }
       }
-      LoginEditorPanel.show(storage, treeProvider, login);
+      LoginEditorPanel.show(storage, treeProvider, login, sysadminStorage);
     }),
 
     vscode.commands.registerCommand('gemstone.refreshProcesses', () => {

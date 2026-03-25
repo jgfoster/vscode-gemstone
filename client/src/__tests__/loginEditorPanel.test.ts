@@ -1,15 +1,23 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 vi.mock('vscode', () => import('../__mocks__/vscode'));
+vi.mock('../sysadminStorage');
 
-import { window, __resetConfig } from '../__mocks__/vscode';
+import { window, __resetConfig, __setConfig } from '../__mocks__/vscode';
 import { LoginEditorPanel } from '../loginEditorPanel';
 import { LoginStorage } from '../loginStorage';
 import { LoginTreeProvider } from '../loginTreeProvider';
+import { SysadminStorage } from '../sysadminStorage';
 import { DEFAULT_LOGIN, GemStoneLogin } from '../loginTypes';
 
 function makeLogin(overrides: Partial<GemStoneLogin> = {}): GemStoneLogin {
   return { ...DEFAULT_LOGIN, label: 'Test', ...overrides };
+}
+
+function makeSysadminStorage(extractedVersions: string[] = []): SysadminStorage {
+  return {
+    getExtractedVersions: vi.fn(() => extractedVersions),
+  } as any;
 }
 
 describe('LoginEditorPanel', () => {
@@ -108,6 +116,7 @@ describe('LoginEditorPanel', () => {
       expect(panel.webview.postMessage).toHaveBeenCalledWith({
         command: 'loadData',
         data: expect.objectContaining({ label: '' }),
+        versions: [],
       });
     });
 
@@ -118,7 +127,89 @@ describe('LoginEditorPanel', () => {
       expect(panel.webview.postMessage).toHaveBeenCalledWith({
         command: 'loadData',
         data: expect.objectContaining({ label: 'Server', gem_host: 'myhost' }),
+        versions: [],
       });
+    });
+  });
+
+  describe('version dropdown', () => {
+    it('includes extracted versions in loadData message', () => {
+      const sysadmin = makeSysadminStorage(['3.7.4', '3.6.4']);
+      LoginEditorPanel.show(storage, treeProvider, undefined, sysadmin);
+      const panel = (window.createWebviewPanel as any).mock.results[0].value;
+      expect(panel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ versions: ['3.7.4', '3.6.4'] }),
+      );
+    });
+
+    it('includes versions from gciLibraries config', () => {
+      __setConfig('gemstone', 'gciLibraries', { '3.5.0': '/path/to/lib' });
+      const sysadmin = makeSysadminStorage([]);
+      LoginEditorPanel.show(storage, treeProvider, undefined, sysadmin);
+      const panel = (window.createWebviewPanel as any).mock.results[0].value;
+      expect(panel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ versions: ['3.5.0'] }),
+      );
+    });
+
+    it('deduplicates versions from both sources', () => {
+      __setConfig('gemstone', 'gciLibraries', { '3.7.4': '/path/to/lib' });
+      const sysadmin = makeSysadminStorage(['3.7.4']);
+      LoginEditorPanel.show(storage, treeProvider, undefined, sysadmin);
+      const panel = (window.createWebviewPanel as any).mock.results[0].value;
+      expect(panel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ versions: ['3.7.4'] }),
+      );
+    });
+
+    it('sorts versions newest first', () => {
+      __setConfig('gemstone', 'gciLibraries', { '3.5.0': '/path/a' });
+      const sysadmin = makeSysadminStorage(['3.6.4', '3.7.4']);
+      LoginEditorPanel.show(storage, treeProvider, undefined, sysadmin);
+      const panel = (window.createWebviewPanel as any).mock.results[0].value;
+      expect(panel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ versions: ['3.7.4', '3.6.4', '3.5.0'] }),
+      );
+    });
+
+    it('renders a select element for the version field', () => {
+      LoginEditorPanel.show(storage, treeProvider);
+      const panel = (window.createWebviewPanel as any).mock.results[0].value;
+      expect(panel.webview.html).toContain('<select id="version">');
+    });
+
+    it('defaults new login version to the highest available version', () => {
+      const sysadmin = makeSysadminStorage(['3.6.4', '3.7.4']);
+      LoginEditorPanel.show(storage, treeProvider, undefined, sysadmin);
+      const panel = (window.createWebviewPanel as any).mock.results[0].value;
+      expect(panel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ version: '3.7.4' }),
+        }),
+      );
+    });
+
+    it('defaults to empty version when no versions are available', () => {
+      const sysadmin = makeSysadminStorage([]);
+      LoginEditorPanel.show(storage, treeProvider, undefined, sysadmin);
+      const panel = (window.createWebviewPanel as any).mock.results[0].value;
+      expect(panel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ version: '' }),
+        }),
+      );
+    });
+
+    it('preserves version from existing login rather than defaulting', () => {
+      const sysadmin = makeSysadminStorage(['3.7.4', '3.6.4']);
+      const login = makeLogin({ version: '3.6.4' });
+      LoginEditorPanel.show(storage, treeProvider, login, sysadmin);
+      const panel = (window.createWebviewPanel as any).mock.results[0].value;
+      expect(panel.webview.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ version: '3.6.4' }),
+        }),
+      );
     });
   });
 });

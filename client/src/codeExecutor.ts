@@ -46,8 +46,15 @@ function toBigInt(value: number | bigint): bigint {
 export class CodeExecutor {
   private executing = new Set<number>();
   private oopClassStringCache = new Map<unknown, bigint>();
+  private diagnostics: vscode.DiagnosticCollection;
 
-  constructor(private sessionManager: SessionManager) {}
+  constructor(private sessionManager: SessionManager) {
+    this.diagnostics = vscode.languages.createDiagnosticCollection('gemstone-execute');
+  }
+
+  dispose(): void {
+    this.diagnostics.dispose();
+  }
 
   async displayIt(): Promise<void> {
     return this.execute(true);
@@ -92,16 +99,16 @@ export class CodeExecutor {
     this.executing.add(session.id);
     const label = displayResult ? 'Display It' : 'Execute It';
     logQuery(session.id, label, code);
-    const wrappedCode = this.wrapWithTranscriptCapture(code);
+    const { wrappedCode, codeOffset } = this.wrapWithTranscriptCapture(code);
     try {
       const { success, err: startErr } = session.gci.GciTsNbExecute(
         session.handle, wrappedCode, oopClassString,
         OOP_ILLEGAL, OOP_NIL, GCI_PERFORM_FLAG_ENABLE_DEBUG, 0,
       );
       if (!success) {
-        const msg = `Execution failed to start: ${startErr.message || `error ${startErr.number}`}`;
+        const msg = startErr.message || `error ${startErr.number}`;
         logError(session.id, msg);
-        vscode.window.showErrorMessage(msg);
+        this.showCompileError(editor, selection, code, codeOffset, msg);
         return;
       }
 
@@ -111,6 +118,7 @@ export class CodeExecutor {
       if (transcript) appendTranscript(transcript);
 
       logResult(session.id, resultString);
+      this.diagnostics.delete(editor.document.uri);
 
       if (displayResult) {
         await editor.edit(editBuilder => {
@@ -146,6 +154,8 @@ export class CodeExecutor {
       logError(session.id, msg);
 
       if (e instanceof DebuggableError) {
+        // Try to show as inline diagnostic first; fall back to debug dialog
+        this.showCompileError(editor, selection, code, codeOffset, msg);
         const choice = await vscode.window.showErrorMessage(
           `GemStone error: ${msg}`, 'Debug', 'Dismiss',
         );
@@ -162,7 +172,7 @@ export class CodeExecutor {
           try { session.gci.GciTsClearStack(session.handle, e.context); } catch { /* ignore */ }
         }
       } else {
-        vscode.window.showErrorMessage(`GemStone execution error: ${msg}`);
+        this.showCompileError(editor, selection, code, codeOffset, msg);
       }
     } finally {
       this.executing.delete(session.id);
@@ -194,7 +204,7 @@ export class CodeExecutor {
     }
   }
 
-  private wrapWithTranscriptCapture(code: string): string {
+  private wrapWithTranscriptCapture(code: string): { wrappedCode: string; codeOffset: number } {
     // Wrap user code so that Transcript writes are captured into SessionTemps.
     // The wrapped code:
     //   1. Creates a capture WriteStream
@@ -202,17 +212,24 @@ export class CodeExecutor {
     //   3. Installs the capture stream as Transcript in SessionTemps
     //   4. Evaluates the user code inside an ensure: block
     //   5. Restores the original Transcript and stores captured text
-    const escaped = code.replace(/'/g, "''");
-    return `| __vscCapture __vscOriginal __vscResult |
+    //
+    // The user code is embedded directly in Smalltalk source (inside a block),
+    // NOT inside a string literal, so single quotes must NOT be escaped.
+    const prefix = `| __vscCapture __vscOriginal __vscResult |
 __vscCapture := WriteStream on: String new.
 __vscOriginal := SessionTemps current at: #Transcript ifAbsent: [nil].
 SessionTemps current at: #Transcript put: __vscCapture.
-[__vscResult := [${escaped}] value]
+[__vscResult := [`;
+    const suffix = `] value]
   ensure: [
     SessionTemps current at: #Transcript put: __vscOriginal.
     SessionTemps current at: #'__vscTranscriptResult' put: __vscCapture contents.
   ].
 __vscResult`;
+    return {
+      wrappedCode: prefix + code + suffix,
+      codeOffset: prefix.length,
+    };
   }
 
   private fetchTranscriptOutput(session: ActiveSession): string {
@@ -247,6 +264,80 @@ __t`;
     oop = result;
     this.oopClassStringCache.set(session.handle, oop);
     return oop;
+  }
+
+  /**
+   * Show a compile/syntax error as an inline diagnostic in the editor.
+   *
+   * GemStone error messages for compile errors typically contain a 1-based
+   * character offset into the source string (e.g. "...near source character 45").
+   * Since the user code is wrapped in a Transcript-capture template, we subtract
+   * the wrapper prefix length to map back to the user's original code, then
+   * convert to a line/column position relative to the editor selection.
+   */
+  private showCompileError(
+    editor: vscode.TextEditor,
+    selection: vscode.Selection,
+    userCode: string,
+    wrapperPrefixLength: number,
+    message: string,
+  ): void {
+    // Try to extract a character offset from the error message.
+    // GemStone formats vary; common patterns include:
+    //   "...near source character 45"
+    //   "...at or near character 45"
+    //   "...Error, (offset 45)"
+    const offsetMatch = message.match(
+      /(?:character|offset|position)\s+(\d+)/i,
+    );
+    let diagRange: vscode.Range;
+    if (offsetMatch) {
+      const gsOffset = parseInt(offsetMatch[1], 10) - 1; // GemStone is 1-based
+      const userOffset = Math.max(0, Math.min(gsOffset - wrapperPrefixLength, userCode.length));
+      diagRange = this.offsetToEditorRange(editor, selection, userCode, userOffset);
+    } else {
+      // No offset found — highlight the entire selection
+      diagRange = new vscode.Range(selection.start, selection.end);
+    }
+
+    const diag = new vscode.Diagnostic(diagRange, message, vscode.DiagnosticSeverity.Error);
+    diag.source = 'GemStone';
+    this.diagnostics.set(editor.document.uri, [diag]);
+
+    // Clear diagnostic when the document is next edited
+    const disposable = vscode.workspace.onDidChangeTextDocument(e => {
+      if (e.document === editor.document) {
+        this.diagnostics.delete(editor.document.uri);
+        disposable.dispose();
+      }
+    });
+  }
+
+  /**
+   * Convert a character offset within the user code to an editor Range.
+   * The range highlights the line containing the error.
+   */
+  private offsetToEditorRange(
+    editor: vscode.TextEditor,
+    selection: vscode.Selection,
+    userCode: string,
+    userOffset: number,
+  ): vscode.Range {
+    const beforeError = userCode.substring(0, userOffset);
+    const lines = beforeError.split('\n');
+    const errorLineInCode = lines.length - 1; // 0-based line within user code
+    const errorCol = lines[lines.length - 1].length;
+
+    // Map to editor position relative to the selection start
+    const editorLine = selection.start.line + errorLineInCode;
+    const editorCol = errorLineInCode === 0
+      ? selection.start.character + errorCol
+      : errorCol;
+
+    const pos = new vscode.Position(editorLine, editorCol);
+    // Highlight from the error position to the end of that line
+    const lineEnd = editor.document.lineAt(editorLine).range.end;
+    return new vscode.Range(pos, lineEnd);
   }
 
   private pollForCompletion<T>(
@@ -426,7 +517,7 @@ __t`;
 
     this.executing.add(session.id);
     logQuery(session.id, 'Inspect It', code);
-    const wrappedCode = this.wrapWithTranscriptCapture(code);
+    const { wrappedCode } = this.wrapWithTranscriptCapture(code);
     try {
       const { success, err: startErr } = session.gci.GciTsNbExecute(
         session.handle, wrappedCode, oopClassString,

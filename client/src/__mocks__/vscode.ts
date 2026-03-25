@@ -178,6 +178,7 @@ export const window = {
   onDidChangeTextEditorSelection: vi.fn(() => ({ dispose: () => {} })),
   onDidChangeVisibleTextEditors: vi.fn(() => ({ dispose: () => {} })),
   createTerminal: vi.fn((_name: string) => ({ show: vi.fn(), sendText: vi.fn() })),
+  setStatusBarMessage: vi.fn(),
   showInputBox: vi.fn(),
   showQuickPick: vi.fn(),
   tabGroups: {
@@ -228,6 +229,7 @@ export class WorkspaceEdit {
 export const workspace = {
   getConfiguration,
   onDidChangeConfiguration: vi.fn(() => ({ dispose: () => {} })),
+  onDidChangeTextDocument: vi.fn(() => ({ dispose: () => {} })),
   onDidSaveTextDocument: vi.fn(() => ({ dispose: () => {} })),
   onWillSaveTextDocument: vi.fn(() => ({ dispose: () => {} })),
   onDidCreateFiles: vi.fn(() => ({ dispose: () => {} })),
@@ -342,6 +344,9 @@ export const FilePermission = {
 
 export class Position {
   constructor(public readonly line: number, public readonly character: number) {}
+  translate(lineDelta = 0, charDelta = 0): Position {
+    return new Position(this.line + lineDelta, this.character + charDelta);
+  }
 }
 
 export class Range {
@@ -375,6 +380,9 @@ export class Selection extends Range {
     super(anchor, active);
     this.anchor = anchor;
     this.active = active;
+  }
+  get isEmpty(): boolean {
+    return this.anchor.line === this.active.line && this.anchor.character === this.active.character;
   }
 }
 

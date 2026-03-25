@@ -31,6 +31,25 @@ export class VersionManager {
     const downloaded = this.storage.getDownloadedFiles();
     const extractedVersions = new Set(this.storage.getExtractedVersions());
 
+    // Add local (symlinked) versions first
+    for (const ver of extractedVersions) {
+      if (this.storage.isLocalVersion(ver)) {
+        const gsPath = this.storage.getGemstonePath(ver);
+        const info = gsPath ? SysadminStorage.readVersionTxt(gsPath) : undefined;
+        versions.push({
+          version: ver,
+          fileName: '',
+          url: '',
+          size: 0,
+          date: info?.date ?? '',
+          downloaded: false,
+          extracted: true,
+          local: true,
+          buildDescription: info?.description,
+        });
+      }
+    }
+
     let match;
     while ((match = regex.exec(html)) !== null) {
       const fileName = match[1];
@@ -45,12 +64,16 @@ export class VersionManager {
         size,
         date,
         downloaded: isDownloaded,
-        extracted: extractedVersions.has(version),
+        extracted: extractedVersions.has(version) && !this.storage.isLocalVersion(version),
       });
     }
 
-    // Sort newest first
-    versions.reverse();
+    // Sort newest first; local versions before remote at same version
+    versions.sort((a, b) => {
+      const cmp = b.version.localeCompare(a.version, undefined, { numeric: true });
+      if (cmp !== 0) return cmp;
+      return (b.local ? 1 : 0) - (a.local ? 1 : 0);
+    });
     return versions;
   }
 
@@ -255,6 +278,12 @@ export class VersionManager {
   async deleteExtracted(version: GemStoneVersion): Promise<void> {
     const gsPath = this.storage.getGemstonePath(version.version);
     if (gsPath && fs.existsSync(gsPath)) {
+      // Safety: if this is a symlink (local version), only remove the link
+      if (this.storage.isLocalVersion(version.version)) {
+        fs.unlinkSync(gsPath);
+        appendSysadmin(`Unregistered local version: ${version.version}`);
+        return;
+      }
       if (needsWsl()) {
         const wslPath = this.storage.getWslGemstonePath(version.version);
         if (wslPath) {

@@ -16,7 +16,7 @@ export function loginLabel(login: Pick<GemStoneLogin, 'gs_user' | 'stone' | 'gem
 
 export const DEFAULT_LOGIN: GemStoneLogin = {
   label: '',
-  version: '3.7.2',
+  version: '',
   gem_host: 'localhost',
   stone: 'gs64stone',
   gs_user: 'DataCurator',
