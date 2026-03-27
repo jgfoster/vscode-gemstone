@@ -61,6 +61,14 @@ export interface MethodInfo {
   selector: string;
 }
 
+export interface MethodUriInfo {
+  dictName: string;
+  className: string;
+  isMeta: boolean;
+  category: string;
+  selector: string;
+}
+
 /**
  * Returns the number of stack frames in the suspended process.
  */
@@ -141,6 +149,50 @@ export function getMethodInfo(session: ActiveSession, methodOop: bigint): Method
   const className = gciPerformFetchString(session, classOop, 'name');
   const selector = gciPerformFetchString(session, methodOop, 'selector');
   return { className, selector };
+}
+
+/**
+ * Returns everything needed to construct a gemstone:// URI for a method.
+ * Uses a single Smalltalk execution to minimise GCI round-trips.
+ */
+export function getMethodUriInfo(session: ActiveSession, methodOop: bigint): MethodUriInfo | undefined {
+  try {
+    const { result: classUtf8, err: resErr } = session.gci.GciTsResolveSymbol(
+      session.handle, 'Utf8', OOP_NIL,
+    );
+    if (resErr.number !== 0) return undefined;
+
+    const code = `| method class baseClass dictName category |
+method := Object _objectForOop: ${methodOop}.
+class := method inClass.
+baseClass := class theNonMetaClass.
+dictName := ''.
+System myUserProfile symbolList do: [:d |
+  (d includesKey: baseClass name asSymbol) ifTrue: [dictName := d name]].
+category := (class categoryOfSelector: method selector environmentId: 0) ifNil: ['as yet unclassified'].
+dictName, String tab,
+  baseClass name, String tab,
+  (class isMeta ifTrue: ['class'] ifFalse: ['instance']), String tab,
+  category, String tab,
+  method selector asString`;
+
+    const { data, err } = session.gci.GciTsExecuteFetchBytes(
+      session.handle, code, -1, classUtf8, OOP_ILLEGAL, OOP_NIL, 64 * 1024,
+    );
+    if (err.number !== 0) return undefined;
+
+    const parts = data.split('\t');
+    if (parts.length < 5) return undefined;
+    return {
+      dictName: parts[0],
+      className: parts[1],
+      isMeta: parts[2] === 'class',
+      category: parts[3],
+      selector: parts[4],
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 /**

@@ -22,6 +22,13 @@ vi.mock('../debugQueries', () => ({
     className: 'SmallInteger',
     selector: methodOop === 1001n ? '/' : methodOop === 1002n ? '_errorExec' : 'perform:',
   })),
+  getMethodUriInfo: vi.fn((session: unknown, methodOop: bigint) => ({
+    dictName: 'Globals',
+    className: 'SmallInteger',
+    isMeta: false,
+    category: 'arithmetic',
+    selector: methodOop === 1001n ? '/' : methodOop === 1002n ? '_errorExec' : 'perform:',
+  })),
   getMethodSource: vi.fn(() => '/ aNumber\n  ^ self _primitiveDivide: aNumber'),
   getLineForIp: vi.fn(() => 2),
   getObjectPrintString: vi.fn((session: unknown, oop: bigint) => {
@@ -212,8 +219,18 @@ describe('GemStoneDebugSession', () => {
       expect(new Set(refs).size).toBe(3);
     });
 
-    it('still provides source reference when getMethodInfo throws (doit frame)', () => {
-      // Simulate a "doit" method where inClass throws — e.g. executed code
+    it('provides gemstone:// URI as source path', () => {
+      const response = makeResponse('stackTrace');
+      callRequest(session, 'stackTraceRequest', response, { threadId: 1 });
+
+      const body = response.body as { stackFrames: Array<{ source?: { path?: string } }> };
+      const path = body.stackFrames[0].source?.path;
+      expect(path).toBe('gemstone://1/Globals/SmallInteger/instance/arithmetic/%2F');
+    });
+
+    it('still provides source reference when getMethodUriInfo returns undefined (doit frame)', () => {
+      // Simulate a "doit" method where the query can't resolve the method
+      vi.mocked(debugQueries.getMethodUriInfo).mockReturnValueOnce(undefined);
       vi.mocked(debugQueries.getMethodInfo).mockImplementationOnce(() => {
         throw new Error('does not understand #inClass');
       });

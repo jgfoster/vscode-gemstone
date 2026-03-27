@@ -11,6 +11,7 @@ vi.mock('../browserQueries', () => ({
   canClassBeWritten: vi.fn(),
   compileClassDefinition: vi.fn(),
   setClassComment: vi.fn(),
+  getPoolDictionaryNames: vi.fn(),
 }));
 
 import { window, ViewColumn } from '../__mocks__/vscode';
@@ -178,6 +179,7 @@ describe('ClassBrowser', () => {
       { isClass: true, category: 'Kernel', name: 'Array' },
     ]);
     vi.mocked(queries.getClassNames).mockReturnValue(['Object', 'Array', 'String']);
+    vi.mocked(queries.getPoolDictionaryNames).mockReturnValue(['Globals', 'UserGlobals', 'MyPool']);
   });
 
   afterEach(() => {
@@ -199,6 +201,15 @@ describe('ClassBrowser', () => {
       expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
         command: 'loadDictionaries',
         items: ['UserGlobals', 'Globals'],
+      });
+    });
+
+    it('sends loadPoolDictionaries with all visible SymbolDictionary names', async () => {
+      await ClassBrowser.showOrUpdate(session, ['UserGlobals', 'Globals'], 1, null);
+      messageHandler({ command: 'ready' });
+      expect(mockPanel.webview.postMessage).toHaveBeenCalledWith({
+        command: 'loadPoolDictionaries',
+        items: ['Globals', 'UserGlobals', 'MyPool'],
       });
     });
 

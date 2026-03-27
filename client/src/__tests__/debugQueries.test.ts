@@ -134,6 +134,76 @@ describe('debugQueries', () => {
     });
   });
 
+  describe('getMethodUriInfo', () => {
+    it('parses tab-separated result into MethodUriInfo', () => {
+      const session = createMockSession();
+      // Mock GciTsResolveSymbol for Utf8 class
+      (session.gci as Record<string, unknown>).GciTsResolveSymbol = vi.fn(() => ({
+        result: 9000n, err: { ...noErr },
+      }));
+      // Mock GciTsExecuteFetchBytes to return tab-separated URI info
+      (session.gci as Record<string, unknown>).GciTsExecuteFetchBytes = vi.fn(() => ({
+        bytesReturned: 0,
+        data: 'Globals\tSmallInteger\tinstance\tarithmetic\t/',
+        err: { ...noErr },
+      }));
+
+      const result = debug.getMethodUriInfo(session, METHOD_OOP);
+
+      expect(result).toEqual({
+        dictName: 'Globals',
+        className: 'SmallInteger',
+        isMeta: false,
+        category: 'arithmetic',
+        selector: '/',
+      });
+    });
+
+    it('returns undefined when GciTsResolveSymbol fails', () => {
+      const session = createMockSession();
+      (session.gci as Record<string, unknown>).GciTsResolveSymbol = vi.fn(() => ({
+        result: 0n, err: { ...noErr, number: 2010, message: 'not found' },
+      }));
+
+      expect(debug.getMethodUriInfo(session, METHOD_OOP)).toBeUndefined();
+    });
+
+    it('returns undefined when GciTsExecuteFetchBytes fails', () => {
+      const session = createMockSession();
+      (session.gci as Record<string, unknown>).GciTsResolveSymbol = vi.fn(() => ({
+        result: 9000n, err: { ...noErr },
+      }));
+      (session.gci as Record<string, unknown>).GciTsExecuteFetchBytes = vi.fn(() => ({
+        bytesReturned: 0, data: '',
+        err: { ...noErr, number: 1, message: 'error' },
+      }));
+
+      expect(debug.getMethodUriInfo(session, METHOD_OOP)).toBeUndefined();
+    });
+
+    it('parses class-side methods correctly', () => {
+      const session = createMockSession();
+      (session.gci as Record<string, unknown>).GciTsResolveSymbol = vi.fn(() => ({
+        result: 9000n, err: { ...noErr },
+      }));
+      (session.gci as Record<string, unknown>).GciTsExecuteFetchBytes = vi.fn(() => ({
+        bytesReturned: 0,
+        data: 'Globals\tArray\tclass\tinstance creation\tnew',
+        err: { ...noErr },
+      }));
+
+      const result = debug.getMethodUriInfo(session, METHOD_OOP);
+
+      expect(result).toEqual({
+        dictName: 'Globals',
+        className: 'Array',
+        isMeta: true,
+        category: 'instance creation',
+        selector: 'new',
+      });
+    });
+  });
+
   describe('getInstVarNames', () => {
     it('does not send multi-word selectors', () => {
       const session = createMockSession();

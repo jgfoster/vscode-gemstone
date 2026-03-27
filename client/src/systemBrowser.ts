@@ -61,6 +61,7 @@ export function extractSelector(messagePattern: string): string {
 
 export class SystemBrowser {
   private static panels = new Map<number, Set<SystemBrowser>>();
+  private static lastActive = new Map<number, SystemBrowser>();
 
   private readonly panel: vscode.WebviewPanel;
   private disposables: vscode.Disposable[] = [];
@@ -83,6 +84,20 @@ export class SystemBrowser {
     const browsers = SystemBrowser.panels.get(sessionId);
     if (browsers) {
       for (const browser of browsers) browser.handleRefresh();
+    }
+  }
+
+  /**
+   * Notify browsers that a method was compiled (new or existing) so the
+   * method list can be refreshed without a full browser reset.
+   */
+  static methodCompiled(sessionId: number, className: string): void {
+    const browsers = SystemBrowser.panels.get(sessionId);
+    if (!browsers) return;
+    for (const browser of browsers) {
+      if (browser.state.selectedClass === className) {
+        browser.refreshMethodList();
+      }
     }
   }
 
@@ -115,6 +130,7 @@ export class SystemBrowser {
     if (browsers) {
       for (const browser of [...browsers]) browser.panel.dispose();
     }
+    SystemBrowser.lastActive.delete(sessionId);
   }
 
   /**
@@ -124,10 +140,53 @@ export class SystemBrowser {
    * separately), false if no browser is open for this session.
    */
   static navigateTo(sessionId: number, result: queries.MethodSearchResult): boolean {
-    const browsers = SystemBrowser.panels.get(sessionId);
-    if (!browsers || browsers.size === 0) return false;
-    for (const browser of browsers) browser.handleNavigateTo(result);
+    const browser = SystemBrowser.activeBrowser(sessionId);
+    if (!browser) return false;
+    browser.handleNavigateTo(result);
     return true;
+  }
+
+  /**
+   * Navigate the browser to a specific class (no method selected).
+   * Returns true if a browser was found and navigated.
+   */
+  static navigateToClass(sessionId: number, dictName: string, className: string): boolean {
+    const browser = SystemBrowser.activeBrowser(sessionId);
+    if (!browser) return false;
+    browser.handleNavigateToClass(dictName, className);
+    return true;
+  }
+
+  /**
+   * Return the most recently active browser for a session, or the first one if
+   * none has been activated yet.
+   */
+  private static activeBrowser(sessionId: number): SystemBrowser | undefined {
+    const browsers = SystemBrowser.panels.get(sessionId);
+    if (!browsers || browsers.size === 0) return undefined;
+    const last = SystemBrowser.lastActive.get(sessionId);
+    if (last && browsers.has(last)) return last;
+    return browsers.values().next().value;
+  }
+
+  /**
+   * Return the currently selected class in the first browser for this session,
+   * or null if no browser is open or no class is selected.
+   */
+  static getSelectedClassName(sessionId: number): { dictName: string; className: string } | null {
+    const browsers = SystemBrowser.panels.get(sessionId);
+    if (!browsers) return null;
+    for (const browser of browsers) {
+      const cls = browser.state.selectedClass;
+      const idx = browser.state.selectedDictIndex;
+      if (cls && idx) {
+        return {
+          dictName: browser.state.dictionaries[idx - 1],
+          className: cls,
+        };
+      }
+    }
+    return null;
   }
 
   private constructor(
@@ -168,6 +227,21 @@ export class SystemBrowser {
       null,
       this.disposables,
     );
+
+    // Track the most recently active browser so navigate commands target it
+    this.panel.onDidChangeViewState(
+      (e) => {
+        if (e.webviewPanel.active) {
+          SystemBrowser.lastActive.set(this.session.id, this);
+        }
+      },
+      null,
+      this.disposables,
+    );
+    // First browser created becomes the default target
+    if (!SystemBrowser.lastActive.has(this.session.id)) {
+      SystemBrowser.lastActive.set(this.session.id, this);
+    }
 
     // Clear dimming when user navigates to a different editor
     const editorSub = vscode.window.onDidChangeActiveTextEditor(() => {
@@ -303,6 +377,9 @@ export class SystemBrowser {
       set.delete(this);
       if (set.size === 0) SystemBrowser.panels.delete(this.session.id);
     }
+    if (SystemBrowser.lastActive.get(this.session.id) === this) {
+      SystemBrowser.lastActive.delete(this.session.id);
+    }
     this.clearDimming();
     this.dimDecorationType.dispose();
     this.panel.dispose();
@@ -376,7 +453,7 @@ export class SystemBrowser {
           this.handleRunTests();
           break;
         case 'ctxNewMethod':
-          this.handleNewMethod();
+          this.handleNewMethod().catch(e => this.postError(e));
           break;
         case 'ctxRenameCategory':
           this.handleRenameCategory().catch(e => this.postError(e));
@@ -512,7 +589,6 @@ export class SystemBrowser {
     this.panel.title = `Browser: ${className}`;
 
     this.loadMethodCategories();
-    this.openClassFile(className);
 
     const dictIndex = this.state.selectedDictIndex;
     if (dictIndex) {
@@ -641,9 +717,48 @@ export class SystemBrowser {
     this.openClassFile(className, selector, isMeta);
   }
 
+  private handleNavigateToClass(dictName: string, className: string): void {
+    const dictIndex = this.state.dictionaries.indexOf(dictName) + 1;
+    if (dictIndex === 0) return;
+
+    this.panel.reveal(undefined, true);
+
+    if (this.state.selectedDictIndex !== dictIndex) {
+      this.handleSelectDictionary(dictIndex);
+      this.panel.webview.postMessage({ command: 'selectDictionaryItem', index: dictIndex });
+    }
+
+    if (!this.state.classes.includes(className)) {
+      this.handleSelectCategory('** ALL CLASSES **');
+      this.panel.webview.postMessage({ command: 'selectCategoryItem', name: '** ALL CLASSES **' });
+    }
+
+    this.handleSelectClass(className);
+
+    this.panel.webview.postMessage({
+      command: 'loadClassCategories',
+      items: this.state.classCategories,
+      selected: this.state.selectedCategory,
+    });
+    this.panel.webview.postMessage({
+      command: 'loadClasses',
+      items: this.state.classes,
+      selected: className,
+    });
+    this.panel.webview.postMessage({
+      command: 'loadMethodCategories',
+      items: this.state.methodCategories,
+      selected: this.state.selectedMethodCategory,
+    });
+    this.panel.webview.postMessage({
+      command: 'loadMethods',
+      items: this.state.methods,
+      selected: null,
+    });
+  }
+
   private handleRefresh(): void {
-    const prevDictIndex = this.state.selectedDictIndex;
-    const prevCategory = this.state.selectedCategory;
+    const prev = { ...this.state };
 
     this.dictEntryCache.clear();
     this.envCache.clear();
@@ -657,8 +772,8 @@ export class SystemBrowser {
       selectedCategory: null,
       classes: [],
       selectedClass: null,
-      isMeta: false,
-      selectedEnvId: 0,
+      isMeta: prev.isMeta,
+      selectedEnvId: prev.selectedEnvId,
       methodCategories: [],
       selectedMethodCategory: null,
       methods: [],
@@ -672,20 +787,54 @@ export class SystemBrowser {
     this.panel.webview.postMessage({ command: 'setViewMode', mode: 'category' });
     this.handleReady();
 
-    // Restore dictionary and category selection so the class list stays visible
-    if (prevDictIndex && prevDictIndex <= this.state.dictionaries.length) {
-      this.handleSelectDictionary(prevDictIndex);
+    // Restore previous selections when the items still exist after refresh
+    if (!prev.selectedDictIndex || prev.selectedDictIndex > this.state.dictionaries.length) return;
+
+    this.handleSelectDictionary(prev.selectedDictIndex);
+    this.panel.webview.postMessage({
+      command: 'selectDictionaryItem',
+      index: prev.selectedDictIndex,
+    });
+
+    const prevCategory = prev.selectedCategory && this.state.classCategories.includes(prev.selectedCategory)
+      ? prev.selectedCategory : null;
+    if (prevCategory) {
+      this.handleSelectCategory(prevCategory);
+    }
+
+    if (prev.selectedClass && this.state.classes.includes(prev.selectedClass)) {
+      this.state.selectedClass = prev.selectedClass;
+      this.panel.title = `Browser: ${prev.selectedClass}`;
+
+      // Tell the webview which class category, class, and side are selected
       this.panel.webview.postMessage({
-        command: 'selectDictionaryItem',
-        index: prevDictIndex,
+        command: 'loadClassCategories',
+        items: this.state.classCategories,
+        selected: prevCategory,
       });
-      if (prevCategory && this.state.classCategories.includes(prevCategory)) {
-        this.handleSelectCategory(prevCategory);
-        this.panel.webview.postMessage({
-          command: 'selectCategoryItem',
-          name: prevCategory,
-        });
+      this.panel.webview.postMessage({
+        command: 'loadClasses',
+        items: this.state.classes,
+        selected: prev.selectedClass,
+      });
+      this.panel.webview.postMessage({ command: 'setSide', isMeta: this.state.isMeta });
+      this.loadMethodCategories(prev.selectedMethodCategory);
+
+      if (prev.selectedMethodCategory) {
+        this.state.selectedMethodCategory = prev.selectedMethodCategory;
+        this.handleSelectMethodCategory(prev.selectedMethodCategory);
       }
+
+      ClassBrowser.showOrUpdate(
+        this.session, this.state.dictionaries, prev.selectedDictIndex, prev.selectedClass,
+      ).catch(e => this.postError(e));
+    } else if (prevCategory) {
+      // No class to restore — just highlight the category in the webview
+      this.panel.webview.postMessage({
+        command: 'loadClassCategories',
+        items: this.state.classCategories,
+        selected: prevCategory,
+      });
     }
   }
 
@@ -992,7 +1141,7 @@ export class SystemBrowser {
   }
 
 
-  private handleNewMethod(): void {
+  private async handleNewMethod(): Promise<void> {
     const dictIndex = this.state.selectedDictIndex;
     const className = this.state.selectedClass;
     if (!dictIndex || !className) {
@@ -1012,7 +1161,9 @@ export class SystemBrowser {
       `/${encodeURIComponent(category)}` +
       `/new-method`,
     );
-    vscode.commands.executeCommand('gemstone.openDocument', uri);
+    const viewColumn = await this.getBrowserViewColumn();
+    const doc = await vscode.workspace.openTextDocument(uri);
+    vscode.window.showTextDocument(doc, { viewColumn, preview: true });
   }
 
   private async handleRenameCategory(): Promise<void> {
@@ -1172,6 +1323,18 @@ export class SystemBrowser {
     return data;
   }
 
+  private refreshMethodList(): void {
+    const dictIndex = this.state.selectedDictIndex;
+    const className = this.state.selectedClass;
+    if (!dictIndex || !className) return;
+
+    this.envCache.delete(`${dictIndex}/${className}`);
+    this.loadMethodCategories(this.state.selectedMethodCategory);
+    if (this.state.selectedMethodCategory) {
+      this.handleSelectMethodCategory(this.state.selectedMethodCategory);
+    }
+  }
+
   private loadMethodCategories(selected?: string | null): void {
     const dictIndex = this.state.selectedDictIndex;
     const className = this.state.selectedClass;
@@ -1243,7 +1406,8 @@ export class SystemBrowser {
 
     // Open the method in a gemstone:// editor tab (editable, one method at a time)
     const side = isMeta ? 'class' : 'instance';
-    const category = this.state.selectedMethodCategory ?? 'as yet unclassified';
+    const category = (this.state.selectedMethodCategory && this.state.selectedMethodCategory !== '** ALL METHODS **')
+      ? this.state.selectedMethodCategory : 'as yet unclassified';
     const envQuery = this.state.selectedEnvId > 0 ? `?env=${this.state.selectedEnvId}` : '';
     const uri = vscode.Uri.parse(
       `gemstone://${this.session.id}/${encodeURIComponent(dictName)}/` +
@@ -1928,13 +2092,11 @@ export class SystemBrowser {
         item.classList.add('selected');
         vscode.postMessage({ command: 'selectMethodCategory', name: item.dataset.value });
       }
-      showContextMenu(e.clientX, e.clientY, [
-        { label: 'New Method', action: () => vscode.postMessage({ command: 'ctxNewMethod' }) },
-        ...((item && !item.classList.contains('virtual')) ? [
-          { separator: true },
+      if (item && !item.classList.contains('virtual')) {
+        showContextMenu(e.clientX, e.clientY, [
           { label: 'Rename Category\\u2026', action: () => vscode.postMessage({ command: 'ctxRenameCategory' }) },
-        ] : []),
-      ]);
+        ]);
+      }
     });
 
     cols.methods.addEventListener('contextmenu', (e) => {
@@ -2050,6 +2212,16 @@ export class SystemBrowser {
             footer.appendChild(label);
           }
           footer.classList.remove('hidden');
+          break;
+        }
+        case 'setSide': {
+          const val = msg.isMeta ? 'class' : 'instance';
+          document.querySelectorAll('input[name="side"]').forEach((r) => {
+            r.checked = (r.value === val);
+          });
+          document.querySelectorAll('input[name="hier-side"]').forEach((r) => {
+            r.checked = (r.value === val);
+          });
           break;
         }
         case 'setSessionLabel':

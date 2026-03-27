@@ -254,4 +254,67 @@ describe('browserQueries', () => {
       });
     });
   });
+
+  describe('getPoolDictionaryNames', () => {
+    it('parses sorted SymbolDictionary names', () => {
+      const payload = 'Globals\nMyPool\nUserGlobals\n';
+      const session = createMockSession(payload);
+
+      const results = queries.getPoolDictionaryNames(session);
+
+      expect(results).toEqual(['Globals', 'MyPool', 'UserGlobals']);
+    });
+
+    it('returns empty array for no results', () => {
+      const session = createMockSession('');
+      expect(queries.getPoolDictionaryNames(session)).toEqual([]);
+    });
+
+    it('sends Smalltalk code that finds SymbolDictionary instances', () => {
+      const session = createMockSession('');
+      queries.getPoolDictionaryNames(session);
+
+      const mockExec = session.gci.GciTsExecuteFetchBytes as ReturnType<typeof vi.fn>;
+      const code = mockExec.mock.calls[0][1] as string;
+      expect(code).toContain('isKindOf: SymbolDictionary');
+      expect(code).toContain('symbolList');
+    });
+  });
+
+  describe('getMethodList', () => {
+    it('parses instance and class methods with categories', () => {
+      const payload = '0\taccessing\tname\n0\taccessing\tname:\n1\tinstance creation\tnew\n';
+      const session = createMockSession(payload);
+
+      const results = queries.getMethodList(session, 'Array');
+
+      expect(results).toHaveLength(3);
+      expect(results[0]).toEqual({ isMeta: false, category: 'accessing', selector: 'name' });
+      expect(results[1]).toEqual({ isMeta: false, category: 'accessing', selector: 'name:' });
+      expect(results[2]).toEqual({ isMeta: true, category: 'instance creation', selector: 'new' });
+    });
+
+    it('returns empty array for no results', () => {
+      const session = createMockSession('');
+      expect(queries.getMethodList(session, 'EmptyClass')).toEqual([]);
+    });
+
+    it('skips lines with fewer than 3 tab-separated fields', () => {
+      const payload = 'incomplete\tonly\n0\taccessing\tsize\n';
+      const session = createMockSession(payload);
+
+      const results = queries.getMethodList(session, 'Array');
+      expect(results).toHaveLength(1);
+      expect(results[0].selector).toBe('size');
+    });
+
+    it('embeds the class name in the Smalltalk code', () => {
+      const session = createMockSession('');
+      queries.getMethodList(session, 'MyClass');
+
+      const mockExec = session.gci.GciTsExecuteFetchBytes as ReturnType<typeof vi.fn>;
+      const code = mockExec.mock.calls[0][1] as string;
+      expect(code).toContain('class := MyClass');
+    });
+  });
 });

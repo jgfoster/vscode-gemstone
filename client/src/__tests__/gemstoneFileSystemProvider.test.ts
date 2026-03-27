@@ -223,6 +223,22 @@ describe('GemStoneFileSystemProvider', () => {
       );
     });
 
+    it('shows success message after compiling a method', () => {
+      const uri = Uri.parse('gemstone://1/Globals/Array/instance/accessing/at%3A');
+      provider.writeFile(uri, encode('at: i\n  ^self basicAt: i'), { create: false, overwrite: true });
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        expect.stringContaining('Compiled Array>>#at:'),
+      );
+    });
+
+    it('shows success message for class-side method compilation', () => {
+      const uri = Uri.parse('gemstone://1/Globals/Array/class/creation/new%3A');
+      provider.writeFile(uri, encode('new: size\n  ^self basicNew: size'), { create: false, overwrite: true });
+      expect(queries.compileMethod).toHaveBeenCalledWith(
+        expect.anything(), 'Array', true, 'creation', 'new: size\n  ^self basicNew: size', 0,
+      );
+    });
+
     it('fires onDidChangeFile event on success', () => {
       const listener = vi.fn();
       provider.onDidChangeFile(listener);

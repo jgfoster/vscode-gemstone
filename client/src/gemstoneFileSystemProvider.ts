@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { SessionManager } from './sessionManager';
 import * as queries from './browserQueries';
 import { BrowserQueryError } from './browserQueries';
+import { logInfo } from './gciLog';
 
 // ── URI Structure ────────────────────────────────────────────
 // Method:     gemstone://{sessionId}/{dictName}/{className}/{side}/{category}/{selector}
@@ -115,6 +116,7 @@ export class GemStoneFileSystemProvider implements vscode.FileSystemProvider {
   }
 
   stat(uri: vscode.Uri): vscode.FileStat {
+    logInfo(`[FS] stat ${uri.toString()}`);
     const stat: vscode.FileStat = {
       type: vscode.FileType.File,
       ctime: 0,
@@ -133,6 +135,7 @@ export class GemStoneFileSystemProvider implements vscode.FileSystemProvider {
     } catch {
       // If the query fails (e.g., session busy), allow editing
     }
+    logInfo(`[FS] stat → ${stat.permissions === vscode.FilePermission.Readonly ? 'readonly' : 'writable'}`);
     return stat;
   }
 
@@ -188,6 +191,7 @@ export class GemStoneFileSystemProvider implements vscode.FileSystemProvider {
     content: Uint8Array,
     _options: { create: boolean; overwrite: boolean },
   ): void {
+    logInfo(`[FS] writeFile ${uri.toString()} (${content.length} bytes)`);
     const parsed = parseUri(uri);
     const session = this.getSession(parsed.sessionId);
     const source = new TextDecoder().decode(content);
@@ -230,8 +234,10 @@ export class GemStoneFileSystemProvider implements vscode.FileSystemProvider {
 
       this.diagnostics.delete(uri);
       this._onDidChangeFile.fire([{ type: vscode.FileChangeType.Changed, uri }]);
+      logInfo(`[FS] writeFile → success (${parsed.kind})`);
     } catch (e: unknown) {
       if (e instanceof BrowserQueryError) {
+        logInfo(`[FS] writeFile → compile error: ${e.message}`);
         // Parse line number from GCI error message (e.g. "... (line 3, ...")
         const lineMatch = e.message.match(/line\s+(\d+)/i);
         const lineNum = lineMatch ? parseInt(lineMatch[1], 10) - 1 : 0;
@@ -246,6 +252,7 @@ export class GemStoneFileSystemProvider implements vscode.FileSystemProvider {
         // lives in GemStone. The user sees the red squiggle and can fix and re-save.
         return;
       }
+      logInfo(`[FS] writeFile → unexpected error: ${e instanceof Error ? e.message : String(e)}`);
       throw e;
     }
   }

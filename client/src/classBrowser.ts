@@ -195,6 +195,10 @@ export class ClassBrowser {
   private loadContent(): void {
     const { session, dictionaries, dictIndex, className } = this.state;
     this.post({ command: 'loadDictionaries', items: dictionaries });
+    try {
+      const poolNames = queries.getPoolDictionaryNames(session);
+      this.post({ command: 'loadPoolDictionaries', items: poolNames });
+    } catch { /* non-critical — dropdown will remain empty */ }
 
     if (!className) {
       // New class form: default the inDictionary to the currently selected dict
@@ -743,6 +747,9 @@ export class ClassBrowser {
       switch (msg.command) {
         case 'loadDictionaries':
           dictionaries = msg.items;
+          break;
+
+        case 'loadPoolDictionaries':
           populateSelect(document.getElementById('poolDictSelect'),
             ['', ...msg.items], '');
           break;

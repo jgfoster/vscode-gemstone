@@ -272,9 +272,23 @@ export class GemStoneDebugSession extends DebugSession {
           const sourceRef = this.allocSourceRef(info.methodOop);
 
           let frameName: string;
+          let sourcePath: string | undefined;
           try {
-            const methodInfo = debug.getMethodInfo(this.session, info.methodOop);
-            frameName = `${methodInfo.className}>>#${methodInfo.selector}`;
+            const uriInfo = debug.getMethodUriInfo(this.session, info.methodOop);
+            if (uriInfo && uriInfo.dictName) {
+              const baseClass = uriInfo.className;
+              const side = uriInfo.isMeta ? 'class' : 'instance';
+              frameName = `${baseClass}${uriInfo.isMeta ? ' class' : ''}>>#${uriInfo.selector}`;
+              sourcePath = `gemstone://${this.session!.id}`
+                + `/${encodeURIComponent(uriInfo.dictName)}`
+                + `/${encodeURIComponent(baseClass)}`
+                + `/${side}`
+                + `/${encodeURIComponent(uriInfo.category)}`
+                + `/${encodeURIComponent(uriInfo.selector)}`;
+            } else {
+              const methodInfo = debug.getMethodInfo(this.session, info.methodOop);
+              frameName = `${methodInfo.className}>>#${methodInfo.selector}`;
+            }
           } catch {
             frameName = 'Executed Code';
           }
@@ -289,7 +303,7 @@ export class GemStoneDebugSession extends DebugSession {
           frames.push(new StackFrame(
             level,
             frameName,
-            new Source(frameName, undefined, sourceRef),
+            new Source(frameName, sourcePath, sourceRef),
             line,
           ));
         } catch (e) {

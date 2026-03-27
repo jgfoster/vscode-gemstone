@@ -2,7 +2,7 @@
   "name": "gemstone-ide",
   "displayName": "Jasper: A GemStone Smalltalk IDE",
 	"description": "GemStone/S IDE for Visual Studio Code",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "publisher": "gemtalksystems",
   "license": "MIT",
   "author": "James Foster",
@@ -461,6 +461,18 @@
         "icon": "$(type-hierarchy)"
       },
       {
+        "command": "gemstone.findClass",
+        "title": "Find Class…",
+        "category": "GemStone",
+        "icon": "$(search)"
+      },
+      {
+        "command": "gemstone.findMethod",
+        "title": "Find Method…",
+        "category": "GemStone",
+        "icon": "$(search)"
+      },
+      {
         "command": "gemstone.toggleSelectorBreakpoint",
         "title": "Toggle Selector Breakpoint",
         "category": "GemStone",
@@ -854,6 +866,18 @@
         "command": "gemstone.openBrowser",
         "key": "ctrl+shift+b",
         "mac": "cmd+shift+b",
+        "when": "gemstone.hasActiveSession"
+      },
+      {
+        "command": "gemstone.findClass",
+        "key": "ctrl+shift+c",
+        "mac": "cmd+shift+c",
+        "when": "gemstone.hasActiveSession"
+      },
+      {
+        "command": "gemstone.findMethod",
+        "key": "ctrl+shift+m",
+        "mac": "cmd+shift+m",
         "when": "gemstone.hasActiveSession"
       }
     ]

@@ -2,14 +2,31 @@
 
 All notable changes to the **GemStone Smalltalk** extension will be documented in this file.
 
-## [Unreleased]
+## [1.2.1] - 2026-03-26
 
 ### Added
 
+- **Find Class command** (`Cmd+Shift+C` / `Ctrl+Shift+C`) — quick-pick search across all classes in all dictionaries; selecting a class navigates the System Browser to it (or opens the class definition if no browser is open)
+- **Find Method command** (`Cmd+Shift+M` / `Ctrl+Shift+M`) — quick-pick search across all methods (instance and class side) of the currently selected class in the System Browser; if no class is selected, prompts for a class name; selecting a method navigates the browser and opens the method editor
+- **FileSystem provider logging** — `gemstone://` file operations (`stat`, `readFile`, `writeFile`) now log to the GemStone output channel, making it easier to diagnose save/compile issues; entries show the URI, read-only status, and success/failure of each operation
 - **Register local GemStone versions** — "Register Local Version…" button in the Versions view lets you point to an existing GemStone installation directory without downloading or extracting; registered versions appear alongside downloaded ones and can be used for databases and logins; "Unregister" removes the registration without deleting files
 - **Login editor version picker** — the login editor now shows a dropdown of available GemStone versions (from extracted installations and configured GCI library paths) instead of a free-text field
 
+### Changed
+
+- **Selecting a class no longer opens the `.gs` file** — the class definition and method navigation are available from the browser; the file can still be opened from the file explorer if needed
+- **Method category context menu simplified** — removed "New Method" from the method category context menu (it remains in the method list context menu where the new method will appear); the context menu now only shows "Rename Category" for real categories and no menu for virtual entries
+- **Find Class/Method navigate only the active browser** — when multiple System Browser panels are open for the same session, Find Class, Find Method, and Implementors/Senders now navigate only the most recently focused browser instead of all of them
+- **Pool Dictionaries dropdown expanded** — the Class Definition panel's Pool Dictionaries dropdown now shows all `SymbolDictionary` instances visible in the user's symbol list (not just the top-level dictionary names), so pool dictionaries stored inside other dictionaries are discoverable
+- **Debugger opens methods in the bottom editor group** — clicking a stack frame in the debugger now opens the method source via a `gemstone://` URI (the same path the System Browser uses), so it appears in the bottom editor group alongside other method editors instead of the top half
+- **Breadcrumbs no longer duplicate class and method names** — document symbols for `gemstone://` method editors now use just the selector as the symbol name instead of `ClassName >> selector`, since the class and method are already shown in the URI path breadcrumbs
+
 ### Fixed
+
+- **Browser refresh preserves full selection state** — commit and abort now restore the selected class, instance/class side toggle, method category, and method list after refresh; previously only the dictionary and class category were restored
+- **Method list refreshes after compile or delete** — saving a new or existing method now immediately updates the method categories and method list in the System Browser; previously the list was stale until a manual refresh or commit/abort
+- **Method category defaults to "as yet unclassified"** — selecting a method or creating a new method when "** ALL METHODS **" (or no category) is selected now uses `as yet unclassified` as the category instead of the literal virtual-category name; previously saving in this state created a duplicate `** ALL METHODS **` category entry
+- **New Method template opens in the bottom editor group** — "New Method" from the method list context menu now opens in the same bottom panel as other method editors instead of the top half
 
 - **Single-quote handling in Execute It / Display It** — code containing Smalltalk string literals (e.g. `UserGlobals at: #'James' put: 'Foster'.`) no longer produces a syntax error; the wrapper had been incorrectly doubling single quotes as if embedding in a string literal, but the user code is placed directly in Smalltalk source
 - **Inline diagnostics for syntax errors** — compilation and runtime errors from Execute It / Display It / Inspect It now appear as red squiggly underlines in the editor (visible in the Problems panel) instead of only as notification popups; when the GemStone compiler reports a character offset, the diagnostic highlights the specific error location; diagnostics clear automatically on the next successful execution or document edit

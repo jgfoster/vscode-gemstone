@@ -102,6 +102,19 @@ ws contents`;
   return splitLines(executeFetchString(session, 'getDictionaryNames', code));
 }
 
+export function getPoolDictionaryNames(session: ActiveSession): string[] {
+  const code = `| ws names |
+names := IdentitySet new.
+System myUserProfile symbolList do: [:dict |
+  dict keysAndValuesDo: [:key :val |
+    (val isKindOf: SymbolDictionary) ifTrue: [names add: key]]].
+ws := WriteStream on: String new.
+names asSortedCollection do: [:each |
+  ws nextPutAll: each; lf].
+ws contents`;
+  return splitLines(executeFetchString(session, 'getPoolDictionaryNames', code));
+}
+
 export function getClassNames(session: ActiveSession, dictIndex: number): string[] {
   const code = `| ws dict |
 dict := System myUserProfile symbolList at: ${dictIndex}.
@@ -643,6 +656,43 @@ ${className} allSelectors asSortedCollection do: [:each |
   ws nextPutAll: each; lf].
 ws contents`;
   return splitLines(executeFetchString(session, `getAllSelectors(${className})`, code));
+}
+
+export interface MethodEntry {
+  isMeta: boolean;
+  category: string;
+  selector: string;
+}
+
+export function getMethodList(
+  session: ActiveSession, className: string,
+): MethodEntry[] {
+  const code = `| ws class |
+ws := WriteStream on: Unicode7 new.
+class := ${className}.
+{ class. class class } doWithIndex: [:cls :idx |
+  | isMeta |
+  isMeta := idx = 2.
+  cls categoryNames asSortedCollection do: [:cat |
+    (cls sortedSelectorsIn: cat) do: [:sel |
+      ws
+        nextPutAll: (isMeta ifTrue: ['1'] ifFalse: ['0']); tab;
+        nextPutAll: cat; tab;
+        nextPutAll: sel; lf]]].
+ws contents`;
+  const raw = executeFetchString(session, `getMethodList(${className})`, code);
+  const results: MethodEntry[] = [];
+  for (const line of raw.split('\n')) {
+    if (line.length === 0) continue;
+    const parts = line.split('\t');
+    if (parts.length < 3) continue;
+    results.push({
+      isMeta: parts[0] === '1',
+      category: parts[1],
+      selector: parts[2],
+    });
+  }
+  return results;
 }
 
 // ── Breakpoints ──────────────────────────────────────────

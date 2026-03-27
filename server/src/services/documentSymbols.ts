@@ -14,10 +14,7 @@ export function getDocumentSymbols(method: MethodNode, region?: TopazRegion): Do
   const off = region?.startLine ?? 0;
   const symbols: DocumentSymbol[] = [];
 
-  const className = region?.className;
-  const methodName = className
-    ? `${className} >> ${method.pattern.selector}`
-    : method.pattern.selector;
+  const methodName = method.pattern.selector;
 
   const methodSymbol: DocumentSymbol = {
     name: methodName,
