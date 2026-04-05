@@ -159,6 +159,11 @@ function createMockTextEditor() {
   };
 }
 
+export const StatusBarAlignment = {
+  Left: 1,
+  Right: 2,
+};
+
 export const window = {
   activeTextEditor: undefined as unknown,
   createWebviewPanel: vi.fn((_viewType: string, title: string) => {
@@ -178,7 +183,14 @@ export const window = {
   onDidChangeTextEditorSelection: vi.fn(() => ({ dispose: () => {} })),
   onDidChangeVisibleTextEditors: vi.fn(() => ({ dispose: () => {} })),
   createTerminal: vi.fn((_name: string) => ({ show: vi.fn(), sendText: vi.fn() })),
+  onDidCloseTerminal: vi.fn((_handler: (terminal: unknown) => void) => ({ dispose: vi.fn() })),
   setStatusBarMessage: vi.fn(),
+  createStatusBarItem: vi.fn(() => ({
+    text: '',
+    show: vi.fn(),
+    hide: vi.fn(),
+    dispose: vi.fn(),
+  })),
   showInputBox: vi.fn(),
   showQuickPick: vi.fn(),
   tabGroups: {

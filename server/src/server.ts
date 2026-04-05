@@ -273,7 +273,7 @@ connection.onDocumentSymbol((params) => {
 
   const allSymbols: DocumentSymbol[] = [];
   for (const pr of doc.parsedRegions) {
-    if (pr.ast) {
+    if (pr.ast && pr.region.kind !== 'smalltalk-code') {
       const symbols = getDocumentSymbols(pr.ast, pr.region);
       allSymbols.push(...symbols);
     }

@@ -15,10 +15,12 @@ const LINUX_SHMMAX_4GB = 4294967296;
 const LINUX_SHMALL_4GB = 1048576;
 const LINUX_SYSCTL_4GB = `kernel.shmmax = ${LINUX_SHMMAX_4GB}\nkernel.shmall = ${LINUX_SHMALL_4GB}\n`;
 const LINUX_SYSCTL_UNLIMITED = 'kernel.shmmax = 18446744073692774399\nkernel.shmall = 18446744073692774399\n';
-const LINUX_SYSCTL_SMALL = 'kernel.shmmax = 1073741824\nkernel.shmall = 262144\n'; // 1 GB / 1 GB
+const LINUX_SYSCTL_1GB = 'kernel.shmmax = 1073741824\nkernel.shmall = 262144\n';
+const LINUX_SYSCTL_SMALL = 'kernel.shmmax = 4194304\nkernel.shmall = 1024\n'; // 4 MB / 4 MB
 
 const MACOS_SYSCTL_4GB = `kern.sysv.shmmax: ${LINUX_SHMMAX_4GB}\nkern.sysv.shmall: ${LINUX_SHMALL_4GB}\n`;
-const MACOS_SYSCTL_SMALL = 'kern.sysv.shmmax: 1073741824\nkern.sysv.shmall: 262144\n';
+const MACOS_SYSCTL_1GB = 'kern.sysv.shmmax: 1073741824\nkern.sysv.shmall: 262144\n';
+const MACOS_SYSCTL_SMALL = 'kern.sysv.shmmax: 4194304\nkern.sysv.shmall: 1024\n'; // 4 MB / 4 MB
 
 function setPlatform(platform: string) {
   Object.defineProperty(process, 'platform', { value: platform, configurable: true });
@@ -86,6 +88,7 @@ describe('OsConfigTreeProvider', () => {
     vi.mocked(vscode.commands.registerCommand).mockClear();
     vi.mocked(vscode.window.createTerminal).mockReturnValue({ show: vi.fn(), sendText: vi.fn() } as any);
     vi.mocked(vscode.window.showInformationMessage).mockClear();
+    vi.mocked(vscode.window.onDidCloseTerminal).mockClear();
   });
 
   afterEach(() => {
@@ -143,14 +146,14 @@ describe('OsConfigTreeProvider', () => {
       expect(nodes[1].kind).toBe('removeIpcStatus');
     });
 
-    it('returns sharedMemoryStatus configured=true when shmmax and shmall >= 4 GB (Linux)', async () => {
+    it('returns sharedMemoryStatus configured=true when shmmax and shmall >= 1 GB (Linux)', async () => {
       setPlatform('linux');
-      mockExec(LINUX_SYSCTL_4GB);
+      mockExec(LINUX_SYSCTL_1GB);
       const [node] = await getRootNodes(provider);
       expect(node).toMatchObject({ kind: 'sharedMemoryStatus', configured: true });
     });
 
-    it('returns sharedMemoryStatus configured=false when shmmax < 4 GB (macOS)', async () => {
+    it('returns sharedMemoryStatus configured=false when shmmax < 1 GB (macOS)', async () => {
       setPlatform('darwin');
       mockExec(MACOS_SYSCTL_SMALL);
       const [node] = await getRootNodes(provider);
@@ -164,18 +167,18 @@ describe('OsConfigTreeProvider', () => {
       expect(node).toMatchObject({ kind: 'sharedMemoryStatus', configured: false, gbLabel: '0' });
     });
 
-    it('labels large Linux default shmmax as "≥ 4"', async () => {
+    it('labels large Linux default shmmax as "≥ 1"', async () => {
       setPlatform('linux');
       mockExec(LINUX_SYSCTL_UNLIMITED);
       const [node] = await getRootNodes(provider);
-      expect(node.gbLabel).toBe('≥ 4');
+      expect(node.gbLabel).toBe('≥ 1');
     });
 
-    it('labels exact 4 GB shmmax as "4"', async () => {
+    it('labels exact 1 GB shmmax as "1"', async () => {
       setPlatform('linux');
-      mockExec(LINUX_SYSCTL_4GB);
+      mockExec(LINUX_SYSCTL_1GB);
       const [node] = await getRootNodes(provider);
-      expect(node.gbLabel).toBe('4');
+      expect(node.gbLabel).toBe('1');
     });
 
     it('removeIpcStatus configured=false when no logind.conf', async () => {
@@ -267,13 +270,12 @@ describe('OsConfigTreeProvider', () => {
       expect(children[0]).toMatchObject({ kind: 'action', command: 'gemstone.runSetSharedMemoryLinux' });
     });
 
-    it('sharedMemoryStatus not configured on macOS returns two actions', async () => {
+    it('sharedMemoryStatus not configured on macOS returns one action', async () => {
       setPlatform('darwin');
-      const parent = { kind: 'sharedMemoryStatus' as const, configured: false, gbLabel: '1' };
+      const parent = { kind: 'sharedMemoryStatus' as const, configured: false, gbLabel: '0' };
       const children = await provider.getChildren(parent);
-      expect(children).toHaveLength(2);
+      expect(children).toHaveLength(1);
       expect(children[0]).toMatchObject({ kind: 'action', command: 'gemstone.runSetSharedMemory' });
-      expect(children[1]).toMatchObject({ kind: 'action', command: 'gemstone.sharedMemoryInfo' });
     });
 
     it('sharedMemoryStatus configured returns no children', async () => {
@@ -324,9 +326,9 @@ describe('OsConfigTreeProvider', () => {
         expect(item.tooltip).toBeTruthy();
       });
 
-      it('uses "≥ 4" gbLabel in label', () => {
-        const item = provider.getTreeItem({ kind: 'sharedMemoryStatus', configured: true, gbLabel: '≥ 4' });
-        expect(item.label).toContain('≥ 4');
+      it('uses "≥ 1" gbLabel in label', () => {
+        const item = provider.getTreeItem({ kind: 'sharedMemoryStatus', configured: true, gbLabel: '≥ 1' });
+        expect(item.label).toContain('≥ 1');
       });
     });
 
@@ -355,6 +357,12 @@ describe('OsConfigTreeProvider', () => {
 
       it('runSetSharedMemoryLinux: terminal icon, mentions no restart in tooltip', () => {
         const item = provider.getTreeItem({ kind: 'action', text: 'Run', command: 'gemstone.runSetSharedMemoryLinux' });
+        expect((item.iconPath as any).id).toBe('terminal');
+        expect(String(item.tooltip)).toMatch(/no restart/i);
+      });
+
+      it('runSetSharedMemory: terminal icon, mentions no restart in tooltip', () => {
+        const item = provider.getTreeItem({ kind: 'action', text: 'Run', command: 'gemstone.runSetSharedMemory' });
         expect((item.iconPath as any).id).toBe('terminal');
         expect(String(item.tooltip)).toMatch(/no restart/i);
       });
@@ -405,6 +413,7 @@ describe('OsConfigTreeProvider', () => {
       expect(vscode.window.createTerminal).toHaveBeenCalledWith('GemStone: Shared Memory Setup');
       expect(mockTerminal.show).toHaveBeenCalled();
       expect(mockTerminal.sendText).toHaveBeenCalledWith(expect.stringContaining('setSharedMemory.sh'));
+      expect(mockTerminal.sendText).toHaveBeenCalledWith(expect.stringMatching(/&& exit$/));
     });
 
     it('runSetSharedMemoryLinux opens a terminal and sends the Linux script path', () => {
@@ -439,6 +448,58 @@ describe('OsConfigTreeProvider', () => {
       getCommand('gemstone.removeIpcInfo')?.();
       const msg = vi.mocked(vscode.window.showInformationMessage).mock.calls[0][0];
       expect(msg).toMatch(/systemd-logind/);
+    });
+
+    it('runSetSharedMemory refreshes the panel when the terminal closes', () => {
+      provider.registerCommands(makeContext());
+      const mockTerminal = { show: vi.fn(), sendText: vi.fn() };
+      vi.mocked(vscode.window.createTerminal).mockReturnValue(mockTerminal as any);
+      const refreshSpy = vi.spyOn(provider, 'refresh');
+
+      getCommand('gemstone.runSetSharedMemory')?.();
+      const closeListener = vi.mocked(vscode.window.onDidCloseTerminal).mock.calls[0][0] as (t: unknown) => void;
+
+      closeListener(mockTerminal);
+      expect(refreshSpy).toHaveBeenCalledOnce();
+    });
+
+    it('runSetSharedMemoryLinux refreshes the panel when the terminal closes', () => {
+      provider.registerCommands(makeContext());
+      const mockTerminal = { show: vi.fn(), sendText: vi.fn() };
+      vi.mocked(vscode.window.createTerminal).mockReturnValue(mockTerminal as any);
+      const refreshSpy = vi.spyOn(provider, 'refresh');
+
+      getCommand('gemstone.runSetSharedMemoryLinux')?.();
+      const closeListener = vi.mocked(vscode.window.onDidCloseTerminal).mock.calls[0][0] as (t: unknown) => void;
+
+      closeListener(mockTerminal);
+      expect(refreshSpy).toHaveBeenCalledOnce();
+    });
+
+    it('runSetRemoveIPC refreshes the panel when the terminal closes', () => {
+      provider.registerCommands(makeContext());
+      const mockTerminal = { show: vi.fn(), sendText: vi.fn() };
+      vi.mocked(vscode.window.createTerminal).mockReturnValue(mockTerminal as any);
+      const refreshSpy = vi.spyOn(provider, 'refresh');
+
+      getCommand('gemstone.runSetRemoveIPC')?.();
+      const closeListener = vi.mocked(vscode.window.onDidCloseTerminal).mock.calls[0][0] as (t: unknown) => void;
+
+      closeListener(mockTerminal);
+      expect(refreshSpy).toHaveBeenCalledOnce();
+    });
+
+    it('does not refresh when a different terminal closes', () => {
+      provider.registerCommands(makeContext());
+      const mockTerminal = { show: vi.fn(), sendText: vi.fn() };
+      vi.mocked(vscode.window.createTerminal).mockReturnValue(mockTerminal as any);
+      const refreshSpy = vi.spyOn(provider, 'refresh');
+
+      getCommand('gemstone.runSetSharedMemory')?.();
+      const closeListener = vi.mocked(vscode.window.onDidCloseTerminal).mock.calls[0][0] as (t: unknown) => void;
+
+      closeListener({ show: vi.fn(), sendText: vi.fn() }); // different terminal
+      expect(refreshSpy).not.toHaveBeenCalled();
     });
 
     it('runSetSharedMemoryLinux script path does not match macOS script', () => {

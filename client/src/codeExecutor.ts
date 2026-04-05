@@ -25,6 +25,11 @@ const resultDecorationType = vscode.window.createTextEditorDecorationType({
   },
 });
 
+// Decoration type applied to the executing code selection to dim it while busy.
+const executingDecorationType = vscode.window.createTextEditorDecorationType({
+  opacity: '0.4',
+});
+
 class ExecutionCancelledError extends Error {
   constructor() {
     super('Execution cancelled');
@@ -47,13 +52,32 @@ export class CodeExecutor {
   private executing = new Set<number>();
   private oopClassStringCache = new Map<unknown, bigint>();
   private diagnostics: vscode.DiagnosticCollection;
+  private statusBarItem: vscode.StatusBarItem;
 
   constructor(private sessionManager: SessionManager) {
     this.diagnostics = vscode.languages.createDiagnosticCollection('gemstone-execute');
+    this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
   }
 
   dispose(): void {
     this.diagnostics.dispose();
+    this.statusBarItem.dispose();
+  }
+
+  private setExecuting(sessionId: number, busy: boolean): void {
+    if (busy) {
+      this.executing.add(sessionId);
+    } else {
+      this.executing.delete(sessionId);
+    }
+    const isExecuting = this.executing.size > 0;
+    vscode.commands.executeCommand('setContext', 'gemstone.executing', isExecuting);
+    if (isExecuting) {
+      this.statusBarItem.text = '$(sync~spin) GemStone: Executing...';
+      this.statusBarItem.show();
+    } else {
+      this.statusBarItem.hide();
+    }
   }
 
   async displayIt(): Promise<void> {
@@ -96,10 +120,15 @@ export class CodeExecutor {
     const oopClassString = this.resolveOopClassString(session);
     if (oopClassString === undefined) return;
 
-    this.executing.add(session.id);
+    this.setExecuting(session.id, true);
     const label = displayResult ? 'Display It' : 'Execute It';
     logQuery(session.id, label, code);
     const { wrappedCode, codeOffset } = this.wrapWithTranscriptCapture(code);
+
+    // Dim the selected code while executing
+    const execRange = new vscode.Range(selection.start, selection.end);
+    editor.setDecorations(executingDecorationType, [execRange]);
+
     try {
       const { success, err: startErr } = session.gci.GciTsNbExecute(
         session.handle, wrappedCode, oopClassString,
@@ -175,7 +204,8 @@ export class CodeExecutor {
         this.showCompileError(editor, selection, code, codeOffset, msg);
       }
     } finally {
-      this.executing.delete(session.id);
+      editor.setDecorations(executingDecorationType, []);
+      this.setExecuting(session.id, false);
     }
   }
 
@@ -515,9 +545,16 @@ __t`;
     const oopClassString = this.resolveOopClassString(session);
     if (oopClassString === undefined) return;
 
-    this.executing.add(session.id);
+    this.setExecuting(session.id, true);
     logQuery(session.id, 'Inspect It', code);
     const { wrappedCode } = this.wrapWithTranscriptCapture(code);
+
+    // Dim the selected code in the active editor while executing
+    const editor = vscode.window.activeTextEditor;
+    if (editor) {
+      editor.setDecorations(executingDecorationType, [editor.selection]);
+    }
+
     try {
       const { success, err: startErr } = session.gci.GciTsNbExecute(
         session.handle, wrappedCode, oopClassString,
@@ -562,7 +599,10 @@ __t`;
         vscode.window.showErrorMessage(`GemStone execution error: ${msg}`);
       }
     } finally {
-      this.executing.delete(session.id);
+      if (editor) {
+        editor.setDecorations(executingDecorationType, []);
+      }
+      this.setExecuting(session.id, false);
     }
   }
 }

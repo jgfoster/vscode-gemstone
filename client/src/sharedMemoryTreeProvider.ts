@@ -9,6 +9,32 @@ type OsConfigNode =
   | { kind: 'removeIpcStatus'; configured: boolean }
   | { kind: 'action'; text: string; command: string };
 
+/** Read the current sysctl shared memory values. */
+export function getSharedMemory(): Promise<{ shmmax: number; shmall: number } | undefined> {
+  return new Promise((resolve) => {
+    const cmd = process.platform === 'linux'
+      ? 'sysctl kernel.shmmax kernel.shmall'
+      : 'sysctl kern.sysv.shmmax kern.sysv.shmall';
+    exec(cmd, { encoding: 'utf-8' }, (error, output) => {
+      if (error) { resolve(undefined); return; }
+      let maxMatch: RegExpMatchArray | null;
+      let allMatch: RegExpMatchArray | null;
+      if (process.platform === 'linux') {
+        maxMatch = output.match(/kernel\.shmmax\s*=\s*(\d+)/);
+        allMatch = output.match(/kernel\.shmall\s*=\s*(\d+)/);
+      } else {
+        maxMatch = output.match(/kern\.sysv\.shmmax:\s*(\d+)/);
+        allMatch = output.match(/kern\.sysv\.shmall:\s*(\d+)/);
+      }
+      if (!maxMatch || !allMatch) { resolve(undefined); return; }
+      resolve({
+        shmmax: parseInt(maxMatch[1], 10),
+        shmall: parseInt(allMatch[1], 10),
+      });
+    });
+  });
+}
+
 export class OsConfigTreeProvider implements vscode.TreeDataProvider<OsConfigNode> {
   private _onDidChangeTreeData = new vscode.EventEmitter<OsConfigNode | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
@@ -18,31 +44,6 @@ export class OsConfigTreeProvider implements vscode.TreeDataProvider<OsConfigNod
   refresh(): void {
     this._cache = undefined;
     this._onDidChangeTreeData.fire(undefined);
-  }
-
-  private getSharedMemory(): Promise<{ shmmax: number; shmall: number } | undefined> {
-    return new Promise((resolve) => {
-      const cmd = process.platform === 'linux'
-        ? 'sysctl kernel.shmmax kernel.shmall'
-        : 'sysctl kern.sysv.shmmax kern.sysv.shmall';
-      exec(cmd, { encoding: 'utf-8' }, (error, output) => {
-        if (error) { resolve(undefined); return; }
-        let maxMatch: RegExpMatchArray | null;
-        let allMatch: RegExpMatchArray | null;
-        if (process.platform === 'linux') {
-          maxMatch = output.match(/kernel\.shmmax\s*=\s*(\d+)/);
-          allMatch = output.match(/kernel\.shmall\s*=\s*(\d+)/);
-        } else {
-          maxMatch = output.match(/kern\.sysv\.shmmax:\s*(\d+)/);
-          allMatch = output.match(/kern\.sysv\.shmall:\s*(\d+)/);
-        }
-        if (!maxMatch || !allMatch) { resolve(undefined); return; }
-        resolve({
-          shmmax: parseInt(maxMatch[1], 10),
-          shmall: parseInt(allMatch[1], 10),
-        });
-      });
-    });
   }
 
   private getRemoveIpc(): boolean {
@@ -86,7 +87,7 @@ export class OsConfigTreeProvider implements vscode.TreeDataProvider<OsConfigNod
       const item = new vscode.TreeItem(
         node.configured
           ? `Shared memory: ${node.gbLabel} GB (configured)`
-          : 'Shared memory not configured (< 4 GB)',
+          : 'Shared memory not configured (< 1 GB)',
         node.configured
           ? vscode.TreeItemCollapsibleState.None
           : vscode.TreeItemCollapsibleState.Expanded,
@@ -96,7 +97,7 @@ export class OsConfigTreeProvider implements vscode.TreeDataProvider<OsConfigNod
         new vscode.ThemeColor(node.configured ? 'testing.iconPassed' : 'problemsWarningIcon.foreground'),
       );
       if (!node.configured) {
-        item.tooltip = 'GemStone requires at least 4 GB shared memory.';
+        item.tooltip = 'GemStone requires at least 1 GB shared memory.';
       }
       return item;
     }
@@ -129,19 +130,17 @@ export class OsConfigTreeProvider implements vscode.TreeDataProvider<OsConfigNod
     ].includes(node.command);
     if (isTerminal) {
       item.iconPath = new vscode.ThemeIcon('terminal');
-      if (node.command === 'gemstone.runSetSharedMemoryLinux') {
-        item.tooltip = 'Open a terminal and run the setup script with sudo. Changes take effect immediately; no restart required.';
-      } else if (node.command === 'gemstone.runSetRemoveIPC') {
+      if (node.command === 'gemstone.runSetRemoveIPC') {
         item.tooltip = 'Open a terminal and run the setup script with sudo.';
       } else {
-        item.tooltip = 'Open a terminal and run the setup script with sudo';
+        item.tooltip = 'Open a terminal and run the setup script with sudo. Changes take effect immediately; no restart required.';
       }
     } else {
       item.iconPath = new vscode.ThemeIcon('info');
       if (node.command === 'gemstone.removeIpcInfo') {
         item.tooltip = 'Restart your computer, or run: sudo systemctl restart systemd-logind';
       } else {
-        item.tooltip = 'Restart required after running the script';
+        item.tooltip = 'Changes take effect immediately; no restart required.';
       }
     }
     return item;
@@ -157,14 +156,11 @@ export class OsConfigTreeProvider implements vscode.TreeDataProvider<OsConfigNod
     }
 
     if (node.kind === 'sharedMemoryStatus' && !node.configured) {
-      if (process.platform === 'linux') {
-        return [
-          { kind: 'action', text: 'Run setup script (requires sudo)', command: 'gemstone.runSetSharedMemoryLinux' },
-        ];
-      }
+      const command = process.platform === 'linux'
+        ? 'gemstone.runSetSharedMemoryLinux'
+        : 'gemstone.runSetSharedMemory';
       return [
-        { kind: 'action', text: 'Run setup script (requires sudo)', command: 'gemstone.runSetSharedMemory' },
-        { kind: 'action', text: 'Restart computer after running', command: 'gemstone.sharedMemoryInfo' },
+        { kind: 'action', text: 'Run setup script (requires sudo)', command },
       ];
     }
 
@@ -181,13 +177,13 @@ export class OsConfigTreeProvider implements vscode.TreeDataProvider<OsConfigNod
   private async _loadConfig(): Promise<void> {
     const nodes: OsConfigNode[] = [];
 
-    const mem = await this.getSharedMemory();
+    const mem = await getSharedMemory();
     if (mem) {
       const shmmaxGb = mem.shmmax / Math.pow(2, 30);
       const shmallGb = mem.shmall / Math.pow(2, 18);
       const minGb = Math.min(shmmaxGb, shmallGb);
-      const configured = shmmaxGb >= 4 && shmallGb >= 4;
-      const gbLabel = minGb > 1024 ? '≥ 4' : String(Math.round(minGb * 10) / 10);
+      const configured = shmmaxGb >= 1 && shmallGb >= 1;
+      const gbLabel = minGb > 1024 ? '≥ 1' : String(Math.round(minGb * 10) / 10);
       nodes.push({ kind: 'sharedMemoryStatus', configured, gbLabel });
     } else {
       nodes.push({ kind: 'sharedMemoryStatus', configured: false, gbLabel: '0' });
@@ -208,23 +204,32 @@ export class OsConfigTreeProvider implements vscode.TreeDataProvider<OsConfigNod
         const scriptPath = path.join(this.extensionPath, 'resources', 'setSharedMemory.sh');
         const terminal = vscode.window.createTerminal('GemStone: Shared Memory Setup');
         terminal.show();
-        terminal.sendText(`sudo "${scriptPath}"`);
+        terminal.sendText(`sudo "${scriptPath}" && exit`);
+        const disposable = vscode.window.onDidCloseTerminal((closed) => {
+          if (closed === terminal) { disposable.dispose(); this.refresh(); }
+        });
       }),
       vscode.commands.registerCommand('gemstone.runSetSharedMemoryLinux', () => {
         const scriptPath = path.join(this.extensionPath, 'resources', 'setSharedMemoryLinux.sh');
         const terminal = vscode.window.createTerminal('GemStone: Shared Memory Setup');
         terminal.show();
-        terminal.sendText(`sudo "${scriptPath}"`);
+        terminal.sendText(`sudo "${scriptPath}" && exit`);
+        const disposable = vscode.window.onDidCloseTerminal((closed) => {
+          if (closed === terminal) { disposable.dispose(); this.refresh(); }
+        });
       }),
       vscode.commands.registerCommand('gemstone.runSetRemoveIPC', () => {
         const scriptPath = path.join(this.extensionPath, 'resources', 'setRemoveIPC.sh');
         const terminal = vscode.window.createTerminal('GemStone: RemoveIPC Setup');
         terminal.show();
-        terminal.sendText(`sudo "${scriptPath}"`);
+        terminal.sendText(`sudo "${scriptPath}" && exit`);
+        const disposable = vscode.window.onDidCloseTerminal((closed) => {
+          if (closed === terminal) { disposable.dispose(); this.refresh(); }
+        });
       }),
       vscode.commands.registerCommand('gemstone.sharedMemoryInfo', () => {
         vscode.window.showInformationMessage(
-          'After running the setup script, restart your computer for the shared memory changes to take effect.',
+          'Shared memory changes take effect immediately. No restart required.',
         );
       }),
       vscode.commands.registerCommand('gemstone.removeIpcInfo', () => {

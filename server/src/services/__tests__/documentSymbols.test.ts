@@ -53,4 +53,14 @@ describe('Document Symbols', () => {
     expect(blocks).toHaveLength(1);
     expect(blocks[0].name).toBe('[:each | ...]');
   });
+
+  it('skips smalltalk-code regions (no breadcrumbs for Workspace)', () => {
+    const dm = new DocumentManager();
+    const doc = dm.update('test://workspace', 1, '6 * 7', 'smalltalk');
+    // Replicate the server handler's filtering logic
+    const allSymbols = doc.parsedRegions
+      .filter(pr => pr.ast && pr.region.kind !== 'smalltalk-code')
+      .flatMap(pr => getDocumentSymbols(pr.ast!, pr.region));
+    expect(allSymbols).toHaveLength(0);
+  });
 });

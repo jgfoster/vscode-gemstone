@@ -138,11 +138,11 @@ describe('debugQueries', () => {
     it('parses tab-separated result into MethodUriInfo', () => {
       const session = createMockSession();
       // Mock GciTsResolveSymbol for Utf8 class
-      (session.gci as Record<string, unknown>).GciTsResolveSymbol = vi.fn(() => ({
+      (session.gci as unknown as Record<string, unknown>).GciTsResolveSymbol = vi.fn(() => ({
         result: 9000n, err: { ...noErr },
       }));
       // Mock GciTsExecuteFetchBytes to return tab-separated URI info
-      (session.gci as Record<string, unknown>).GciTsExecuteFetchBytes = vi.fn(() => ({
+      (session.gci as unknown as Record<string, unknown>).GciTsExecuteFetchBytes = vi.fn(() => ({
         bytesReturned: 0,
         data: 'Globals\tSmallInteger\tinstance\tarithmetic\t/',
         err: { ...noErr },
@@ -161,7 +161,7 @@ describe('debugQueries', () => {
 
     it('returns undefined when GciTsResolveSymbol fails', () => {
       const session = createMockSession();
-      (session.gci as Record<string, unknown>).GciTsResolveSymbol = vi.fn(() => ({
+      (session.gci as unknown as Record<string, unknown>).GciTsResolveSymbol = vi.fn(() => ({
         result: 0n, err: { ...noErr, number: 2010, message: 'not found' },
       }));
 
@@ -170,10 +170,10 @@ describe('debugQueries', () => {
 
     it('returns undefined when GciTsExecuteFetchBytes fails', () => {
       const session = createMockSession();
-      (session.gci as Record<string, unknown>).GciTsResolveSymbol = vi.fn(() => ({
+      (session.gci as unknown as Record<string, unknown>).GciTsResolveSymbol = vi.fn(() => ({
         result: 9000n, err: { ...noErr },
       }));
-      (session.gci as Record<string, unknown>).GciTsExecuteFetchBytes = vi.fn(() => ({
+      (session.gci as unknown as Record<string, unknown>).GciTsExecuteFetchBytes = vi.fn(() => ({
         bytesReturned: 0, data: '',
         err: { ...noErr, number: 1, message: 'error' },
       }));
@@ -183,10 +183,10 @@ describe('debugQueries', () => {
 
     it('parses class-side methods correctly', () => {
       const session = createMockSession();
-      (session.gci as Record<string, unknown>).GciTsResolveSymbol = vi.fn(() => ({
+      (session.gci as unknown as Record<string, unknown>).GciTsResolveSymbol = vi.fn(() => ({
         result: 9000n, err: { ...noErr },
       }));
-      (session.gci as Record<string, unknown>).GciTsExecuteFetchBytes = vi.fn(() => ({
+      (session.gci as unknown as Record<string, unknown>).GciTsExecuteFetchBytes = vi.fn(() => ({
         bytesReturned: 0,
         data: 'Globals\tArray\tclass\tinstance creation\tnew',
         err: { ...noErr },

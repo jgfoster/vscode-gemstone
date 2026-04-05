@@ -6,7 +6,7 @@ A full-featured GemStone/S 64 Bit development environment for Visual Studio Code
 
 1. Install the extension from the VS Code Marketplace.
 2. Open the **GemStone** sidebar (gem icon in the activity bar).
-3. If on macOS, check the **Shared Memory** section and run the setup script if needed (requires restart).
+3. If on macOS, check the **Shared Memory** section and run the setup script if needed.
 4. Use the **Versions** section to download and extract a GemStone release.
 5. Use the **Databases** section to create a new database.
 6. Start the stone and NetLDI from the database tree.
@@ -19,7 +19,7 @@ Manage your GemStone installation directly from VS Code, no separate tools requi
 
 ### Shared Memory (macOS)
 
-GemStone requires shared memory on macOS. The **Shared Memory** view checks your current `sysctl` settings and shows whether they are configured. If not, click **Run setup script** to install a `LaunchDaemon` plist that sets the values at boot, then restart your computer.
+GemStone requires shared memory on macOS. The **Shared Memory** view checks your current `sysctl` settings and shows whether they are configured. If not, click **Run setup script** to apply the settings immediately and install a `LaunchDaemon` plist that persists them across reboots.
 
 ### Version Management
 
@@ -90,15 +90,15 @@ With an active session, execute Smalltalk code from any editor:
 
 | Command | macOS | Windows/Linux | Description |
 |---------|-------|---------------|-------------|
-| Display It | Cmd+D | Ctrl+D | Evaluate selection and insert result inline |
-| Execute It | Cmd+E | Ctrl+E | Evaluate selection silently |
-| Inspect It | Cmd+I | Ctrl+I | Evaluate selection and show result in Inspector |
+| Display It | Cmd+; D | Ctrl+; D | Evaluate selection and insert result inline |
+| Execute It | Cmd+; E | Ctrl+; E | Evaluate selection silently |
+| Inspect It | Cmd+; I | Ctrl+; I | Evaluate selection and show result in Inspector |
 
 Long-running expressions show a progress notification with soft-break and hard-break options. The **GemStone Transcript** output channel captures transcript output from the session.
 
 ### System Browser
 
-Open with **Cmd+Shift+B** (Ctrl+Shift+B) or from a session's inline button. The browser provides a five-column layout:
+Open with **Cmd+; B** (Ctrl+; B) or from a session's inline button. The browser provides a five-column layout:
 
 - **Dictionaries** — your symbol list dictionaries
 - **Class Categories** — classes grouped by category

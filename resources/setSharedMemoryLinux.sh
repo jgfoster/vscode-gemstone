@@ -13,14 +13,14 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # Apply immediately
-sysctl -w kernel.shmmax=4294967296
-sysctl -w kernel.shmall=1048576
+sysctl -w kernel.shmmax=1073741824
+sysctl -w kernel.shmall=262144
 
 # Persist across reboots
 cat > "$SYSCTL_CONF" <<'EOF'
 # GemStone/S 64 Bit shared memory settings
-kernel.shmmax = 4294967296
-kernel.shmall = 1048576
+kernel.shmmax = 1073741824
+kernel.shmall = 262144
 EOF
 
 echo "Shared memory configured at $SYSCTL_CONF"

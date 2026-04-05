@@ -2,7 +2,7 @@
   "name": "gemstone-ide",
   "displayName": "Jasper: A GemStone Smalltalk IDE",
 	"description": "GemStone/S IDE for Visual Studio Code",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "publisher": "gemtalksystems",
   "license": "MIT",
   "author": "James Foster",
@@ -527,6 +527,11 @@
         "icon": "$(folder-opened)"
       },
       {
+        "command": "gemstone.quickSetup",
+        "title": "Quick Setup",
+        "category": "GemStone"
+      },
+      {
         "command": "gemstone.createDatabase",
         "title": "Create Database",
         "category": "GemStone Admin",
@@ -775,17 +780,17 @@
       "editor/context": [
         {
           "command": "gemstone.displayIt",
-          "when": "editorTextFocus && gemstone.hasActiveSession",
+          "when": "editorTextFocus && gemstone.hasActiveSession && !gemstone.executing",
           "group": "1_modification@0"
         },
         {
           "command": "gemstone.inspectIt",
-          "when": "editorTextFocus && gemstone.hasActiveSession",
+          "when": "editorTextFocus && gemstone.hasActiveSession && !gemstone.executing",
           "group": "1_modification@1"
         },
         {
           "command": "gemstone.executeIt",
-          "when": "editorTextFocus && gemstone.hasActiveSession",
+          "when": "editorTextFocus && gemstone.hasActiveSession && !gemstone.executing",
           "group": "1_modification@2"
         },
         {
@@ -846,38 +851,38 @@
     "keybindings": [
       {
         "command": "gemstone.displayIt",
-        "key": "ctrl+d",
-        "mac": "cmd+d",
-        "when": "editorTextFocus && gemstone.hasActiveSession"
+        "key": "ctrl+; d",
+        "mac": "cmd+; d",
+        "when": "editorTextFocus && gemstone.hasActiveSession && !gemstone.executing"
       },
       {
         "command": "gemstone.executeIt",
-        "key": "ctrl+e",
-        "mac": "cmd+e",
-        "when": "editorTextFocus && gemstone.hasActiveSession"
+        "key": "ctrl+; e",
+        "mac": "cmd+; e",
+        "when": "editorTextFocus && gemstone.hasActiveSession && !gemstone.executing"
       },
       {
         "command": "gemstone.inspectIt",
-        "key": "ctrl+i",
-        "mac": "cmd+i",
-        "when": "editorTextFocus && gemstone.hasActiveSession"
+        "key": "ctrl+; i",
+        "mac": "cmd+; i",
+        "when": "editorTextFocus && gemstone.hasActiveSession && !gemstone.executing"
       },
       {
         "command": "gemstone.openBrowser",
-        "key": "ctrl+shift+b",
-        "mac": "cmd+shift+b",
+        "key": "ctrl+; b",
+        "mac": "cmd+; b",
         "when": "gemstone.hasActiveSession"
       },
       {
         "command": "gemstone.findClass",
-        "key": "ctrl+shift+c",
-        "mac": "cmd+shift+c",
+        "key": "ctrl+; c",
+        "mac": "cmd+; c",
         "when": "gemstone.hasActiveSession"
       },
       {
         "command": "gemstone.findMethod",
-        "key": "ctrl+shift+m",
-        "mac": "cmd+shift+m",
+        "key": "ctrl+; m",
+        "mac": "cmd+; m",
         "when": "gemstone.hasActiveSession"
       }
     ]

@@ -62,77 +62,85 @@ export class DatabaseManager {
     // Create directory structure
     return vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Creating GemStone database...' },
-      async (progress) => {
-        this.storage.ensureRootPath();
-        const dbNum = this.storage.getNextDbNumber();
-        const dbDir = path.join(this.storage.getRootPath(), `db-${dbNum}`);
-
-        progress.report({ message: 'Creating directories...' });
-        fs.mkdirSync(dbDir);
-        fs.mkdirSync(path.join(dbDir, 'conf'));
-        fs.mkdirSync(path.join(dbDir, 'data'));
-        fs.mkdirSync(path.join(dbDir, 'log'));
-        fs.mkdirSync(path.join(dbDir, 'stat'));
-
-        progress.report({ message: 'Writing configuration...' });
-
-        // Config files are read by GemStone inside WSL, so paths must be Linux-side
-        const confPath = needsWsl() ? windowsPathToWsl(dbDir) : dbDir;
-
-        // database.yaml
-        fs.writeFileSync(path.join(dbDir, 'database.yaml'),
-          `---\nbaseExtent: "${baseExtent}.dbf"\nldiName: "${ldiName}"\nstoneName: "${stoneName}"\nversion: "${version}"\n`);
-
-        // gem.conf
-        fs.writeFileSync(path.join(dbDir, 'conf', 'gem.conf'),
-          `# Edit this file to change your gem or topaz configuration\n\n` +
-          `GEM_TEMPOBJ_CACHE_SIZE = 50000;\n` +
-          `GEM_TEMPOBJ_POMGEN_PRUNE_ON_VOTE = 90;\n\n` +
-          `# Set the following to FALSE if you get an error\n` +
-          `# related to native code when stepping in the debugger\n` +
-          `GEM_NATIVE_CODE_ENABLED = TRUE;\n`);
-
-        // stoneName.conf
-        fs.writeFileSync(path.join(dbDir, 'conf', `${stoneName}.conf`),
-          `# Edit this file to change your stone configuration.\n` +
-          `# For example, you might want a larger Shared Page Cache.\n\n` +
-          `SHR_PAGE_CACHE_SIZE_KB = 100000;\n` +
-          `KEYFILE = "${confPath}/conf/gemstone.key";\n`);
-
-        // system.conf
-        fs.writeFileSync(path.join(dbDir, 'conf', 'system.conf'),
-          `# See $GEMSTONE/data/system.conf for descriptions of these lines.\n` +
-          `# In general, this file should not be edited.\n` +
-          `# You may customize the stone config file (stonename.conf) or gem.conf\n\n` +
-          `DBF_EXTENT_NAMES = "${confPath}/data/extent0.dbf";\n` +
-          `STN_TRAN_FULL_LOGGING = TRUE;\n` +
-          `STN_TRAN_LOG_DIRECTORIES = "${confPath}/data/";\n` +
-          `STN_TRAN_LOG_SIZES = 1000;\n`);
-
-        progress.report({ message: 'Copying key file...' });
-        const gsPath = this.storage.getGemstonePath(version)!;
-        const keySource = path.join(gsPath, 'sys', 'community.starter.key');
-        if (fs.existsSync(keySource)) {
-          fs.copyFileSync(keySource, path.join(dbDir, 'conf', 'gemstone.key'));
-        }
-
-        progress.report({ message: 'Copying base extent (this may take a moment)...' });
-        const extentSource = path.join(gsPath, 'bin', `${baseExtent}.dbf`);
-        const extentDest = path.join(dbDir, 'data', 'extent0.dbf');
-        fs.copyFileSync(extentSource, extentDest);
-        // Make extent writable
-        fs.chmodSync(extentDest, 0o644);
-
-        appendSysadmin(`Created database db-${dbNum} with stone "${stoneName}", version ${version}`);
-
-        const db: GemStoneDatabase = {
-          dirName: `db-${dbNum}`,
-          path: dbDir,
-          config: { version, stoneName, ldiName, baseExtent: `${baseExtent}.dbf` },
-        };
-        return db;
-      },
+      (progress) => this.createDatabaseDirect(version, baseExtent, stoneName, ldiName, progress),
     );
+  }
+
+  /** Create a database with explicit parameters (no interactive UI). */
+  async createDatabaseDirect(
+    version: string,
+    baseExtent: string,
+    stoneName: string,
+    ldiName: string,
+    progress?: vscode.Progress<{ message?: string }>,
+  ): Promise<GemStoneDatabase> {
+    this.storage.ensureRootPath();
+    const dbNum = this.storage.getNextDbNumber();
+    const dbDir = path.join(this.storage.getRootPath(), `db-${dbNum}`);
+
+    progress?.report({ message: 'Creating directories...' });
+    fs.mkdirSync(dbDir);
+    fs.mkdirSync(path.join(dbDir, 'conf'));
+    fs.mkdirSync(path.join(dbDir, 'data'));
+    fs.mkdirSync(path.join(dbDir, 'log'));
+    fs.mkdirSync(path.join(dbDir, 'stat'));
+
+    progress?.report({ message: 'Writing configuration...' });
+
+    // Config files are read by GemStone inside WSL, so paths must be Linux-side
+    const confPath = needsWsl() ? windowsPathToWsl(dbDir) : dbDir;
+
+    // database.yaml
+    fs.writeFileSync(path.join(dbDir, 'database.yaml'),
+      `---\nbaseExtent: "${baseExtent}.dbf"\nldiName: "${ldiName}"\nstoneName: "${stoneName}"\nversion: "${version}"\n`);
+
+    // gem.conf
+    fs.writeFileSync(path.join(dbDir, 'conf', 'gem.conf'),
+      `# Edit this file to change your gem or topaz configuration\n\n` +
+      `GEM_TEMPOBJ_CACHE_SIZE = 50000;\n` +
+      `GEM_TEMPOBJ_POMGEN_PRUNE_ON_VOTE = 90;\n\n` +
+      `# Set the following to FALSE if you get an error\n` +
+      `# related to native code when stepping in the debugger\n` +
+      `GEM_NATIVE_CODE_ENABLED = TRUE;\n`);
+
+    // stoneName.conf
+    fs.writeFileSync(path.join(dbDir, 'conf', `${stoneName}.conf`),
+      `# Edit this file to change your stone configuration.\n` +
+      `# For example, you might want a larger Shared Page Cache.\n\n` +
+      `SHR_PAGE_CACHE_SIZE_KB = 100000;\n` +
+      `KEYFILE = "${confPath}/conf/gemstone.key";\n`);
+
+    // system.conf
+    fs.writeFileSync(path.join(dbDir, 'conf', 'system.conf'),
+      `# See $GEMSTONE/data/system.conf for descriptions of these lines.\n` +
+      `# In general, this file should not be edited.\n` +
+      `# You may customize the stone config file (stonename.conf) or gem.conf\n\n` +
+      `DBF_EXTENT_NAMES = "${confPath}/data/extent0.dbf";\n` +
+      `STN_TRAN_FULL_LOGGING = TRUE;\n` +
+      `STN_TRAN_LOG_DIRECTORIES = "${confPath}/data/";\n` +
+      `STN_TRAN_LOG_SIZES = 1000;\n`);
+
+    progress?.report({ message: 'Copying key file...' });
+    const gsPath = this.storage.getGemstonePath(version)!;
+    const keySource = path.join(gsPath, 'sys', 'community.starter.key');
+    if (fs.existsSync(keySource)) {
+      fs.copyFileSync(keySource, path.join(dbDir, 'conf', 'gemstone.key'));
+    }
+
+    progress?.report({ message: 'Copying base extent (this may take a moment)...' });
+    const extentSource = path.join(gsPath, 'bin', `${baseExtent}.dbf`);
+    const extentDest = path.join(dbDir, 'data', 'extent0.dbf');
+    fs.copyFileSync(extentSource, extentDest);
+    // Make extent writable
+    fs.chmodSync(extentDest, 0o644);
+
+    appendSysadmin(`Created database db-${dbNum} with stone "${stoneName}", version ${version}`);
+
+    return {
+      dirName: `db-${dbNum}`,
+      path: dbDir,
+      config: { version, stoneName, ldiName, baseExtent: `${baseExtent}.dbf` },
+    };
   }
 
   /** Delete a database directory after confirmation */

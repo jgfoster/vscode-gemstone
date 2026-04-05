@@ -352,4 +352,97 @@ describe('CodeExecutor', () => {
       expect(wrappedCode).toContain("'hello' reversed");
     });
   });
+
+  // ── Execution busy-state indicators ───────────────────────
+
+  describe('execution busy-state indicators', () => {
+    it('sets gemstone.executing context to true on start and false on finish', async () => {
+      const editor = makeEditor('3 + 4');
+      setActiveEditor(editor);
+
+      await executor.executeIt();
+
+      const calls = vi.mocked(vscode.commands.executeCommand).mock.calls
+        .filter(([cmd]) => cmd === 'setContext');
+      // First call: set to true, last call: set to false
+      expect(calls.length).toBeGreaterThanOrEqual(2);
+      expect(calls[0]).toEqual(['setContext', 'gemstone.executing', true]);
+      expect(calls[calls.length - 1]).toEqual(['setContext', 'gemstone.executing', false]);
+    });
+
+    it('shows status bar spinner during execution', async () => {
+      const editor = makeEditor('3 + 4');
+      setActiveEditor(editor);
+
+      const statusBar = vi.mocked(vscode.window.createStatusBarItem).mock.results[0].value;
+
+      await executor.executeIt();
+
+      expect(statusBar.show).toHaveBeenCalled();
+      expect(statusBar.hide).toHaveBeenCalled();
+    });
+
+    it('applies dim decoration to selection during execution', async () => {
+      const editor = makeEditor('3 + 4');
+      setActiveEditor(editor);
+
+      await executor.executeIt();
+
+      // setDecorations is called at least twice: once to dim, once to clear
+      const calls = editor.setDecorations.mock.calls;
+      expect(calls.length).toBeGreaterThanOrEqual(2);
+      // First call applies the executing decoration (non-empty ranges)
+      expect(calls[0][1].length).toBe(1);
+      // A later call clears it (empty array)
+      const clearCall = (calls as [unknown, unknown[]][]).find(
+        (c) => c[1].length === 0 && c[0] !== calls[calls.length - 1][0] || c[1].length === 0,
+      );
+      expect(clearCall).toBeDefined();
+    });
+
+    it('clears dim decoration and context even when execution errors', async () => {
+      (gci.GciTsNbResult as Mock).mockReturnValue({
+        result: 0x01n,
+        err: {
+          number: 2003,
+          message: 'a UndefinedObject does not understand #foo',
+          context: OOP_NIL,
+        },
+      });
+
+      const editor = makeEditor('nil foo');
+      setActiveEditor(editor);
+
+      await executor.executeIt();
+
+      // Context should be reset to false
+      const setCalls = vi.mocked(vscode.commands.executeCommand).mock.calls
+        .filter(([cmd]) => cmd === 'setContext');
+      const lastCall = setCalls[setCalls.length - 1];
+      expect(lastCall).toEqual(['setContext', 'gemstone.executing', false]);
+
+      // Dim decoration should be cleared
+      const clearCall = (editor.setDecorations.mock.calls as [unknown, unknown[]][]).find(
+        (c) => c[1].length === 0,
+      );
+      expect(clearCall).toBeDefined();
+    });
+
+    it('sets context for inspectIt and clears on completion', async () => {
+      const editor = makeEditor('3 + 4');
+      setActiveEditor(editor);
+
+      const inspectorProvider = {
+        addRoot: vi.fn(),
+        findRootByLabel: vi.fn(),
+      };
+
+      await executor.inspectIt(inspectorProvider as unknown as import('../inspectorTreeProvider').InspectorTreeProvider);
+
+      const calls = vi.mocked(vscode.commands.executeCommand).mock.calls
+        .filter(([cmd]) => cmd === 'setContext');
+      expect(calls[0]).toEqual(['setContext', 'gemstone.executing', true]);
+      expect(calls[calls.length - 1]).toEqual(['setContext', 'gemstone.executing', false]);
+    });
+  });
 });

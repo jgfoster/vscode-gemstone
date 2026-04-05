@@ -1,7 +1,7 @@
 #!/bin/bash
 # Configure macOS shared memory for GemStone/S 64 Bit
 # Run with: sudo ./setSharedMemory.sh
-# Requires a restart to take effect.
+# Changes take effect immediately; no restart required.
 
 set -e
 
@@ -12,6 +12,11 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
+# Apply immediately
+sysctl -w kern.sysv.shmmax=1073741824
+sysctl -w kern.sysv.shmall=262144
+
+# Persist across reboots via LaunchDaemon
 cat > "$PLIST_PATH" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -27,8 +32,8 @@ cat > "$PLIST_PATH" <<'EOF'
   <key>ProgramArguments</key>
   <array>
     <string>/usr/sbin/sysctl</string>
-    <string>kern.sysv.shmmax=4294967296</string>
-    <string>kern.sysv.shmall=1048576</string>
+    <string>kern.sysv.shmmax=1073741824</string>
+    <string>kern.sysv.shmall=262144</string>
   </array>
   <key>KeepAlive</key>
   <false/>
@@ -41,5 +46,5 @@ EOF
 chown root:wheel "$PLIST_PATH"
 chmod 644 "$PLIST_PATH"
 
-echo "Shared memory plist installed at $PLIST_PATH"
-echo "Please restart your computer for the changes to take effect."
+echo "Shared memory configured at $PLIST_PATH"
+echo "Changes are active immediately. No restart required."

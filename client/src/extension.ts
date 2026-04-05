@@ -18,6 +18,7 @@ import { SystemBrowser } from './systemBrowser';
 import { GlobalsBrowser } from './globalsBrowser';
 import { ClassBrowser } from './classBrowser';
 import { GemStoneFileSystemProvider } from './gemstoneFileSystemProvider';
+import { openWorkspace } from './workspace';
 import { GemStoneDebugSession } from './gemstoneDebugSession';
 import { InspectorTreeProvider, InspectorNode } from './inspectorTreeProvider';
 import { GemStoneWorkspaceSymbolProvider } from './gemstoneSymbolProvider';
@@ -41,6 +42,7 @@ import { DatabaseTreeProvider, DatabaseNode } from './databaseTreeProvider';
 import { ProcessManager } from './processManager';
 import { ProcessTreeProvider } from './processTreeProvider';
 import { OsConfigTreeProvider } from './sharedMemoryTreeProvider';
+import { runQuickSetup } from './quickSetup';
 import { isWindows, getWslInfo } from './wslBridge';
 
 let client: LanguageClient;
@@ -471,8 +473,9 @@ export function activate(context: vscode.ExtensionContext) {
         ?? path.dirname(path.dirname(gciPath));
       process.env.GEMSTONE = gsInstallPath;
 
+      let session;
       try {
-        const session = sessionManager.login(login, gciPath);
+        session = sessionManager.login(login, gciPath);
         sessionTreeProvider.refresh();
         vscode.window.showInformationMessage(
           `Connected to ${login.stone} (${session.stoneVersion}) on ${login.gem_host} as ${login.gs_user}`
@@ -481,7 +484,9 @@ export function activate(context: vscode.ExtensionContext) {
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         vscode.window.showErrorMessage(`Login failed: ${msg}`);
+        return;
       }
+      await openWorkspace(session.id);
     }),
 
     vscode.commands.registerCommand('gemstone.sessionCommit', async (item: GemStoneSessionItem) => {
@@ -1056,6 +1061,22 @@ export function activate(context: vscode.ExtensionContext) {
     databaseProvider.refresh();
     processProvider.refresh();
   }
+
+  // ── Quick Setup ──────────────────────────────────────────
+  context.subscriptions.push(
+    vscode.commands.registerCommand('gemstone.quickSetup', () =>
+      runQuickSetup({
+        sysadminStorage,
+        versionManager,
+        databaseManager,
+        processManager,
+        loginStorage: storage,
+        refreshAdminViews,
+        refreshVersions: () => versionProvider.loadVersions(),
+        refreshLogins: () => treeProvider.refresh(),
+      }),
+    ),
+  );
 
   // ── SysAdmin Commands ───────────────────────────────────
   context.subscriptions.push(

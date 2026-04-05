@@ -2,12 +2,28 @@
 
 All notable changes to the **GemStone Smalltalk** extension will be documented in this file.
 
+## [Unreleased]
+
+## [1.2.2] - 2026-04-05
+
+### Added
+
+- **Quick Setup wizard** — one-click "Quick Setup" command that checks shared memory, downloads and extracts a GemStone version, creates a database, starts Stone and NetLDI, and creates a login — getting a new user from zero to a running environment in a single step; if shared memory is not configured, offers to run the setup script and resumes automatically when the terminal closes
+- **Execution busy-state indicators** — executing code (Execute It, Display It, Inspect It) now provides layered visual feedback: the selected code dims to 40% opacity while running, a `$(sync~spin) GemStone: Executing…` spinner appears in the status bar, and the execute/display/inspect commands are disabled (greyed out in context menus, keybindings ignored) until the execution completes; all indicators clear automatically on completion or error
+- **Workspace document on login** — logging in now automatically opens a "Workspace" scratch pad (`gemstone://{sessionId}/Workspace`) with a sample expression; edits are preserved in memory for the session; the document is not reopened if already open
+
+### Changed
+
+- **Keybindings moved to `Cmd+;` chord prefix** — all keybindings now use a two-key chord (`Cmd+; D`, `Cmd+; E`, `Cmd+; I`, `Cmd+; B`, `Cmd+; C`, `Cmd+; M`) to avoid conflicts with core VS Code shortcuts (`Cmd+D`, `Cmd+E`, `Cmd+I`) and Copilot (`Cmd+I`); `Shift` modifier removed from browser, class, and method bindings
+- **Shared memory threshold lowered to 1 GB** — shared memory checks now apply settings immediately and use a 1 GB threshold instead of 4 GB
+- **No breadcrumbs for Workspace documents** — Workspace (doIt) documents no longer show a misleading `_doIt` breadcrumb; document symbols are suppressed for code-only regions since they have no navigational structure
+
 ## [1.2.1] - 2026-03-26
 
 ### Added
 
-- **Find Class command** (`Cmd+Shift+C` / `Ctrl+Shift+C`) — quick-pick search across all classes in all dictionaries; selecting a class navigates the System Browser to it (or opens the class definition if no browser is open)
-- **Find Method command** (`Cmd+Shift+M` / `Ctrl+Shift+M`) — quick-pick search across all methods (instance and class side) of the currently selected class in the System Browser; if no class is selected, prompts for a class name; selecting a method navigates the browser and opens the method editor
+- **Find Class command** (`Cmd+; C` / `Ctrl+; C`) — quick-pick search across all classes in all dictionaries; selecting a class navigates the System Browser to it (or opens the class definition if no browser is open)
+- **Find Method command** (`Cmd+; M` / `Ctrl+; M`) — quick-pick search across all methods (instance and class side) of the currently selected class in the System Browser; if no class is selected, prompts for a class name; selecting a method navigates the browser and opens the method editor
 - **FileSystem provider logging** — `gemstone://` file operations (`stat`, `readFile`, `writeFile`) now log to the GemStone output channel, making it easier to diagnose save/compile issues; entries show the URI, read-only status, and success/failure of each operation
 - **Register local GemStone versions** — "Register Local Version…" button in the Versions view lets you point to an existing GemStone installation directory without downloading or extracting; registered versions appear alongside downloaded ones and can be used for databases and logins; "Unregister" removes the registration without deleting files
 - **Login editor version picker** — the login editor now shows a dropdown of available GemStone versions (from extracted installations and configured GCI library paths) instead of a free-text field

@@ -21,7 +21,7 @@ vi.mock('../browserQueries', () => ({
 }));
 
 import { Uri, FileSystemError, FilePermission, window, languages } from '../__mocks__/vscode';
-import { GemStoneFileSystemProvider } from '../gemstoneFileSystemProvider';
+import { GemStoneFileSystemProvider, WORKSPACE_TEMPLATE } from '../gemstoneFileSystemProvider';
 import { SessionManager } from '../sessionManager';
 import * as queries from '../browserQueries';
 import { BrowserQueryError } from '../browserQueries';
@@ -388,6 +388,52 @@ describe('GemStoneFileSystemProvider', () => {
       provider.closeTabsForSession(1);
 
       expect(window.tabGroups.close).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('workspace', () => {
+    const workspaceUri = Uri.parse('gemstone://1/Workspace');
+    const encode = (s: string) => new TextEncoder().encode(s);
+
+    it('stat returns writable without checking canClassBeWritten', () => {
+      const stat = provider.stat(workspaceUri);
+      expect(stat.permissions).toBeUndefined();
+      expect(queries.canClassBeWritten).not.toHaveBeenCalled();
+    });
+
+    it('readFile returns workspace template on first read', () => {
+      const content = new TextDecoder().decode(provider.readFile(workspaceUri));
+      expect(content).toBe(WORKSPACE_TEMPLATE);
+    });
+
+    it('readFile returns saved content after writeFile', () => {
+      const edited = '"Workspace"\n3 + 4';
+      provider.writeFile(workspaceUri, encode(edited), { create: false, overwrite: true });
+      const content = new TextDecoder().decode(provider.readFile(workspaceUri));
+      expect(content).toBe(edited);
+    });
+
+    it('writeFile does not call any GemStone queries', () => {
+      provider.writeFile(workspaceUri, encode('anything'), { create: false, overwrite: true });
+      expect(queries.compileMethod).not.toHaveBeenCalled();
+      expect(queries.compileClassDefinition).not.toHaveBeenCalled();
+      expect(queries.setClassComment).not.toHaveBeenCalled();
+    });
+
+    it('workspace content is per-session', () => {
+      const session2 = makeSession(2);
+      const mgr = {
+        getSessions: vi.fn(() => [makeSession(1), session2]),
+        getSession: vi.fn((id: number) => id === 2 ? session2 : makeSession(1)),
+      } as unknown as SessionManager;
+      const p = new GemStoneFileSystemProvider(mgr);
+
+      const uri1 = Uri.parse('gemstone://1/Workspace');
+      const uri2 = Uri.parse('gemstone://2/Workspace');
+      p.writeFile(uri1, encode('session 1 content'), { create: false, overwrite: true });
+
+      expect(new TextDecoder().decode(p.readFile(uri1))).toBe('session 1 content');
+      expect(new TextDecoder().decode(p.readFile(uri2))).toBe(WORKSPACE_TEMPLATE);
     });
   });
 
