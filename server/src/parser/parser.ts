@@ -378,48 +378,12 @@ export class Parser {
 
     // Unary messages (highest precedence)
     while (this.isUnaryMessage()) {
-      const start = this.currentRange().start;
-      let envSpecifier: string | undefined;
-      if (this.check(TokenType.EnvSpecifier)) {
-        envSpecifier = this.advance().text;
-      }
-      const selector = this.advance();
-      messages.push({
-        kind: 'UnaryMessage',
-        selector: selector.text,
-        envSpecifier,
-        range: this.rangeFrom(start),
-      } as UnaryMessageNode);
+      messages.push(this.parseUnaryMessageNode());
     }
 
     // Binary messages
     while (this.isBinaryMessage()) {
-      const start = this.currentRange().start;
-      let envSpecifier: string | undefined;
-      if (this.check(TokenType.EnvSpecifier)) {
-        envSpecifier = this.advance().text;
-      }
-      const selector = this.advance();
-      const argPrimary = this.parsePrimary();
-      // Parse unary messages on the argument
-      const argMessages: UnaryMessageNode[] = [];
-      while (this.isUnaryMessage()) {
-        const uStart = this.currentRange().start;
-        const uSelector = this.advance();
-        argMessages.push({
-          kind: 'UnaryMessage',
-          selector: uSelector.text,
-          range: this.rangeFrom(uStart),
-        });
-      }
-      const argument = this.wrapWithMessages(argPrimary, argMessages, start);
-      messages.push({
-        kind: 'BinaryMessage',
-        selector: selector.text,
-        argument,
-        envSpecifier,
-        range: this.rangeFrom(start),
-      } as BinaryMessageNode);
+      messages.push(this.parseBinaryMessageNode());
     }
 
     // Keyword message (at most one)
@@ -433,36 +397,11 @@ export class Parser {
 
   private parseCascadeMessage(): MessageNode | null {
     if (this.isUnaryMessage()) {
-      const start = this.currentRange().start;
-      const selector = this.advance();
-      return {
-        kind: 'UnaryMessage',
-        selector: selector.text,
-        range: this.rangeFrom(start),
-      } as UnaryMessageNode;
+      return this.parseUnaryMessageNode();
     }
 
     if (this.isBinaryMessage()) {
-      const start = this.currentRange().start;
-      const selector = this.advance();
-      const argPrimary = this.parsePrimary();
-      const argMessages: UnaryMessageNode[] = [];
-      while (this.isUnaryMessage()) {
-        const uStart = this.currentRange().start;
-        const uSelector = this.advance();
-        argMessages.push({
-          kind: 'UnaryMessage',
-          selector: uSelector.text,
-          range: this.rangeFrom(uStart),
-        });
-      }
-      const argument = this.wrapWithMessages(argPrimary, argMessages, start);
-      return {
-        kind: 'BinaryMessage',
-        selector: selector.text,
-        argument,
-        range: this.rangeFrom(start),
-      } as BinaryMessageNode;
+      return this.parseBinaryMessageNode();
     }
 
     if (this.isKeywordMessage()) {
@@ -472,14 +411,55 @@ export class Parser {
     return null;
   }
 
+  // Consume an optional EnvSpecifier token (e.g. `@env0:`) and return its text.
+  private consumeEnvSpecifier(): string | undefined {
+    if (this.check(TokenType.EnvSpecifier)) {
+      return this.advance().text;
+    }
+    return undefined;
+  }
+
+  private parseUnaryMessageNode(): UnaryMessageNode {
+    const start = this.currentRange().start;
+    const envSpecifier = this.consumeEnvSpecifier();
+    const selector = this.advance();
+    return {
+      kind: 'UnaryMessage',
+      selector: selector.text,
+      envSpecifier,
+      range: this.rangeFrom(start),
+    } as UnaryMessageNode;
+  }
+
+  private parseBinaryMessageNode(): BinaryMessageNode {
+    const start = this.currentRange().start;
+    const envSpecifier = this.consumeEnvSpecifier();
+    const selector = this.advance();
+    const argPrimary = this.parsePrimary();
+    // Parse unary messages on the argument (each may have its own env specifier)
+    const argMessages: UnaryMessageNode[] = [];
+    while (this.isUnaryMessage()) {
+      argMessages.push(this.parseUnaryMessageNode());
+    }
+    const argument = this.wrapWithMessages(argPrimary, argMessages, start);
+    return {
+      kind: 'BinaryMessage',
+      selector: selector.text,
+      argument,
+      envSpecifier,
+      range: this.rangeFrom(start),
+    } as BinaryMessageNode;
+  }
+
   private parseKeywordMessage(): KeywordMessageNode | null {
-    if (!this.check(TokenType.Keyword)) return null;
+    // A keyword message starts with either a Keyword token, or an EnvSpecifier
+    // followed by a Keyword (e.g. `@env0:show:`).
+    if (!this.isKeywordMessage()) return null;
 
     const start = this.currentRange().start;
-    let envSpecifier: string | undefined;
-    if (this.check(TokenType.EnvSpecifier)) {
-      envSpecifier = this.advance().text;
-    }
+    const envSpecifier = this.consumeEnvSpecifier();
+
+    if (!this.check(TokenType.Keyword)) return null;
 
     const parts: KeywordPartNode[] = [];
     const keywords: string[] = [];
@@ -490,38 +470,13 @@ export class Parser {
       keywords.push(kw.text);
 
       const argPrimary = this.parsePrimary();
-      // Parse unary then binary messages on the argument
+      // Parse unary then binary messages on the argument (each may have its own env specifier)
       const argMsgs: MessageNode[] = [];
       while (this.isUnaryMessage()) {
-        const uStart = this.currentRange().start;
-        const uSelector = this.advance();
-        argMsgs.push({
-          kind: 'UnaryMessage',
-          selector: uSelector.text,
-          range: this.rangeFrom(uStart),
-        });
+        argMsgs.push(this.parseUnaryMessageNode());
       }
       while (this.isBinaryMessage()) {
-        const bStart = this.currentRange().start;
-        const bSelector = this.advance();
-        const bArgPrimary = this.parsePrimary();
-        const bArgMsgs: UnaryMessageNode[] = [];
-        while (this.isUnaryMessage()) {
-          const buStart = this.currentRange().start;
-          const buSelector = this.advance();
-          bArgMsgs.push({
-            kind: 'UnaryMessage',
-            selector: buSelector.text,
-            range: this.rangeFrom(buStart),
-          });
-        }
-        const bArgument = this.wrapWithMessages(bArgPrimary, bArgMsgs, bStart);
-        argMsgs.push({
-          kind: 'BinaryMessage',
-          selector: bSelector.text,
-          argument: bArgument,
-          range: this.rangeFrom(bStart),
-        });
+        argMsgs.push(this.parseBinaryMessageNode());
       }
 
       const value = this.wrapWithMessages(argPrimary, argMsgs, partStart);

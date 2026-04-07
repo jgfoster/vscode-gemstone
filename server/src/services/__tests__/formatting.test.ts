@@ -290,6 +290,32 @@ describe('AST Formatter', () => {
       expect(result).toBe('run\n#foo.\n%');
     });
   });
+
+  describe('env specifier preservation', () => {
+    it('preserves env specifier on a unary message', () => {
+      const input = 'run\n3 @env2:squared\n%';
+      const result = format(input);
+      expect(result).toBe('run\n3 @env2:squared.\n%');
+    });
+
+    it('preserves env specifier on a binary message', () => {
+      const input = 'run\n2 @env1:+ 3\n%';
+      const result = format(input);
+      expect(result).toBe('run\n2 @env1:+ 3.\n%');
+    });
+
+    it('preserves env specifier on a keyword message', () => {
+      const input = 'run\nTranscript @env0:show: 2\n%';
+      const result = format(input);
+      expect(result).toBe('run\nTranscript @env0:show: 2.\n%');
+    });
+
+    it('preserves env specifiers on the BNF docstring example', () => {
+      const input = 'run\nTranscript @env0:show: 2 @env1:+ 3 @env2:squared\n%';
+      const result = format(input);
+      expect(result).toBe('run\nTranscript @env0:show: 2 @env1:+ 3 @env2:squared.\n%');
+    });
+  });
 });
 
 // ── Settings-specific tests ─────────────────────────────────

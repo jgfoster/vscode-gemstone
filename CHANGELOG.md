@@ -4,6 +4,10 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+### Fixed
+
+- **Parser support for `@envN:` on all message kinds** — the language server parser now correctly handles the optional `@envN:` environment specifier prefix on unary, binary, and keyword messages, including nested messages inside binary/keyword arguments and all three cascade message kinds; previously, expressions such as `Transcript @env0:show: 2 @env1:+ 3 @env2:squared` were silently dropped or had the env specifier consumed as the selector
+
 ## [1.2.2] - 2026-04-05
 
 ### Added

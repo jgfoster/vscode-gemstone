@@ -251,4 +251,170 @@ describe('Parser', () => {
       expect(ast).not.toBeNull();
     });
   });
+
+  describe('env specifier on messages', () => {
+    function findMessages(source: string) {
+      const { ast, errors } = parse(source);
+      expect(errors).toHaveLength(0);
+      expect(ast).not.toBeNull();
+      const stmt = ast!.body.statements[0];
+      // Statement may be Return wrapping Expression, or an Expression
+      const expr = stmt.kind === 'Return'
+        ? stmt.expression
+        : (stmt.kind === 'Expression' ? stmt : null);
+      expect(expr).not.toBeNull();
+      return expr!;
+    }
+
+    it('parses env specifier on a top-level unary message', () => {
+      const expr = findMessages('foo 3 @env2:squared');
+      expect(expr.messages).toHaveLength(1);
+      const msg = expr.messages[0];
+      expect(msg.kind).toBe('UnaryMessage');
+      if (msg.kind === 'UnaryMessage') {
+        expect(msg.selector).toBe('squared');
+        expect(msg.envSpecifier).toBe('@env2:');
+      }
+    });
+
+    it('parses env specifier on a top-level binary message', () => {
+      const expr = findMessages('foo 2 @env1:+ 3');
+      expect(expr.messages).toHaveLength(1);
+      const msg = expr.messages[0];
+      expect(msg.kind).toBe('BinaryMessage');
+      if (msg.kind === 'BinaryMessage') {
+        expect(msg.selector).toBe('+');
+        expect(msg.envSpecifier).toBe('@env1:');
+      }
+    });
+
+    it('parses env specifier on a top-level keyword message', () => {
+      const expr = findMessages('foo Transcript @env0:show: 2');
+      expect(expr.messages).toHaveLength(1);
+      const msg = expr.messages[0];
+      expect(msg.kind).toBe('KeywordMessage');
+      if (msg.kind === 'KeywordMessage') {
+        expect(msg.selector).toBe('show:');
+        expect(msg.envSpecifier).toBe('@env0:');
+        expect(msg.parts).toHaveLength(1);
+      }
+    });
+
+    it('parses the BNF docstring example with env specifiers on each message', () => {
+      const expr = findMessages('foo Transcript @env0:show: 2 @env1:+ 3 @env2:squared');
+      // Receiver is Transcript, then a single keyword message show: with env0
+      expect(expr.messages).toHaveLength(1);
+      const msg = expr.messages[0];
+      expect(msg.kind).toBe('KeywordMessage');
+      if (msg.kind === 'KeywordMessage') {
+        expect(msg.envSpecifier).toBe('@env0:');
+        expect(msg.parts).toHaveLength(1);
+        // The argument: 2 + 3 squared
+        const arg = msg.parts[0].value;
+        // arg has receiver=2, then binary +, with binary's argument being "3 squared"
+        expect(arg.receiver.kind).toBe('NumberLiteral');
+        // Should have one binary message on the keyword argument with @env1:
+        expect(arg.messages).toHaveLength(1);
+        const bin = arg.messages[0];
+        expect(bin.kind).toBe('BinaryMessage');
+        if (bin.kind === 'BinaryMessage') {
+          expect(bin.selector).toBe('+');
+          expect(bin.envSpecifier).toBe('@env1:');
+          // The binary argument has receiver=3, with one unary squared with @env2:
+          expect(bin.argument.receiver.kind).toBe('NumberLiteral');
+          expect(bin.argument.messages).toHaveLength(1);
+          const unary = bin.argument.messages[0];
+          expect(unary.kind).toBe('UnaryMessage');
+          if (unary.kind === 'UnaryMessage') {
+            expect(unary.selector).toBe('squared');
+            expect(unary.envSpecifier).toBe('@env2:');
+          }
+        }
+      }
+    });
+
+    it('parses env specifier on a unary message inside a binary argument', () => {
+      const expr = findMessages('foo 1 + 3 @env0:squared');
+      expect(expr.messages).toHaveLength(1);
+      const msg = expr.messages[0];
+      expect(msg.kind).toBe('BinaryMessage');
+      if (msg.kind === 'BinaryMessage') {
+        expect(msg.selector).toBe('+');
+        expect(msg.argument.messages).toHaveLength(1);
+        const inner = msg.argument.messages[0];
+        expect(inner.kind).toBe('UnaryMessage');
+        if (inner.kind === 'UnaryMessage') {
+          expect(inner.selector).toBe('squared');
+          expect(inner.envSpecifier).toBe('@env0:');
+        }
+      }
+    });
+
+    it('parses env specifier on a unary message inside a keyword argument', () => {
+      const expr = findMessages('foo self foo: 3 @env0:squared');
+      expect(expr.messages).toHaveLength(1);
+      const msg = expr.messages[0];
+      expect(msg.kind).toBe('KeywordMessage');
+      if (msg.kind === 'KeywordMessage') {
+        const arg = msg.parts[0].value;
+        expect(arg.messages).toHaveLength(1);
+        const inner = arg.messages[0];
+        expect(inner.kind).toBe('UnaryMessage');
+        if (inner.kind === 'UnaryMessage') {
+          expect(inner.selector).toBe('squared');
+          expect(inner.envSpecifier).toBe('@env0:');
+        }
+      }
+    });
+
+    it('parses env specifier on a binary message inside a keyword argument', () => {
+      const expr = findMessages('foo self foo: 3 @env0:+ 4');
+      expect(expr.messages).toHaveLength(1);
+      const msg = expr.messages[0];
+      expect(msg.kind).toBe('KeywordMessage');
+      if (msg.kind === 'KeywordMessage') {
+        const arg = msg.parts[0].value;
+        expect(arg.messages).toHaveLength(1);
+        const inner = arg.messages[0];
+        expect(inner.kind).toBe('BinaryMessage');
+        if (inner.kind === 'BinaryMessage') {
+          expect(inner.selector).toBe('+');
+          expect(inner.envSpecifier).toBe('@env0:');
+        }
+      }
+    });
+
+    it('parses env specifier on cascade unary message', () => {
+      const expr = findMessages('foo self bar; @env0:baz');
+      expect(expr.cascades).toHaveLength(1);
+      const cascade = expr.cascades[0];
+      expect(cascade.kind).toBe('UnaryMessage');
+      if (cascade.kind === 'UnaryMessage') {
+        expect(cascade.selector).toBe('baz');
+        expect(cascade.envSpecifier).toBe('@env0:');
+      }
+    });
+
+    it('parses env specifier on cascade binary message', () => {
+      const expr = findMessages('foo self bar; @env1:+ 2');
+      expect(expr.cascades).toHaveLength(1);
+      const cascade = expr.cascades[0];
+      expect(cascade.kind).toBe('BinaryMessage');
+      if (cascade.kind === 'BinaryMessage') {
+        expect(cascade.selector).toBe('+');
+        expect(cascade.envSpecifier).toBe('@env1:');
+      }
+    });
+
+    it('parses env specifier on cascade keyword message', () => {
+      const expr = findMessages('foo Transcript show: 1; @env0:show: 2');
+      expect(expr.cascades).toHaveLength(1);
+      const cascade = expr.cascades[0];
+      expect(cascade.kind).toBe('KeywordMessage');
+      if (cascade.kind === 'KeywordMessage') {
+        expect(cascade.selector).toBe('show:');
+        expect(cascade.envSpecifier).toBe('@env0:');
+      }
+    });
+  });
 });
