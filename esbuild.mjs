@@ -19,3 +19,13 @@ await esbuild.build({
   external: ['vscode', 'koffi'],
   sourcemap: true,
 });
+
+await esbuild.build({
+  entryPoints: ['mcp-server/src/index.ts'],
+  bundle: true,
+  outfile: 'mcp-server/out/index.js',
+  platform: 'node',
+  format: 'cjs',
+  external: ['koffi'],
+  sourcemap: true,
+});

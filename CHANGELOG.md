@@ -4,6 +4,16 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-04-10
+
+### Added
+
+- **MCP Server for Claude Code integration** — an embedded MCP (Model Context Protocol) server that lets Claude Code interact with GemStone directly, without the Topaz CLI; the MCP server runs as a separate Node.js process with its own GCI session (isolated from the user's sessions), using SSE/HTTP transport on an auto-assigned port; lifecycle is managed via Start/Stop buttons in the Databases pane, with the port automatically written to `.claude/settings.local.json`
+- **16 MCP tools** — `abort`, `commit`, `compile_method`, `execute_code`, `find_implementors`, `find_senders`, `get_class_definition`, `get_class_hierarchy`, `get_method_source`, `list_classes`, `list_dictionaries`, `list_methods`, `run_test_class`, `run_test_method`, `search_method_source`, and `status`; together these give Claude a full development workflow: browse, write, test, commit/abort, and inspect session state
+- **Login selection for MCP server** — starting the MCP server prompts for a login matching the database's stone name (auto-selects if only one exists); the MCP server logs in with its own credentials, keeping full isolation from user sessions
+- **Open MCP Inspector** — a button on a running MCP Server node opens the standard MCP Inspector (`@modelcontextprotocol/inspector`) in a VS Code terminal, pre-configured with the server's URL; the terminal is tracked and disposed on stop or re-open to prevent port conflicts
+- **Auto-stop MCP server on stone shutdown** — stopping a stone automatically stops any running MCP server for that stone first, preventing orphaned sessions
+
 ## [1.2.3] - 2026-04-10
 
 ### Fixed

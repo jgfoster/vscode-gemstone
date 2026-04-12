@@ -182,7 +182,7 @@ export const window = {
   onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: () => {} })),
   onDidChangeTextEditorSelection: vi.fn(() => ({ dispose: () => {} })),
   onDidChangeVisibleTextEditors: vi.fn(() => ({ dispose: () => {} })),
-  createTerminal: vi.fn((_name: string) => ({ show: vi.fn(), sendText: vi.fn() })),
+  createTerminal: vi.fn((_nameOrOptions: string | { name?: string }) => ({ show: vi.fn(), sendText: vi.fn(), dispose: vi.fn() })),
   onDidCloseTerminal: vi.fn((_handler: (terminal: unknown) => void) => ({ dispose: vi.fn() })),
   setStatusBarMessage: vi.fn(),
   createStatusBarItem: vi.fn(() => ({

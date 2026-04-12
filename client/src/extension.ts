@@ -40,6 +40,7 @@ import { VersionTreeProvider, VersionItem } from './versionTreeProvider';
 import { DatabaseManager } from './databaseManager';
 import { DatabaseTreeProvider, DatabaseNode } from './databaseTreeProvider';
 import { ProcessManager } from './processManager';
+import { McpServerManager } from './mcpServerManager';
 import { ProcessTreeProvider } from './processTreeProvider';
 import { OsConfigTreeProvider } from './sharedMemoryTreeProvider';
 import { runQuickSetup } from './quickSetup';
@@ -1013,6 +1014,22 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   const processManager = new ProcessManager(sysadminStorage);
+  const mcpServerManager = new McpServerManager(context.extensionPath);
+  const inspectorTerminals = new Map<string, vscode.Terminal>();
+  context.subscriptions.push(
+    { dispose: () => mcpServerManager.dispose() },
+    mcpServerManager.onDidChange(() => {
+      databaseProvider.refresh();
+    }),
+    vscode.window.onDidCloseTerminal((closed) => {
+      for (const [stoneName, terminal] of inspectorTerminals) {
+        if (terminal === closed) {
+          inspectorTerminals.delete(stoneName);
+          break;
+        }
+      }
+    }),
+  );
   const versionManager = new VersionManager(sysadminStorage);
   const databaseManager = new DatabaseManager(sysadminStorage, processManager);
 
@@ -1036,7 +1053,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // Databases
-  const databaseProvider = new DatabaseTreeProvider(sysadminStorage, processManager);
+  const databaseProvider = new DatabaseTreeProvider(sysadminStorage, processManager, mcpServerManager);
   context.subscriptions.push(
     vscode.window.createTreeView('gemstoneDatabases', {
       treeDataProvider: databaseProvider,
@@ -1216,6 +1233,10 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand('gemstone.stopStone', async (node: DatabaseNode) => {
       if (node.kind !== 'stone') return;
+      if (mcpServerManager.isRunning(node.db.config.stoneName)) {
+        await mcpServerManager.stopServer(node.db.config.stoneName);
+        appendSysadmin('MCP Server stopped (stone shutting down)');
+      }
       try {
         await processManager.stopStone(node.db);
         vscode.window.showInformationMessage(`Stone "${node.db.config.stoneName}" stopped.`);
@@ -1248,6 +1269,87 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage(msg);
       }
       refreshAdminViews();
+    }),
+
+    vscode.commands.registerCommand('gemstone.startMcpServer', async (node: DatabaseNode) => {
+      if (node.kind !== 'mcpServer') return;
+      const allLogins = storage.getLogins();
+      const matching = allLogins.filter(l => l.stone === node.db.config.stoneName);
+      let login;
+      if (matching.length === 0) {
+        vscode.window.showErrorMessage(
+          `No logins found for stone "${node.db.config.stoneName}". Create a login first.`,
+        );
+        return;
+      } else if (matching.length === 1) {
+        login = matching[0];
+      } else {
+        const items = matching.map(l => ({
+          label: loginLabel(l),
+          description: `${l.gs_user}@${l.gem_host}`,
+          login: l,
+        }));
+        const picked = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select login for MCP Server',
+          title: `MCP Server for ${node.db.config.stoneName}`,
+        });
+        if (!picked) return;
+        login = picked.login;
+      }
+      if (!login.gs_password) {
+        const password = await vscode.window.showInputBox({
+          prompt: `GemStone password for ${login.gs_user}@${login.gem_host}`,
+          password: true,
+        });
+        if (password === undefined) return;
+        login = { ...login, gs_password: password };
+      }
+      try {
+        const info = await mcpServerManager.startServer(node.db, login, sysadminStorage, storage);
+        vscode.window.showInformationMessage(
+          `MCP Server started for "${node.db.config.stoneName}" on port ${info.port}.`,
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        vscode.window.showErrorMessage(`MCP Server failed to start: ${msg}`);
+      }
+      refreshAdminViews();
+    }),
+
+    vscode.commands.registerCommand('gemstone.stopMcpServer', async (node: DatabaseNode) => {
+      if (node.kind !== 'mcpServer') return;
+      // Dispose the Inspector terminal before stopping the server
+      const inspectorTerminal = inspectorTerminals.get(node.db.config.stoneName);
+      if (inspectorTerminal) {
+        inspectorTerminal.dispose();
+        inspectorTerminals.delete(node.db.config.stoneName);
+      }
+      try {
+        await mcpServerManager.stopServer(node.db.config.stoneName);
+        vscode.window.showInformationMessage('MCP Server stopped.');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        vscode.window.showErrorMessage(`MCP Server failed to stop: ${msg}`);
+      }
+      refreshAdminViews();
+    }),
+
+    vscode.commands.registerCommand('gemstone.openMcpInspector', (node: DatabaseNode) => {
+      if (node.kind !== 'mcpServer' || !node.running || !node.port) return;
+      // Dispose any existing Inspector terminal for this stone
+      const existing = inspectorTerminals.get(node.db.config.stoneName);
+      if (existing) {
+        existing.dispose();
+      }
+      const serverUrl = `http://localhost:${node.port}/sse`;
+      const terminal = vscode.window.createTerminal({
+        name: `MCP Inspector: ${node.db.config.stoneName}`,
+      });
+      inspectorTerminals.set(node.db.config.stoneName, terminal);
+      terminal.show();
+      terminal.sendText(
+        `npx @modelcontextprotocol/inspector --transport sse --server-url ${serverUrl}`,
+      );
     }),
 
     vscode.commands.registerCommand('gemstone.openDbInFinder', (node: DatabaseNode) => {

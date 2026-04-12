@@ -3,12 +3,14 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { SysadminStorage } from './sysadminStorage';
 import { ProcessManager } from './processManager';
+import { McpServerManager } from './mcpServerManager';
 import { GemStoneDatabase } from './sysadminTypes';
 
 export type DatabaseNode =
   | { kind: 'database'; db: GemStoneDatabase }
   | { kind: 'stone'; db: GemStoneDatabase; running: boolean }
   | { kind: 'netldi'; db: GemStoneDatabase; running: boolean }
+  | { kind: 'mcpServer'; db: GemStoneDatabase; running: boolean; port?: number; gsUser?: string }
   | { kind: 'logs'; db: GemStoneDatabase }
   | { kind: 'config'; db: GemStoneDatabase }
   | { kind: 'file'; filePath: string };
@@ -20,6 +22,7 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DatabaseNod
   constructor(
     private storage: SysadminStorage,
     private processManager: ProcessManager,
+    private mcpServerManager?: McpServerManager,
   ) {}
 
   refresh(): void {
@@ -64,6 +67,19 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DatabaseNod
         );
         return item;
       }
+      case 'mcpServer': {
+        const label = node.running
+          ? `MCP Server: ${node.gsUser ?? '?'} @ ${node.port ?? '?'}`
+          : 'MCP Server';
+        const item = new vscode.TreeItem(label);
+        item.description = node.running ? 'Running' : 'Stopped';
+        item.contextValue = node.running ? 'gemstoneDbMcpRunning' : 'gemstoneDbMcpStopped';
+        item.iconPath = new vscode.ThemeIcon(
+          node.running ? 'play' : 'debug-stop',
+          new vscode.ThemeColor(node.running ? 'testing.iconPassed' : 'testing.iconFailed'),
+        );
+        return item;
+      }
       case 'logs': {
         const item = new vscode.TreeItem('Logs', vscode.TreeItemCollapsibleState.Collapsed);
         item.contextValue = 'gemstoneDbLogs';
@@ -99,9 +115,13 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DatabaseNod
     if (node.kind === 'database') {
       const stoneRunning = this.processManager.isStoneRunning(node.db.config.stoneName);
       const netldiRunning = this.processManager.isNetldiRunning(node.db.config.ldiName);
+      const mcpInfo = this.mcpServerManager?.getServerInfo(node.db.config.stoneName);
+      const mcpRunning = this.mcpServerManager?.isRunning(node.db.config.stoneName) ?? false;
       return [
         { kind: 'stone', db: node.db, running: stoneRunning },
         { kind: 'netldi', db: node.db, running: netldiRunning },
+        { kind: 'mcpServer', db: node.db, running: mcpRunning,
+          port: mcpInfo?.port, gsUser: mcpInfo?.login.gs_user },
         { kind: 'logs', db: node.db },
         { kind: 'config', db: node.db },
       ];

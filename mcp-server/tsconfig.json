@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./out",
+    "noEmit": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "../client/src/gciLibrary.ts",
+    "../client/src/gciConstants.ts"
+  ]
+}

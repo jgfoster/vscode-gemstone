@@ -2,7 +2,7 @@
   "name": "gemstone-ide",
   "displayName": "Jasper: A GemStone Smalltalk IDE",
 	"description": "GemStone/S IDE for Visual Studio Code",
-  "version": "1.2.3",
+  "version": "1.3.0",
   "publisher": "gemtalksystems",
   "license": "MIT",
   "author": "James Foster",
@@ -602,6 +602,24 @@
         "title": "Replace Extent",
         "category": "GemStone Admin",
         "icon": "$(replace-all)"
+      },
+      {
+        "command": "gemstone.startMcpServer",
+        "title": "Start MCP Server",
+        "category": "GemStone Admin",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "gemstone.stopMcpServer",
+        "title": "Stop MCP Server",
+        "category": "GemStone Admin",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "gemstone.openMcpInspector",
+        "title": "Open MCP Inspector",
+        "category": "GemStone Admin",
+        "icon": "$(open-preview)"
       }
     ],
     "menus": {
@@ -758,6 +776,21 @@
           "group": "inline@1"
         },
         {
+          "command": "gemstone.startMcpServer",
+          "when": "view == gemstoneDatabases && viewItem == gemstoneDbMcpStopped",
+          "group": "inline@1"
+        },
+        {
+          "command": "gemstone.openMcpInspector",
+          "when": "view == gemstoneDatabases && viewItem == gemstoneDbMcpRunning",
+          "group": "inline@1"
+        },
+        {
+          "command": "gemstone.stopMcpServer",
+          "when": "view == gemstoneDatabases && viewItem == gemstoneDbMcpRunning",
+          "group": "inline@2"
+        },
+        {
           "command": "gemstone.openDbInFinder",
           "when": "view == gemstoneDatabases && viewItem == gemstoneDb",
           "group": "inline@2"
@@ -889,18 +922,21 @@
   },
   "workspaces": [
     "client",
-    "server"
+    "server",
+    "mcp-server"
   ],
   "scripts": {
     "vscode:prepublish": "npm run bundle",
-    "compile": "npm run compile:client && npm run compile:server",
+    "compile": "npm run compile:client && npm run compile:server && npm run compile:mcp",
     "compile:client": "tsc -p client/tsconfig.json",
     "compile:server": "tsc -p server/tsconfig.json",
+    "compile:mcp": "tsc -p mcp-server/tsconfig.json",
     "bundle": "node esbuild.mjs",
     "watch": "tsc -b -w client/tsconfig.json server/tsconfig.json",
-    "test": "npm run test:server && npm run test:client",
+    "test": "npm run test:server && npm run test:client && npm run test:mcp",
     "test:server": "cd server && NODE_OPTIONS=--experimental-require-module npx vitest run",
     "test:client": "cd client && NODE_OPTIONS=--experimental-require-module npx vitest run",
+    "test:mcp": "cd mcp-server && NODE_OPTIONS=--experimental-require-module npx vitest run",
     "test:gci": "cd client && NODE_OPTIONS=--experimental-require-module npx vitest run --config vitest.gci.config.ts",
     "package": "vsce package"
   },
