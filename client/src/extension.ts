@@ -8,6 +8,7 @@ import {
   TransportKind,
 } from 'vscode-languageclient/node';
 import { LoginStorage } from './loginStorage';
+import { getLoginPassword, deleteLoginPassword } from './loginCredentials';
 import { LoginTreeProvider, GemStoneLoginItem } from './loginTreeProvider';
 import { loginLabel } from './loginTypes';
 import { LoginEditorPanel } from './loginEditorPanel';
@@ -41,6 +42,7 @@ import { DatabaseManager } from './databaseManager';
 import { DatabaseTreeProvider, DatabaseNode } from './databaseTreeProvider';
 import { ProcessManager } from './processManager';
 import { McpServerManager } from './mcpServerManager';
+import { McpSocketServer, writeClaudeCodeMcpConfig } from './mcpSocketServer';
 import { ProcessTreeProvider } from './processTreeProvider';
 import { OsConfigTreeProvider } from './sharedMemoryTreeProvider';
 import { runQuickSetup } from './quickSetup';
@@ -50,6 +52,48 @@ let client: LanguageClient;
 let sessionManager: SessionManager;
 let exportManager: ExportManager;
 let fileInManager: FileInManager;
+
+/**
+ * Pick a login matching the given database's stone name. Prompts for password
+ * if missing. Returns undefined if the user cancels or no matching login exists.
+ */
+async function pickMcpLogin(
+  db: { config: { stoneName: string } },
+  storage: LoginStorage,
+) {
+  const allLogins = storage.getLogins();
+  const matching = allLogins.filter(l => l.stone === db.config.stoneName);
+  let login;
+  if (matching.length === 0) {
+    vscode.window.showErrorMessage(
+      `No logins found for stone "${db.config.stoneName}". Create a login first.`,
+    );
+    return undefined;
+  } else if (matching.length === 1) {
+    login = matching[0];
+  } else {
+    const items = matching.map(l => ({
+      label: loginLabel(l),
+      description: `${l.gs_user}@${l.gem_host}`,
+      login: l,
+    }));
+    const picked = await vscode.window.showQuickPick(items, {
+      placeHolder: 'Select login',
+      title: `Login for ${db.config.stoneName}`,
+    });
+    if (!picked) return undefined;
+    login = picked.login;
+  }
+  if (!login.gs_password) {
+    const password = await vscode.window.showInputBox({
+      prompt: `GemStone password for ${login.gs_user}@${login.gem_host}`,
+      password: true,
+    });
+    if (password === undefined) return undefined;
+    login = { ...login, gs_password: password };
+  }
+  return login;
+}
 
 export function activate(context: vscode.ExtensionContext) {
   // ── LSP Client ───────────────────────────────────────────
@@ -381,6 +425,9 @@ export function activate(context: vscode.ExtensionContext) {
         'Delete',
       );
       if (confirmed === 'Delete') {
+        if (item.login.password_in_keychain) {
+          await deleteLoginPassword(item.login);
+        }
         await storage.deleteLogin(loginLabel(item.login));
         treeProvider.refresh();
       }
@@ -400,6 +447,15 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       const login = { ...item.login };
+
+      // If the login is configured to use the OS keychain, fetch the password
+      // from there. Fall through to the prompt if the keychain entry is missing.
+      if (login.password_in_keychain && !login.gs_password) {
+        const stored = await getLoginPassword(login);
+        if (stored) {
+          login.gs_password = stored;
+        }
+      }
 
       if (!login.gs_password) {
         const password = await vscode.window.showInputBox({
@@ -1030,6 +1086,34 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }),
   );
+
+  // ── MCP Socket Server (proxy → Jasper's current session) ─────────────────
+  // Opens a local socket on activation. The stdio MCP proxy (spawned by
+  // Claude Code) connects here; tools run inside the extension host against
+  // whatever session the user has currently selected. If no workspace folder
+  // is open we skip this — `.claude/settings.local.json` is workspace-scoped.
+  const workspaceRoots = vscode.workspace.workspaceFolders;
+  if (workspaceRoots && workspaceRoots.length > 0) {
+    const socketServer = new McpSocketServer({
+      getSession: () => sessionManager.getSelectedSession(),
+      workspaceKey: workspaceRoots[0].uri.fsPath,
+    });
+    socketServer.start().then(() => {
+      try {
+        const settingsPath = writeClaudeCodeMcpConfig(
+          workspaceRoots[0].uri.fsPath,
+          context.extensionPath,
+          socketServer.socketPath,
+        );
+        appendSysadmin(`Claude Code MCP config: ${settingsPath}`);
+      } catch (err) {
+        appendSysadmin(`Failed to write Claude Code MCP config: ${(err as Error).message}`);
+      }
+    }).catch((err) => {
+      appendSysadmin(`MCP socket server failed to start: ${(err as Error).message}`);
+    });
+    context.subscriptions.push({ dispose: () => { void socketServer.dispose(); } });
+  }
   const versionManager = new VersionManager(sysadminStorage);
   const databaseManager = new DatabaseManager(sysadminStorage, processManager);
 
@@ -1273,37 +1357,8 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand('gemstone.startMcpServer', async (node: DatabaseNode) => {
       if (node.kind !== 'mcpServer') return;
-      const allLogins = storage.getLogins();
-      const matching = allLogins.filter(l => l.stone === node.db.config.stoneName);
-      let login;
-      if (matching.length === 0) {
-        vscode.window.showErrorMessage(
-          `No logins found for stone "${node.db.config.stoneName}". Create a login first.`,
-        );
-        return;
-      } else if (matching.length === 1) {
-        login = matching[0];
-      } else {
-        const items = matching.map(l => ({
-          label: loginLabel(l),
-          description: `${l.gs_user}@${l.gem_host}`,
-          login: l,
-        }));
-        const picked = await vscode.window.showQuickPick(items, {
-          placeHolder: 'Select login for MCP Server',
-          title: `MCP Server for ${node.db.config.stoneName}`,
-        });
-        if (!picked) return;
-        login = picked.login;
-      }
-      if (!login.gs_password) {
-        const password = await vscode.window.showInputBox({
-          prompt: `GemStone password for ${login.gs_user}@${login.gem_host}`,
-          password: true,
-        });
-        if (password === undefined) return;
-        login = { ...login, gs_password: password };
-      }
+      const login = await pickMcpLogin(node.db, storage);
+      if (!login) return;
       try {
         const info = await mcpServerManager.startServer(node.db, login, sysadminStorage, storage);
         vscode.window.showInformationMessage(

@@ -36,12 +36,54 @@ describe('parseArgs', () => {
     expect(result.hostUser).toBeUndefined();
   });
 
-  it('throws on missing required argument', () => {
+  it('throws on missing required argument for stdio/sse mode', () => {
     const args = [
       'node', 'index.js',
       '--library-path', '/path/to/lib.dylib',
     ];
 
     expect(() => parseArgs(args)).toThrow('Missing required argument');
+  });
+
+  it('defaults transport to stdio', () => {
+    const result = parseArgs(validArgs);
+    expect(result.transport).toBe('stdio');
+  });
+
+  it('accepts --transport sse', () => {
+    const result = parseArgs([...validArgs, '--transport', 'sse']);
+    expect(result.transport).toBe('sse');
+  });
+
+  it('accepts --transport stdio explicitly', () => {
+    const result = parseArgs([...validArgs, '--transport', 'stdio']);
+    expect(result.transport).toBe('stdio');
+  });
+
+  it('throws on invalid transport value', () => {
+    expect(() => parseArgs([...validArgs, '--transport', 'websocket']))
+      .toThrow('Invalid --transport');
+  });
+
+  describe('proxy mode', () => {
+    it('recognizes --proxy-socket without requiring other args', () => {
+      const result = parseArgs(['node', 'index.js', '--proxy-socket', '/tmp/jasper.sock']);
+      expect(result.transport).toBe('proxy');
+      expect(result.proxySocket).toBe('/tmp/jasper.sock');
+    });
+
+    it('does not require library-path or GemStone args in proxy mode', () => {
+      expect(() => parseArgs(['node', 'index.js', '--proxy-socket', '/tmp/jasper.sock']))
+        .not.toThrow();
+    });
+
+    it('still exposes the socket path when other args are also given', () => {
+      const result = parseArgs([
+        ...validArgs,
+        '--proxy-socket', '/tmp/jasper.sock',
+      ]);
+      expect(result.transport).toBe('proxy');
+      expect(result.proxySocket).toBe('/tmp/jasper.sock');
+    });
   });
 });

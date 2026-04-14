@@ -4,6 +4,11 @@ import { GemStoneLogin, DEFAULT_LOGIN, loginLabel } from './loginTypes';
 import { LoginStorage } from './loginStorage';
 import { LoginTreeProvider } from './loginTreeProvider';
 import { SysadminStorage } from './sysadminStorage';
+import {
+  setLoginPassword,
+  getLoginPassword,
+  deleteLoginPassword,
+} from './loginCredentials';
 
 export class LoginEditorPanel {
   private static currentPanel: LoginEditorPanel | undefined;
@@ -28,21 +33,30 @@ export class LoginEditorPanel {
     return versions;
   }
 
-  static show(
+  static async show(
     storage: LoginStorage,
     treeProvider: LoginTreeProvider,
     existingLogin?: GemStoneLogin,
     sysadminStorage?: SysadminStorage,
-  ): void {
+  ): Promise<void> {
     const column = vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.One;
     const versions = sysadminStorage
       ? LoginEditorPanel.getAvailableVersions(storage, sysadminStorage)
       : [];
 
-    const login = existingLogin ?? {
+    let login: GemStoneLogin = existingLogin ?? {
       ...DEFAULT_LOGIN,
       version: versions[0] ?? '',
     };
+
+    // If the login has its password in the keychain, load it so the user can
+    // view or change it in the editor.
+    if (existingLogin?.password_in_keychain) {
+      const pw = await getLoginPassword(existingLogin);
+      if (pw !== undefined) {
+        login = { ...login, gs_password: pw };
+      }
+    }
 
     if (LoginEditorPanel.currentPanel) {
       LoginEditorPanel.currentPanel.panel.reveal(column);
@@ -101,6 +115,22 @@ export class LoginEditorPanel {
 
   private async handleSave(data: GemStoneLogin, originalLabel?: string): Promise<void> {
     data.label = loginLabel(data);
+
+    if (data.password_in_keychain) {
+      // Store the password in the OS keychain and strip it from the settings
+      // object before we persist.
+      if (data.gs_password) {
+        await setLoginPassword(data);
+      }
+      data = { ...data, gs_password: '' };
+    } else {
+      // If keychain was previously enabled and the user unchecked it, clean up
+      // the stored keychain entry so we don't leave stale secrets behind.
+      if (this.login.password_in_keychain) {
+        await deleteLoginPassword(this.login);
+      }
+    }
+
     await this.storage.saveLogin(data, originalLabel);
     this.treeProvider.refresh();
     this.login = data;
@@ -194,6 +224,26 @@ export class LoginEditorPanel {
     button.secondary:hover {
       background: var(--vscode-button-secondaryHoverBackground);
     }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .checkbox-row input[type="checkbox"] {
+      margin: 0;
+    }
+    label.inline-label {
+      display: inline;
+      margin: 0;
+      font-weight: 400;
+      cursor: pointer;
+    }
+    .hint {
+      font-size: 0.9em;
+      opacity: 0.7;
+      margin-top: 4px;
+    }
   </style>
 </head>
 <body>
@@ -219,6 +269,11 @@ export class LoginEditorPanel {
 
     <label for="gs_password">GemStone Password</label>
     <input type="password" id="gs_password">
+    <div class="checkbox-row">
+      <input type="checkbox" id="password_in_keychain">
+      <label for="password_in_keychain" class="inline-label">Store password in OS keychain</label>
+    </div>
+    <div class="hint">Leave password blank to be prompted on each login.</div>
   </div>
 
   <div class="field-group">
@@ -267,6 +322,8 @@ export class LoginEditorPanel {
           const el = document.getElementById(f);
           if (el) el.value = msg.data[f] || '';
         }
+        document.getElementById('password_in_keychain').checked =
+          Boolean(msg.data.password_in_keychain);
       }
     });
 
@@ -275,6 +332,7 @@ export class LoginEditorPanel {
       for (const f of fields) {
         data[f] = document.getElementById(f).value;
       }
+      data.password_in_keychain = document.getElementById('password_in_keychain').checked;
       vscode.postMessage({ command: 'save', data, originalLabel });
     });
 

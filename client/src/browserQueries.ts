@@ -27,7 +27,7 @@ function resolveClassUtf8(session: ActiveSession): bigint {
   return oop;
 }
 
-function executeFetchString(session: ActiveSession, label: string, code: string): string {
+export function executeFetchString(session: ActiveSession, label: string, code: string): string {
   logQuery(session.id, label, code);
 
   // Check if session is busy with an async operation (e.g., Display It)

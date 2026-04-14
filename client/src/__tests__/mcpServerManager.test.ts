@@ -199,14 +199,9 @@ describe('McpServerManager', () => {
       )).rejects.toThrow('No GCI library');
     });
 
-    it('writes .claude/settings.local.json with port', async () => {
+    it('passes --transport sse to the child process', async () => {
       const proc = makeChildProcess();
       vi.mocked(spawn).mockReturnValue(proc as unknown as ReturnType<typeof spawn>);
-      vi.mocked(fs.existsSync).mockImplementation((p) => {
-        if (String(p).includes('settings.local.json')) return false;
-        return true;
-      });
-      const writeSpy = vi.mocked(fs.writeFileSync);
 
       const promise = manager.startServer(
         makeDatabase(),
@@ -217,13 +212,10 @@ describe('McpServerManager', () => {
       proc.emitStdout('{"port":5555}\n');
       await promise;
 
-      expect(writeSpy).toHaveBeenCalled();
-      const writeCall = writeSpy.mock.calls.find(
-        call => String(call[0]).includes('settings.local.json'),
-      );
-      expect(writeCall).toBeDefined();
-      const written = JSON.parse(writeCall![1] as string);
-      expect(written.mcpServers.gemstone.url).toBe('http://localhost:5555/sse');
+      const spawnCall = vi.mocked(spawn).mock.calls[0];
+      const args = spawnCall[1] as string[];
+      expect(args).toContain('--transport');
+      expect(args[args.indexOf('--transport') + 1]).toBe('sse');
     });
   });
 

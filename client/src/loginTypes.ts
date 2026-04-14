@@ -8,6 +8,11 @@ export interface GemStoneLogin {
   netldi: string;
   host_user: string;
   host_password: string;
+  /**
+   * When true, the GemStone password is stored in the OS keychain and
+   * `gs_password` in the settings file is left empty. See loginCredentials.ts.
+   */
+  password_in_keychain?: boolean;
 }
 
 export function loginLabel(login: Pick<GemStoneLogin, 'gs_user' | 'stone' | 'gem_host'>): string {

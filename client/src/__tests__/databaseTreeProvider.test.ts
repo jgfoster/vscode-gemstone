@@ -33,7 +33,11 @@ function makeProcessManager(stoneRunning = false, netldiRunning = false) {
   };
 }
 
-function makeMcpServerManager(running = false, port?: number, gsUser?: string) {
+function makeMcpServerManager(
+  running = false,
+  port?: number,
+  gsUser?: string,
+) {
   return {
     isRunning: vi.fn(() => running),
     getServerInfo: vi.fn(() =>

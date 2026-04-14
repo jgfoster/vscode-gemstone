@@ -1,7 +1,7 @@
 {
   "name": "gemstone-ide",
   "displayName": "Jasper: A GemStone Smalltalk IDE",
-	"description": "GemStone/S IDE for Visual Studio Code",
+  "description": "GemStone/S IDE for Visual Studio Code",
   "version": "1.3.0",
   "publisher": "gemtalksystems",
   "license": "MIT",
@@ -19,17 +19,19 @@
   },
   "icon": "resources/gemstone-icon.png",
   "categories": [
-		"Debuggers",
+    "Debuggers",
     "Programming Languages"
   ],
-	"keywords": [
-		"GemStone",
-		"Smalltalk",
-		"Database",
-		"Object Database",
-		"IDE"
-	],
-  "extensionKind": ["workspace"],
+  "keywords": [
+    "GemStone",
+    "Smalltalk",
+    "Database",
+    "Object Database",
+    "IDE"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
   "activationEvents": [],
   "main": "./client/out/extension.js",
   "contributes": {
@@ -111,7 +113,9 @@
           },
           "gemstone.userManagedDictionaries": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "default": [],
             "description": "Dictionary names managed by the user. These are never overwritten by export from GemStone. All other dictionaries are exported normally."
           },
@@ -948,6 +952,7 @@
   },
   "dependencies": {
     "@vscode/debugadapter": "^1.68.0",
+    "keytar": "^7.9.0",
     "koffi": "^2.15.1"
   }
 }

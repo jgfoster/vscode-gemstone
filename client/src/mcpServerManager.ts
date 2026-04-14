@@ -7,12 +7,38 @@ import { GemStoneDatabase } from './sysadminTypes';
 import { SysadminStorage } from './sysadminStorage';
 import { LoginStorage } from './loginStorage';
 import { appendSysadmin, showSysadmin } from './sysadminChannel';
-
 export interface McpServerInfo {
   process: child_process.ChildProcess;
   port: number;
   login: GemStoneLogin;
   stoneName: string;
+}
+
+/** Resolves the GCI library path and GemStone install path for a login. */
+function resolveGciAndGsPath(
+  login: GemStoneLogin,
+  sysadminStorage: SysadminStorage,
+  loginStorage: LoginStorage,
+): { gciPath: string; gsPath: string } {
+  let gciPath = loginStorage.getGciLibraryPath(login.version);
+  if (!gciPath) {
+    const gsPath = sysadminStorage.getGemstonePath(login.version);
+    if (gsPath) {
+      const ext = process.platform === 'win32' ? 'dll' : process.platform === 'darwin' ? 'dylib' : 'so';
+      const candidate = path.join(gsPath, 'lib', `libgcits-${login.version}-64.${ext}`);
+      if (fs.existsSync(candidate)) {
+        gciPath = candidate;
+      }
+    }
+  }
+  if (!gciPath) {
+    throw new Error(`No GCI library found for GemStone ${login.version}. Configure it in the login settings.`);
+  }
+  const gsPath = sysadminStorage.getGemstonePath(login.version);
+  if (!gsPath) {
+    throw new Error(`GemStone ${login.version} not found. Please extract it first.`);
+  }
+  return { gciPath, gsPath };
 }
 
 export class McpServerManager {
@@ -21,6 +47,8 @@ export class McpServerManager {
   readonly onDidChange = this._onDidChange.event;
 
   constructor(private extensionPath: string) {}
+
+  // ── SSE server lifecycle (for MCP Inspector, manual exploration) ─────────
 
   async startServer(
     db: GemStoneDatabase,
@@ -33,26 +61,7 @@ export class McpServerManager {
       throw new Error(`MCP server is already running for ${stoneName}`);
     }
 
-    let gciPath = loginStorage.getGciLibraryPath(login.version);
-    if (!gciPath) {
-      const gsPath = sysadminStorage.getGemstonePath(login.version);
-      if (gsPath) {
-        const ext = process.platform === 'win32' ? 'dll' : process.platform === 'darwin' ? 'dylib' : 'so';
-        const candidate = path.join(gsPath, 'lib', `libgcits-${login.version}-64.${ext}`);
-        if (fs.existsSync(candidate)) {
-          gciPath = candidate;
-        }
-      }
-    }
-    if (!gciPath) {
-      throw new Error(`No GCI library found for GemStone ${login.version}. Configure it in the login settings.`);
-    }
-
-    const gsPath = sysadminStorage.getGemstonePath(login.version);
-    if (!gsPath) {
-      throw new Error(`GemStone ${login.version} not found. Please extract it first.`);
-    }
-
+    const { gciPath, gsPath } = resolveGciAndGsPath(login, sysadminStorage, loginStorage);
     const rootPath = sysadminStorage.getRootPath();
     const stoneNrs = `!tcp@${login.gem_host}#server!${login.stone}`;
     const gemNrs = `!tcp@${login.gem_host}#netldi:${login.netldi}#task!gemnetobject`;
@@ -70,6 +79,7 @@ export class McpServerManager {
 
     const proc = child_process.spawn('node', [
       serverScript,
+      '--transport', 'sse',
       '--library-path', gciPath,
       '--stone-nrs', stoneNrs,
       '--gem-nrs', gemNrs,
@@ -91,11 +101,9 @@ export class McpServerManager {
     proc.on('exit', (code) => {
       appendSysadmin(`MCP Server for ${stoneName} exited (code ${code})`);
       this.servers.delete(stoneName);
-      this.removeClaudeSettings();
       this._onDidChange.fire();
     });
 
-    this.writeClaudeSettings(port);
     return info;
   }
 
@@ -169,7 +177,6 @@ export class McpServerManager {
     });
 
     this.servers.delete(stoneName);
-    this.removeClaudeSettings();
   }
 
   getServerInfo(stoneName: string): McpServerInfo | undefined {
@@ -187,62 +194,7 @@ export class McpServerManager {
       } catch { /* ignore */ }
     }
     this.servers.clear();
-    this.removeClaudeSettings();
     this._onDidChange.dispose();
   }
 
-  private writeClaudeSettings(port: number): void {
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders?.length) return;
-
-    const workspaceRoot = workspaceFolders[0].uri.fsPath;
-    const claudeDir = path.join(workspaceRoot, '.claude');
-    const settingsPath = path.join(claudeDir, 'settings.local.json');
-
-    if (!fs.existsSync(claudeDir)) {
-      fs.mkdirSync(claudeDir, { recursive: true });
-    }
-
-    let settings: Record<string, unknown> = {};
-    if (fs.existsSync(settingsPath)) {
-      try {
-        settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-      } catch { /* ignore parse errors, start fresh */ }
-    }
-
-    const mcpServers = (settings.mcpServers ?? {}) as Record<string, unknown>;
-    mcpServers['gemstone'] = {
-      url: `http://localhost:${port}/sse`,
-    };
-    settings.mcpServers = mcpServers;
-
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
-    appendSysadmin(`Wrote MCP server URL to ${settingsPath}`);
-  }
-
-  private removeClaudeSettings(): void {
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders?.length) return;
-
-    const workspaceRoot = workspaceFolders[0].uri.fsPath;
-    const settingsPath = path.join(workspaceRoot, '.claude', 'settings.local.json');
-
-    if (!fs.existsSync(settingsPath)) return;
-
-    try {
-      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-      const mcpServers = settings.mcpServers;
-      if (mcpServers && typeof mcpServers === 'object') {
-        delete mcpServers['gemstone'];
-        if (Object.keys(mcpServers).length === 0) {
-          delete settings.mcpServers;
-        }
-      }
-      if (Object.keys(settings).length === 0) {
-        fs.unlinkSync(settingsPath);
-      } else {
-        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
-      }
-    } catch { /* ignore */ }
-  }
 }
