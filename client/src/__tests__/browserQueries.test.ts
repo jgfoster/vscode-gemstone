@@ -36,38 +36,27 @@ function createMockSession(executeFetchData = ''): ActiveSession {
 }
 
 describe('browserQueries', () => {
-  describe('compileMethod - class side (isMeta=true)', () => {
-    it('passes OOP_ILLEGAL (not OOP_NIL) as selector OOP to GciTsPerform', () => {
-      const session = createMockSession();
+  describe('compileMethod', () => {
+    it('uses pure Smalltalk (no GciTsPerform) via Behavior>>compileMethod:dictionaries:category:environmentId:', () => {
+      const session = createMockSession('Compiled: Array >> foo');
 
-      queries.compileMethod(session, 'Array', true, 'test', 'testMethod\n  ^ 42');
+      queries.compileMethod(session, 'Array', false, 'test', 'foo\n  ^ 42');
 
-      // When isMeta is true, compileMethod calls GciTsPerform to send #class
-      // The second argument after session.handle is the selector OOP.
-      // Per the C API: "Either selector == OOP_ILLEGAL and selectorStr is used,
-      // or else selectorStr == NULL and selector is used."
-      // So when passing a string selector ('class'), the selector OOP MUST be OOP_ILLEGAL.
       const mockPerform = session.gci.GciTsPerform as ReturnType<typeof vi.fn>;
-      expect(mockPerform).toHaveBeenCalledTimes(1);
-
-      const callArgs = mockPerform.mock.calls[0];
-      // callArgs: [handle, receiver, selectorOop, selectorStr, args, flags, envId]
-      const selectorOop = callArgs[2];
-      const selectorStr = callArgs[3];
-
-      expect(selectorStr).toBe('class');
-      expect(selectorOop).toBe(OOP_ILLEGAL);
-      // Verify it's NOT using OOP_NIL (which was the bug)
-      expect(selectorOop).not.toBe(OOP_NIL);
+      const mockExec = session.gci.GciTsExecuteFetchBytes as ReturnType<typeof vi.fn>;
+      expect(mockPerform).not.toHaveBeenCalled();
+      expect(mockExec).toHaveBeenCalledTimes(1);
+      const code = mockExec.mock.calls[0][1] as string;
+      expect(code).toContain('compileMethod:');
+      expect(code).toContain('dictionaries: System myUserProfile symbolList');
     });
 
-    it('does not call GciTsPerform when isMeta is false', () => {
-      const session = createMockSession();
-
-      queries.compileMethod(session, 'Array', false, 'test', 'testMethod\n  ^ 42');
-
-      const mockPerform = session.gci.GciTsPerform as ReturnType<typeof vi.fn>;
-      expect(mockPerform).not.toHaveBeenCalled();
+    it('branches on isMeta inside the Smalltalk, not via a GCI perform', () => {
+      const session = createMockSession('ok');
+      queries.compileMethod(session, 'Array', true, 'test', 'foo');
+      const mockExec = session.gci.GciTsExecuteFetchBytes as ReturnType<typeof vi.fn>;
+      const code = mockExec.mock.calls[0][1] as string;
+      expect(code).toContain('target := base class');
     });
   });
 
@@ -167,25 +156,34 @@ describe('browserQueries', () => {
       const topazSource = "! Class definition\nObject subclass: 'MyClass'\n";
       const session = createMockSession(topazSource);
 
-      const result = queries.fileOutClass(session, 1, 'MyClass');
+      const result = queries.fileOutClass(session, 'MyClass');
 
       expect(result).toBe(topazSource);
     });
 
-    it('sends correct Smalltalk code with dictionary index and class name', () => {
+    it('defaults to global objectNamed: lookup when no dict is given', () => {
       const session = createMockSession('');
-      queries.fileOutClass(session, 3, 'MyClass');
+      queries.fileOutClass(session, 'MyClass');
+
+      const mockExec = session.gci.GciTsExecuteFetchBytes as ReturnType<typeof vi.fn>;
+      const code = mockExec.mock.calls[0][1] as string;
+      expect(code).toContain("objectNamed: #'MyClass'");
+      expect(code).toContain('fileOutClass');
+    });
+
+    it('scopes to a dictionary by 1-based index when given a number', () => {
+      const session = createMockSession('');
+      queries.fileOutClass(session, 'MyClass', 3);
 
       const mockExec = session.gci.GciTsExecuteFetchBytes as ReturnType<typeof vi.fn>;
       const code = mockExec.mock.calls[0][1] as string;
       expect(code).toContain('symbolList at: 3');
-      expect(code).toContain("#'MyClass'");
-      expect(code).toContain('fileOutClass');
+      expect(code).toContain("#'MyClass' ifAbsent: [nil]");
     });
 
     it('escapes single quotes in class names', () => {
       const session = createMockSession('');
-      queries.fileOutClass(session, 1, "Class'Name");
+      queries.fileOutClass(session, "Class'Name");
 
       const mockExec = session.gci.GciTsExecuteFetchBytes as ReturnType<typeof vi.fn>;
       const code = mockExec.mock.calls[0][1] as string;

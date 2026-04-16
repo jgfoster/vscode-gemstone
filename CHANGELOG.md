@@ -4,15 +4,26 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-04-16
+
 ### Changed
 
 - **MCP stdio now routes to the user's current session** — Jasper's extension host opens a local socket on activation and writes `.claude/settings.local.json` automatically; the MCP server runs as a thin proxy that forwards each tool call into the extension host, so Claude Code (and any other MCP client) sees exactly the session you are working in. No separate login, credentials, or keychain entries are required for the MCP flow. If no session is selected, tools return an error Claude can handle gracefully.
 - **Removed "Configure Claude Code" setup** — no longer needed; the stdio MCP server is available as soon as a workspace is open.
+- **Shared query layer (`client/src/queries/`)** — every GemStone query (read and write) now lives in a shared module parameterized by a `QueryExecutor` function. Both MCP surfaces (stdio proxy and SSE) and Jasper's own IDE code delegate through the same Smalltalk composition and result-parsing logic. Eliminates all duplicated inline Smalltalk between the client and MCP server.
+- **`compileMethod` switched from GCI primitives to pure Smalltalk** — now uses `Behavior>>compileMethod:dictionaries:category:environmentId:` via the shared query layer instead of low-level GCI calls (`GciTsCompileMethod`, `GciTsPerform`, `GciTsNewString`, `GciTsNewSymbol`); returns a confirmation string instead of a method OOP (no caller used the OOP). Compile errors propagate through the GCI error path with line/position details as before.
+- **`fileOutClass` uses global lookup by default** — resolves classes via `objectNamed:` across the symbolList instead of requiring a dictionary index. Optional `dict` parameter targets a specific dictionary when needed (e.g., export manager walking dicts to handle shadowed names correctly).
+- **Class browser loads data in one round trip** — the class definition panel now fetches definition, comment, superclass dictionary name, and write-permission in a single GemStone query (`loadClassInfo`) instead of four separate calls.
 
 ### Added
 
 - **Keychain-backed login passwords** — the login editor has a "Store password in OS keychain" checkbox. When enabled, the password is saved to the OS keychain (macOS Keychain, Windows Credential Vault, Linux libsecret) via `keytar`, keyed by `${user}@${host}/${stone}`; the settings file stores an empty password and a `password_in_keychain` flag. Editing the login reads the password back from the keychain; unchecking the box migrates the entry back to plaintext and deletes the keychain secret. Leaving the password blank still prompts on each login.
 - **End-to-end MCP integration tests** — a real `McpSocketServer` is started in-process and driven by the MCP SDK's `Client` over a Unix socket (named pipe on Windows), verifying the full proxy path: tool discovery, tool dispatch to the current session, graceful "no active session" errors, and live session-switch behavior without stale caching.
+- **27 MCP tools (up from 16)** — eleven new tools: `add_dictionary`, `compile_class_definition`, `delete_class`, `delete_method`, `describe_class`, `export_class_source`, `find_references_to`, `list_all_classes`, `list_dictionary_entries`, `remove_dictionary`, `set_class_comment`. Write tools flag "NOT committed automatically"; destructive tools start descriptions with "DESTRUCTIVE:".
+- **`describe_class` combined tool** — returns class definition, comment, and own methods grouped by category (both sides) in one round trip; descriptions guide agents to prefer it over calling `get_class_definition` + `list_methods` separately.
+- **`getClassNames` and `getDictionaryEntries` accept dictionary name or index** — MCP clients can pass a dictionary name string; Jasper's IDE callers continue using 1-based indices.
+- **Shadow-safe class lookup (`classLookupExpr`)** — shared helper composes Smalltalk that resolves a class either globally (`objectNamed:`) or scoped to a specific dictionary, for correct behavior when class names are shadowed across dictionaries. Used by `describe_class`, `export_class_source`, `compile_method`, `delete_method`, `set_class_comment`, and `fileOutClass`.
+- **Optional `dictionaryName` parameter on class-targeting tools** — `describe_class`, `export_class_source`, `compile_method`, `delete_method`, and `set_class_comment` accept an optional dictionary name to disambiguate shadowed class names.
 
 ## [1.3.0] - 2026-04-10
 

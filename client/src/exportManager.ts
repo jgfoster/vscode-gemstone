@@ -152,7 +152,7 @@ export class ExportManager {
               });
 
               try {
-                const source = queries.fileOutClass(session, dict.dictIndex, className);
+                const source = queries.fileOutClass(session, className, dict.dictIndex);
                 const filePath = path.join(dict.dirPath, `${className}.gs`);
                 fs.writeFileSync(filePath, source, 'utf-8');
                 newFiles.add(filePath);

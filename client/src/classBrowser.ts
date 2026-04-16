@@ -208,18 +208,16 @@ export class ClassBrowser {
       return;
     }
 
-    const defStr = queries.getClassDefinition(session, className);
-    const parsed = parseClassDefinition(defStr);
-    const superclassDictName = queries.getSuperclassDictName(session, dictIndex, className);
-    const description = (() => {
-      try { return queries.getClassComment(session, className); } catch { return ''; }
-    })();
-    const canEdit = (() => {
-      try { return queries.canClassBeWritten(session, className); } catch { return false; }
-    })();
+    const info = queries.loadClassInfo(session, dictIndex, className);
+    const parsed = parseClassDefinition(info.definition);
 
-    const full: ParsedClassDef = { ...parsed, superclassDictName, description, canEdit };
-    this.post({ command: 'loadDefinition', definition: full, dictName: parsed.inDictName, canEdit });
+    const full: ParsedClassDef = {
+      ...parsed,
+      superclassDictName: info.superclassDictName,
+      description: info.comment,
+      canEdit: info.canBeWritten,
+    };
+    this.post({ command: 'loadDefinition', definition: full, dictName: parsed.inDictName, canEdit: info.canBeWritten });
     this.panel.title = `Class Definition: ${className}`;
   }
 

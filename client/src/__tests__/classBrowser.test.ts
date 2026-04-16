@@ -12,6 +12,12 @@ vi.mock('../browserQueries', () => ({
   compileClassDefinition: vi.fn(),
   setClassComment: vi.fn(),
   getPoolDictionaryNames: vi.fn(),
+  loadClassInfo: vi.fn(() => ({
+    definition: "Object subclass: 'Array'\n  instVarNames: #('x')\n  classVars: #()\n  classInstVars: #()\n  poolDictionaries: #()\n  inDictionary: UserGlobals\n  options: #()",
+    superclassDictName: 'Kernel',
+    comment: 'An ordered collection.',
+    canBeWritten: true,
+  })),
 }));
 
 import { window, ViewColumn } from '../__mocks__/vscode';
@@ -169,12 +175,12 @@ describe('ClassBrowser', () => {
       return mockPanel;
     });
 
-    vi.mocked(queries.getClassDefinition).mockReturnValue(
-      "Object subclass: 'Array'\n  instVarNames: #('x')\n  classVars: #()\n  classInstVars: #()\n  poolDictionaries: #()\n  inDictionary: UserGlobals\n  options: #()"
-    );
-    vi.mocked(queries.getSuperclassDictName).mockReturnValue('Kernel');
-    vi.mocked(queries.getClassComment).mockReturnValue('An ordered collection.');
-    vi.mocked(queries.canClassBeWritten).mockReturnValue(true);
+    vi.mocked(queries.loadClassInfo).mockReturnValue({
+      definition: "Object subclass: 'Array'\n  instVarNames: #('x')\n  classVars: #()\n  classInstVars: #()\n  poolDictionaries: #()\n  inDictionary: UserGlobals\n  options: #()",
+      superclassDictName: 'Kernel',
+      comment: 'An ordered collection.',
+      canBeWritten: true,
+    });
     vi.mocked(queries.getDictionaryEntries).mockReturnValue([
       { isClass: true, category: 'Kernel', name: 'Array' },
     ]);

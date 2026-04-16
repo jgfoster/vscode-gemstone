@@ -36,7 +36,7 @@ vi.mock('../browserQueries', () => ({
     if (dictIndex === 2) return ['Array', 'String'];
     return [];
   }),
-  fileOutClass: vi.fn((_session: unknown, _dictIndex: number, className: string) => {
+  fileOutClass: vi.fn((_session: unknown, className: string, _dict?: number | string) => {
     return `! fileout of ${className}\n`;
   }),
 }));
@@ -81,7 +81,7 @@ describe('ExportManager', () => {
       if (dictIndex === 2) return ['Array', 'String'];
       return [];
     });
-    (queries.fileOutClass as ReturnType<typeof vi.fn>).mockImplementation((_s: unknown, _d: number, className: string) => {
+    (queries.fileOutClass as ReturnType<typeof vi.fn>).mockImplementation((_s: unknown, className: string, _dict?: number | string) => {
       return `! fileout of ${className}\n`;
     });
     manager = new ExportManager();
@@ -126,15 +126,15 @@ describe('ExportManager', () => {
       expect(fs.readFileSync(path.join(dict2Dir, 'String.gs'), 'utf-8')).toBe('! fileout of String\n');
     });
 
-    it('calls fileOutClass with correct dictionary index and class name', async () => {
+    it('calls fileOutClass scoped to each dictionary so shadowed names resolve correctly', async () => {
       const session = createMockSession();
       await manager.exportSession(session);
 
       const mockFileOut = queries.fileOutClass as ReturnType<typeof vi.fn>;
-      expect(mockFileOut).toHaveBeenCalledWith(session, 1, 'MyClass');
-      expect(mockFileOut).toHaveBeenCalledWith(session, 1, 'OtherClass');
-      expect(mockFileOut).toHaveBeenCalledWith(session, 2, 'Array');
-      expect(mockFileOut).toHaveBeenCalledWith(session, 2, 'String');
+      expect(mockFileOut).toHaveBeenCalledWith(session, 'MyClass', 1);
+      expect(mockFileOut).toHaveBeenCalledWith(session, 'OtherClass', 1);
+      expect(mockFileOut).toHaveBeenCalledWith(session, 'Array', 2);
+      expect(mockFileOut).toHaveBeenCalledWith(session, 'String', 2);
     });
 
     it('shows progress notification', async () => {
@@ -170,7 +170,7 @@ describe('ExportManager', () => {
 
     it('continues when a single class export fails', async () => {
       const mockFileOut = queries.fileOutClass as ReturnType<typeof vi.fn>;
-      mockFileOut.mockImplementation((_s: unknown, _d: number, className: string) => {
+      mockFileOut.mockImplementation((_s: unknown, className: string, _dict?: number | string) => {
         if (className === 'OtherClass') throw new Error('Kernel class');
         return `! fileout of ${className}\n`;
       });

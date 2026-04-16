@@ -16,13 +16,37 @@ vi.mock('../browserQueries', () => ({
   executeFetchString: vi.fn(() => ''),
   implementorsOf: vi.fn(() => [] as unknown[]),
   sendersOf: vi.fn(() => [] as unknown[]),
+  referencesToObject: vi.fn(() => [] as unknown[]),
   getClassDefinition: vi.fn(() => 'Array definition'),
   getClassHierarchy: vi.fn(() => [] as unknown[]),
   getMethodSource: vi.fn(() => ''),
   getMethodList: vi.fn(() => [] as unknown[]),
   getDictionaryNames: vi.fn(() => ['Globals', 'UserGlobals']),
   getClassNames: vi.fn(() => [] as string[]),
+  getDictionaryEntries: vi.fn(() => [] as unknown[]),
+  getAllClassNames: vi.fn(() => [] as unknown[]),
   searchMethodSource: vi.fn(() => [] as unknown[]),
+  describeClass: vi.fn(() => ''),
+  fileOutClass: vi.fn(() => ''),
+  compileMethod: vi.fn(() => ''),
+  compileClassDefinition: vi.fn(() => ''),
+  setClassComment: vi.fn(() => ''),
+  deleteMethod: vi.fn(() => ''),
+  deleteClass: vi.fn(() => ''),
+  addDictionary: vi.fn(() => ''),
+  removeDictionary: vi.fn(() => ''),
+  BrowserQueryError: class BrowserQueryError extends Error {
+    gciErrorNumber: number;
+    constructor(msg: string, num = 0) { super(msg); this.gciErrorNumber = num; }
+  },
+}));
+vi.mock('../sunitQueries', () => ({
+  runTestMethod: vi.fn(() => ({ className: '', selector: '', status: 'passed', message: '', durationMs: 0 })),
+  runTestClass: vi.fn(() => []),
+  SunitQueryError: class SunitQueryError extends Error {
+    gciErrorNumber: number;
+    constructor(msg: string, num = 0) { super(msg); this.gciErrorNumber = num; }
+  },
 }));
 
 import * as net from 'net';
@@ -117,26 +141,37 @@ describe('McpSocketServer integration', () => {
     await server.dispose();
   });
 
-  it('lists the 16 registered tools over the socket', async () => {
+  it('lists the 27 registered tools over the socket', async () => {
     const { client, socket } = await connectClient(server.socketPath);
     try {
       const { tools } = await client.listTools();
       expect(tools.map(t => t.name).sort()).toEqual([
         'abort',
+        'add_dictionary',
         'commit',
+        'compile_class_definition',
         'compile_method',
+        'delete_class',
+        'delete_method',
+        'describe_class',
         'execute_code',
+        'export_class_source',
         'find_implementors',
+        'find_references_to',
         'find_senders',
         'get_class_definition',
         'get_class_hierarchy',
         'get_method_source',
+        'list_all_classes',
         'list_classes',
         'list_dictionaries',
+        'list_dictionary_entries',
         'list_methods',
+        'remove_dictionary',
         'run_test_class',
         'run_test_method',
         'search_method_source',
+        'set_class_comment',
         'status',
       ]);
     } finally {

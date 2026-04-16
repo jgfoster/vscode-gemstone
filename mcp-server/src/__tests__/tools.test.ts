@@ -41,20 +41,31 @@ describe('tools', () => {
     const toolNames = server.getTools().map(t => t.name);
     const expected = [
       'abort',
+      'add_dictionary',
       'commit',
+      'compile_class_definition',
       'compile_method',
+      'delete_class',
+      'delete_method',
+      'describe_class',
       'execute_code',
+      'export_class_source',
       'find_implementors',
+      'find_references_to',
       'find_senders',
       'get_class_definition',
       'get_class_hierarchy',
       'get_method_source',
+      'list_all_classes',
       'list_classes',
       'list_dictionaries',
+      'list_dictionary_entries',
       'list_methods',
+      'remove_dictionary',
       'run_test_class',
       'run_test_method',
       'search_method_source',
+      'set_class_comment',
       'status',
     ];
     expect(toolNames).toEqual(expected);
@@ -194,7 +205,189 @@ describe('tools', () => {
       const tool = server.getTool('list_dictionaries')!;
       const result = await tool.handler({});
 
-      expect(result.content[0].text).toBe('Globals\nUserGlobals\n');
+      expect(result.content[0].text).toBe('Globals\nUserGlobals');
+    });
+  });
+
+  describe('add_dictionary', () => {
+    it('creates a new SymbolDictionary and returns confirmation', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('Added dictionary: MyDict');
+      const result = await server.getTool('add_dictionary')!.handler({ dictionaryName: 'MyDict' });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain('SymbolDictionary new');
+      expect(code).toContain("dict name: #'MyDict'");
+      expect(result.content[0].text).toBe('Added dictionary: MyDict');
+    });
+  });
+
+  describe('remove_dictionary', () => {
+    it('removes by name and returns confirmation', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('Removed dictionary: MyDict');
+      const result = await server.getTool('remove_dictionary')!.handler({ dictionaryName: 'MyDict' });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain("objectNamed: #'MyDict'");
+      expect(result.content[0].text).toBe('Removed dictionary: MyDict');
+    });
+  });
+
+  describe('compile_class_definition', () => {
+    it('evaluates the source and returns "Class: <name>"', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('Foo');
+      const result = await server.getTool('compile_class_definition')!.handler({
+        source: "Object subclass: 'Foo' inDictionary: 'Globals'",
+      });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toBe("(Object subclass: 'Foo' inDictionary: 'Globals') name");
+      expect(result.content[0].text).toBe('Class: Foo');
+    });
+  });
+
+  describe('delete_class', () => {
+    it('scopes to the named dictionary', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('Deleted class: Foo');
+      const result = await server.getTool('delete_class')!.handler({
+        className: 'Foo', dictionaryName: 'UserGlobals',
+      });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain("objectNamed: #'UserGlobals'");
+      expect(code).toContain("removeKey: #'Foo'");
+      expect(result.content[0].text).toBe('Deleted class: Foo');
+    });
+  });
+
+  describe('delete_method', () => {
+    it('removes the selector and returns confirmation', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('Deleted: Array >> size');
+      const result = await server.getTool('delete_method')!.handler({
+        className: 'Array', isMeta: false, selector: 'size',
+      });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain("removeSelector: #'size'");
+      expect(result.content[0].text).toBe('Deleted: Array >> size');
+    });
+
+    it('scopes to a dictionary when dictionaryName is given', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      await server.getTool('delete_method')!.handler({
+        className: 'Foo', isMeta: false, selector: 'bar', dictionaryName: 'UserGlobals',
+      });
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain("objectNamed: #'UserGlobals'");
+    });
+  });
+
+  describe('set_class_comment', () => {
+    it('sets the comment via the shared query', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('Comment set: Foo');
+      const result = await server.getTool('set_class_comment')!.handler({
+        className: 'Foo', comment: 'hi',
+      });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain("cls comment: 'hi'");
+      expect(result.content[0].text).toBe('Comment set: Foo');
+    });
+  });
+
+  describe('describe_class', () => {
+    it('defaults to first-match objectNamed: lookup', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('=== Definition ===\nObject subclass: #Foo\n');
+      const tool = server.getTool('describe_class')!;
+      const result = await tool.handler({ className: 'Foo' });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain("objectNamed: #'Foo'");
+      expect(code).toContain('=== Instance methods ===');
+      expect(result.content[0].text).toContain('=== Definition ===');
+    });
+
+    it('scopes to a specific dictionary when dictionaryName is given', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('describe_class')!;
+      await tool.handler({ className: 'Customer', dictionaryName: 'UserGlobals' });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain("objectNamed: #'UserGlobals'");
+      expect(code).toContain("at: #'Customer' ifAbsent: [nil]");
+    });
+  });
+
+  describe('export_class_source', () => {
+    it('defaults to first-match objectNamed: lookup', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('! Class\nObject subclass: \'Foo\'\n');
+      const tool = server.getTool('export_class_source')!;
+      const result = await tool.handler({ className: 'Foo' });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain("objectNamed: #'Foo'");
+      expect(code).toContain('fileOutClass');
+      expect(result.content[0].text).toContain('Object subclass');
+    });
+
+    it('scopes to a specific dictionary when dictionaryName is given', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('export_class_source')!;
+      await tool.handler({ className: 'Customer', dictionaryName: 'UserGlobals' });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain("objectNamed: #'UserGlobals'");
+      expect(code).toContain("at: #'Customer' ifAbsent: [nil]");
+    });
+  });
+
+  describe('find_references_to', () => {
+    it('calls ClassOrganizer referencesToObject: with objectNamed: lookup', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('Globals\tFoo\t0\tuse\tclient\n');
+      const tool = server.getTool('find_references_to')!;
+      const result = await tool.handler({ objectName: 'AllUsers' });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain('referencesToObject:');
+      expect(code).toContain("objectNamed: #'AllUsers'");
+      expect(result.content[0].text).toContain('Foo\tinstance\tuse\tclient');
+    });
+
+    it('returns fallback when no references found', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('find_references_to')!;
+      const result = await tool.handler({ objectName: 'Unused' });
+
+      expect(result.content[0].text).toBe('No references found.');
+    });
+  });
+
+  describe('list_all_classes', () => {
+    it('emits dictIndex, dictName, className rows', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('1\tGlobals\tArray\n2\tUserGlobals\tMyClass\n');
+      const tool = server.getTool('list_all_classes')!;
+      const result = await tool.handler({});
+
+      expect(result.content[0].text).toBe('1\tGlobals\tArray\n2\tUserGlobals\tMyClass');
+    });
+  });
+
+  describe('list_dictionary_entries', () => {
+    it('emits kind, category, name rows for classes and globals', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('1\taccessing\tArray\n0\t\tMyVar\n');
+      const tool = server.getTool('list_dictionary_entries')!;
+      const result = await tool.handler({ dictionaryName: 'Globals' });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain("objectNamed: #'Globals'");
+      expect(result.content[0].text).toBe('class\taccessing\tArray\nglobal\t\tMyVar');
+    });
+
+    it('reports empty/missing dictionary with a friendly message', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('list_dictionary_entries')!;
+      const result = await tool.handler({ dictionaryName: 'NoSuchDict' });
+
+      expect(result.content[0].text).toBe('Dictionary not found or empty: NoSuchDict');
     });
   });
 
@@ -206,7 +399,7 @@ describe('tools', () => {
 
       const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
       expect(code).toContain("objectNamed: #'Globals'");
-      expect(result.content[0].text).toBe('Array\nString\n');
+      expect(result.content[0].text).toBe('Array\nString');
     });
 
     it('escapes single quotes in dictionary name', async () => {
@@ -216,6 +409,14 @@ describe('tools', () => {
 
       const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
       expect(code).toContain("it''s");
+    });
+
+    it('reports empty/missing dictionary with a friendly message', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('list_classes')!;
+      const result = await tool.handler({ dictionaryName: 'NoSuchDict' });
+
+      expect(result.content[0].text).toBe('Dictionary not found or empty: NoSuchDict');
     });
   });
 
@@ -253,7 +454,7 @@ describe('tools', () => {
       expect(result.content[0].text).toContain('Compiled successfully');
     });
 
-    it('compiles a class-side method', async () => {
+    it('compiles a class-side method (target := base class in the shared Smalltalk)', async () => {
       vi.mocked(session.executeFetchString).mockReturnValue('Compiled');
       const tool = server.getTool('compile_method')!;
       await tool.handler({
@@ -264,7 +465,7 @@ describe('tools', () => {
       });
 
       const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
-      expect(code).toContain('Array class');
+      expect(code).toContain('target := base class');
     });
 
     it('escapes single quotes in source', async () => {
@@ -361,8 +562,9 @@ describe('tools', () => {
   });
 
   describe('run_test_method', () => {
-    it('runs a passing test', async () => {
-      vi.mocked(session.executeFetchString).mockReturnValue('PASSED (12ms)');
+    it('runs a passing test and formats the result', async () => {
+      // Shared query parses structured tab-separated output from Smalltalk
+      vi.mocked(session.executeFetchString).mockReturnValue('passed\t\t12');
       const tool = server.getTool('run_test_method')!;
       const result = await tool.handler({ className: 'ArrayTest', selector: 'testSize' });
 
@@ -370,10 +572,11 @@ describe('tools', () => {
       expect(code).toContain('ArrayTest');
       expect(code).toContain("selector: #'testSize'");
       expect(result.content[0].text).toContain('PASSED');
+      expect(result.content[0].text).toContain('12ms');
     });
 
     it('returns failure details', async () => {
-      vi.mocked(session.executeFetchString).mockReturnValue('FAILED: expected 3 got 4 (5ms)');
+      vi.mocked(session.executeFetchString).mockReturnValue('failed\texpected 3 got 4\t5');
       const tool = server.getTool('run_test_method')!;
       const result = await tool.handler({ className: 'ArrayTest', selector: 'testBad' });
 
@@ -383,20 +586,21 @@ describe('tools', () => {
   });
 
   describe('run_test_class', () => {
-    it('runs all tests in a class and returns results', async () => {
-      const output = '3 passed\n\nPASSED: ArrayTest >> testSize\nPASSED: ArrayTest >> testAt\nPASSED: ArrayTest >> testAdd\n';
+    it('runs all tests in a class and returns formatted results', async () => {
+      const output = 'ArrayTest\ttestSize\tpassed\t\nArrayTest\ttestAt\tpassed\t\nArrayTest\ttestAdd\tpassed\t\n';
       vi.mocked(session.executeFetchString).mockReturnValue(output);
       const tool = server.getTool('run_test_class')!;
       const result = await tool.handler({ className: 'ArrayTest' });
 
       const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
-      expect(code).toContain('ArrayTest suite');
-      expect(result.content[0].text).toContain('3 passed');
+      expect(code).toContain('ArrayTest');
+      expect(code).toContain('suite');
       expect(result.content[0].text).toContain('testSize');
+      expect(result.content[0].text).toContain('PASSED');
     });
 
     it('reports failures and errors', async () => {
-      const output = '1 passed, 1 failed\n\nPASSED: MyTest >> testGood\nFAILED: MyTest >> testBad\n  expected 1 got 2\n';
+      const output = 'MyTest\ttestGood\tpassed\t\nMyTest\ttestBad\tfailed\texpected 1 got 2\n';
       vi.mocked(session.executeFetchString).mockReturnValue(output);
       const tool = server.getTool('run_test_class')!;
       const result = await tool.handler({ className: 'MyTest' });

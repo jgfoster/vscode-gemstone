@@ -2,39 +2,61 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { McpSession } from './mcpSession';
 
-function escapeString(s: string): string {
-  return s.replace(/'/g, "''");
+import { QueryExecutor } from '../../client/src/queries/types';
+import { getMethodSource } from '../../client/src/queries/getMethodSource';
+import { abortTransaction } from '../../client/src/queries/abortTransaction';
+import { commitTransaction } from '../../client/src/queries/commitTransaction';
+import { runTestMethod, TestRunResult } from '../../client/src/queries/runTestMethod';
+import { runTestClass } from '../../client/src/queries/runTestClass';
+import { getDictionaryNames } from '../../client/src/queries/getDictionaryNames';
+import { getClassNames } from '../../client/src/queries/getClassNames';
+import { getDictionaryEntries } from '../../client/src/queries/getDictionaryEntries';
+import { getAllClassNames } from '../../client/src/queries/getAllClassNames';
+import { getMethodList } from '../../client/src/queries/getMethodList';
+import { getClassDefinition } from '../../client/src/queries/getClassDefinition';
+import { getClassHierarchy } from '../../client/src/queries/getClassHierarchy';
+import { describeClass } from '../../client/src/queries/describeClass';
+import { fileOutClass } from '../../client/src/queries/fileOutClass';
+import { compileMethod } from '../../client/src/queries/compileMethod';
+import { compileClassDefinition } from '../../client/src/queries/compileClassDefinition';
+import { setClassComment } from '../../client/src/queries/setClassComment';
+import { deleteMethod } from '../../client/src/queries/deleteMethod';
+import { deleteClass } from '../../client/src/queries/deleteClass';
+import { addDictionary } from '../../client/src/queries/addDictionary';
+import { removeDictionary } from '../../client/src/queries/removeDictionary';
+import {
+  searchMethodSource, sendersOf, implementorsOf, referencesToObject,
+  MethodSearchResult,
+} from '../../client/src/queries/methodSearch';
+
+function formatTestResult(r: TestRunResult): string {
+  const prefix = r.status === 'passed' ? 'PASSED' : r.status === 'failed' ? 'FAILED' : 'ERROR';
+  const msg = r.message ? `: ${r.message}` : '';
+  return `${prefix}${msg} (${r.durationMs}ms)`;
 }
 
-function receiver(className: string, isMeta: boolean): string {
-  return isMeta ? `${className} class` : className;
+function formatTestResults(results: TestRunResult[]): string {
+  return results
+    .map(r => {
+      const prefix = r.status === 'passed' ? 'PASSED' : r.status === 'failed' ? 'FAILED' : 'ERROR';
+      const msg = r.message ? `\n  ${r.message}` : '';
+      return `${prefix}: ${r.className} >> ${r.selector}${msg}`;
+    })
+    .join('\n');
 }
 
-function methodSerialization(envId: number): string {
-  return `sl := System myUserProfile symbolList.
-classDict := IdentityDictionary new.
-sl do: [:dict |
-  dict keysAndValuesDo: [:k :v |
-    (v isBehavior and: [(classDict includesKey: v) not])
-      ifTrue: [classDict at: v put: dict name]]].
-stream := WriteStream on: Unicode7 new.
-limit := methods size min: 500.
-1 to: limit do: [:i |
-  | each cls baseClass |
-  each := methods at: i.
-  cls := each inClass.
-  baseClass := cls theNonMetaClass.
-  stream
-    nextPutAll: (classDict at: baseClass ifAbsent: ['']); tab;
-    nextPutAll: baseClass name; tab;
-    nextPutAll: (cls isMeta ifTrue: ['1'] ifFalse: ['0']); tab;
-    nextPutAll: each selector; tab;
-    nextPutAll: ((cls categoryOfSelector: each selector environmentId: ${envId}) ifNil: ['']); lf.
-].
-stream contents`;
+function formatMethodResults(results: MethodSearchResult[], fallback: string): string {
+  if (results.length === 0) return fallback;
+  return results
+    .map(r => `${r.dictName}\t${r.className}\t${r.isMeta ? 'class' : 'instance'}\t${r.selector}\t${r.category}`)
+    .join('\n');
 }
 
 export function registerTools(server: McpServer, session: McpSession): void {
+
+  // Bind this session into the QueryExecutor shape shared queries expect.
+  // Label is used only for client-side logging, ignored here.
+  const exec: QueryExecutor = (_label, code) => session.executeFetchString(code);
 
   // Tools are registered in alphabetical order.
 
@@ -44,8 +66,26 @@ export function registerTools(server: McpServer, session: McpSession): void {
     {},
     async () => {
       try {
-        const result = session.executeFetchString(`System abortTransaction. 'Transaction aborted'`);
-        return { content: [{ type: 'text' as const, text: result }] };
+        const text = abortTransaction(exec);
+        return { content: [{ type: 'text' as const, text }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'add_dictionary',
+    'Create a new SymbolDictionary and append it to the current user\'s symbolList. ' +
+    'NOT committed automatically — call commit to persist or abort to undo.',
+    { dictionaryName: z.string().describe('Name of the new dictionary') },
+    async ({ dictionaryName }) => {
+      try {
+        const text = addDictionary(exec, dictionaryName);
+        return { content: [{ type: 'text' as const, text }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -61,12 +101,31 @@ export function registerTools(server: McpServer, session: McpSession): void {
     {},
     async () => {
       try {
-        const result = session.executeFetchString(
-          `System commitTransaction
-  ifTrue: ['Transaction committed']
-  ifFalse: ['Commit failed — possible conflict. Use abort to reset, then retry.']`,
-        );
-        return { content: [{ type: 'text' as const, text: result }] };
+        const text = commitTransaction(exec);
+        return { content: [{ type: 'text' as const, text }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'compile_class_definition',
+    'Evaluate a class-definition expression (e.g. `Object subclass: \'Foo\' ... inDictionary: \'UserGlobals\'`). ' +
+    'Creates the class if new, updates it if it exists. The source embeds its own dictionary target. ' +
+    'NOT committed automatically.',
+    {
+      source: z.string().describe(
+        'Full class-definition Smalltalk expression including the "subclass:" keyword send and inDictionary:',
+      ),
+    },
+    async ({ source }) => {
+      try {
+        const text = compileClassDefinition(exec, source);
+        return { content: [{ type: 'text' as const, text: `Class: ${text}` }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -78,26 +137,97 @@ export function registerTools(server: McpServer, session: McpSession): void {
 
   server.tool(
     'compile_method',
-    'Compile (add or update) a method on a class. The change is NOT committed automatically — call abort to undo, or commit to persist.',
+    'Compile (add or update) a method on a class. The change is NOT committed automatically — call abort to undo, or commit to persist. ' +
+    'Optional dictionaryName disambiguates shadowed class names.',
     {
       className: z.string().describe('Class name'),
       isMeta: z.boolean().describe('true for class-side, false for instance-side'),
       category: z.string().describe('Method category, e.g. "accessing"'),
       source: z.string().describe('Full method source including the selector line'),
       environmentId: z.number().optional().describe('Environment ID (default 0)'),
+      dictionaryName: z.string().optional().describe(
+        'Optional dictionary to scope the class lookup. Omit for first-match resolution.',
+      ),
     },
-    async ({ className, isMeta, category, source, environmentId }) => {
+    async ({ className, isMeta, category, source, environmentId, dictionaryName }) => {
       try {
-        const recv = receiver(className, isMeta);
-        const envId = environmentId ?? 0;
-        const code = `${recv}
-  compileMethod: '${escapeString(source)}'
-  dictionaries: System myUserProfile symbolList
-  category: '${escapeString(category)}'
-  environmentId: ${envId}.
-'Compiled successfully: ${escapeString(recv)} >> ' , (('${escapeString(source)}' copyUpTo: Character lf) copyUpTo: Character cr)`;
-        const result = session.executeFetchString(code);
-        return { content: [{ type: 'text' as const, text: result }] };
+        const text = compileMethod(
+          exec, className, isMeta, category, source, environmentId ?? 0, dictionaryName,
+        );
+        return { content: [{ type: 'text' as const, text }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'delete_class',
+    'DESTRUCTIVE: remove a class from a specific dictionary. Requires dictionaryName because ' +
+    'deletion must target a specific dictionary (names can be shadowed across dicts). ' +
+    'NOT committed automatically — abort undoes it.',
+    {
+      className: z.string().describe('Class name to delete'),
+      dictionaryName: z.string().describe('Name of the dictionary that contains the class'),
+    },
+    async ({ className, dictionaryName }) => {
+      try {
+        const text = deleteClass(exec, dictionaryName, className);
+        return { content: [{ type: 'text' as const, text }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'delete_method',
+    'Remove a method from a class. NOT committed automatically. Optional dictionaryName ' +
+    'disambiguates shadowed class names.',
+    {
+      className: z.string().describe('Class name'),
+      isMeta: z.boolean().describe('true for class-side, false for instance-side'),
+      selector: z.string().describe('Method selector to remove'),
+      dictionaryName: z.string().optional().describe(
+        'Optional dictionary to scope the class lookup.',
+      ),
+    },
+    async ({ className, isMeta, selector, dictionaryName }) => {
+      try {
+        const text = deleteMethod(exec, className, isMeta, selector, dictionaryName);
+        return { content: [{ type: 'text' as const, text }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'describe_class',
+    'Agent-focused: combined class description in one round trip. Returns the class definition ' +
+    '(superclass, instance/class variables, pool dictionaries), class comment, and own methods ' +
+    'grouped by category for both instance and class sides. Does NOT include inherited selectors. ' +
+    'Prefer this over calling get_class_definition + list_methods separately when you want to ' +
+    'understand a class. Optional dictionaryName disambiguates shadowed class names.',
+    {
+      className: z.string().describe('Class name, e.g. "Array"'),
+      dictionaryName: z.string().optional().describe(
+        'Optional dictionary to scope the lookup. Omit to use first-match resolution across the symbolList.',
+      ),
+    },
+    async ({ className, dictionaryName }) => {
+      try {
+        const text = describeClass(exec, className, dictionaryName);
+        return { content: [{ type: 'text' as const, text }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -116,10 +246,34 @@ export function registerTools(server: McpServer, session: McpSession): void {
       try {
         // Wrap so the result is always a String — GciTsExecuteFetchBytes
         // requires a byte object, but the user's code may return any object.
-        // Use printString consistently (Smalltalk convention for unambiguous display).
         const wrapped = `(${code}) printString`;
         const result = session.executeFetchString(wrapped);
         return { content: [{ type: 'text' as const, text: result }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'export_class_source',
+    'Export a class as Topaz file-in source (full definition plus all methods). Useful for ' +
+    'backing up a class or transporting it between environments. Optional dictionaryName ' +
+    'disambiguates shadowed class names; without it, resolves to the first match in the ' +
+    'symbolList (the class the user\'s code actually binds to).',
+    {
+      className: z.string().describe('Class name, e.g. "Array"'),
+      dictionaryName: z.string().optional().describe(
+        'Optional dictionary to scope the lookup. Omit for first-match resolution.',
+      ),
+    },
+    async ({ className, dictionaryName }) => {
+      try {
+        const text = fileOutClass(exec, className, dictionaryName);
+        return { content: [{ type: 'text' as const, text }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -138,13 +292,30 @@ export function registerTools(server: McpServer, session: McpSession): void {
     },
     async ({ selector, environmentId }) => {
       try {
-        const envId = environmentId ?? 0;
-        const code = `| methods stream limit classDict sl |
-methods := ((ClassOrganizer new environmentId: ${envId}; yourself)
-  implementorsOf: #'${escapeString(selector)}') asArray.
-${methodSerialization(envId)}`;
-        const result = session.executeFetchString(code);
-        return { content: [{ type: 'text' as const, text: result || 'No implementors found.' }] };
+        const results = implementorsOf(exec, selector, environmentId ?? 0);
+        return { content: [{ type: 'text' as const, text: formatMethodResults(results, 'No implementors found.') }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'find_references_to',
+    'Find all methods that reference a named global (class, pool, or shared variable). ' +
+    'Sister to find_senders, which matches a selector; this matches a global by name. ' +
+    'Returns up to 500 results.',
+    {
+      objectName: z.string().describe('Name of the global to find references to, e.g. "AllUsers"'),
+      environmentId: z.number().optional().describe('Environment ID (default 0)'),
+    },
+    async ({ objectName, environmentId }) => {
+      try {
+        const results = referencesToObject(exec, objectName, environmentId ?? 0);
+        return { content: [{ type: 'text' as const, text: formatMethodResults(results, 'No references found.') }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -163,13 +334,8 @@ ${methodSerialization(envId)}`;
     },
     async ({ selector, environmentId }) => {
       try {
-        const envId = environmentId ?? 0;
-        const code = `| methods stream limit classDict sl |
-methods := ((ClassOrganizer new environmentId: ${envId}; yourself)
-  sendersOf: #'${escapeString(selector)}') at: 1.
-${methodSerialization(envId)}`;
-        const result = session.executeFetchString(code);
-        return { content: [{ type: 'text' as const, text: result || 'No senders found.' }] };
+        const results = sendersOf(exec, selector, environmentId ?? 0);
+        return { content: [{ type: 'text' as const, text: formatMethodResults(results, 'No senders found.') }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -185,8 +351,7 @@ ${methodSerialization(envId)}`;
     { className: z.string().describe('Class name, e.g. "Array"') },
     async ({ className }) => {
       try {
-        const code = `${className} definition`;
-        const result = session.executeFetchString(code);
+        const result = getClassDefinition(exec, className);
         return { content: [{ type: 'text' as const, text: result }] };
       } catch (err) {
         return {
@@ -203,29 +368,11 @@ ${methodSerialization(envId)}`;
     { className: z.string().describe('Class name') },
     async ({ className }) => {
       try {
-        const code = `| organizer class supers subs stream classDict sl |
-organizer := ClassOrganizer new.
-class := System myUserProfile symbolList objectNamed: #'${escapeString(className)}'.
-supers := organizer allSuperclassesOf: class.
-subs := organizer subclassesOf: class.
-sl := System myUserProfile symbolList.
-classDict := IdentityDictionary new.
-sl do: [:dict |
-  dict keysAndValuesDo: [:k :v |
-    (v isBehavior and: [(classDict includesKey: v) not])
-      ifTrue: [classDict at: v put: dict name]]].
-stream := WriteStream on: Unicode7 new.
-supers reverseDo: [:each |
-  stream nextPutAll: (classDict at: each ifAbsent: ['']); tab;
-    nextPutAll: each name; tab; nextPutAll: 'superclass'; lf].
-stream nextPutAll: (classDict at: class ifAbsent: ['']); tab;
-  nextPutAll: class name; tab; nextPutAll: 'self'; lf.
-(subs asSortedCollection: [:a :b | a name <= b name]) do: [:each |
-  stream nextPutAll: (classDict at: each ifAbsent: ['']); tab;
-    nextPutAll: each name; tab; nextPutAll: 'subclass'; lf].
-stream contents`;
-        const result = session.executeFetchString(code);
-        return { content: [{ type: 'text' as const, text: result }] };
+        const entries = getClassHierarchy(exec, className);
+        const text = entries
+          .map(e => `${e.dictName}\t${e.className}\t${e.kind}`)
+          .join('\n');
+        return { content: [{ type: 'text' as const, text }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -246,13 +393,30 @@ stream contents`;
     },
     async ({ className, isMeta, selector, environmentId }) => {
       try {
-        const recv = receiver(className, isMeta);
-        const envId = environmentId ?? 0;
-        const code = envId === 0
-          ? `(${recv} compiledMethodAt: #'${escapeString(selector)}') sourceString`
-          : `(${recv} compiledMethodAt: #'${escapeString(selector)}' environmentId: ${envId}) sourceString`;
-        const result = session.executeFetchString(code);
+        const result = getMethodSource(exec, className, isMeta, selector, environmentId ?? 0);
         return { content: [{ type: 'text' as const, text: result }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'list_all_classes',
+    'Enumerate every class in the user\'s symbol list along with its dictionary. ' +
+    'Bulk schema discovery; use when you don\'t know which dictionary a class lives in. ' +
+    'Returns tab-separated rows: dictIndex, dictName, className. May be large on big schemas.',
+    {},
+    async () => {
+      try {
+        const entries = getAllClassNames(exec);
+        const text = entries
+          .map(e => `${e.dictIndex}\t${e.dictName}\t${e.className}`)
+          .join('\n');
+        return { content: [{ type: 'text' as const, text }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -268,15 +432,11 @@ stream contents`;
     { dictionaryName: z.string().describe('Dictionary name, e.g. "Globals"') },
     async ({ dictionaryName }) => {
       try {
-        const code = `| ws dict |
-dict := System myUserProfile symbolList objectNamed: #'${escapeString(dictionaryName)}'.
-dict ifNil: [^ 'Dictionary not found: ${escapeString(dictionaryName)}'].
-ws := WriteStream on: String new.
-dict keysAndValuesDo: [:k :v |
-  v isBehavior ifTrue: [ws nextPutAll: k; lf]].
-ws contents`;
-        const result = session.executeFetchString(code);
-        return { content: [{ type: 'text' as const, text: result }] };
+        const names = getClassNames(exec, dictionaryName);
+        if (names.length === 0) {
+          return { content: [{ type: 'text' as const, text: `Dictionary not found or empty: ${dictionaryName}` }] };
+        }
+        return { content: [{ type: 'text' as const, text: names.join('\n') }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -292,13 +452,33 @@ ws contents`;
     {},
     async () => {
       try {
-        const code = `| ws |
-ws := WriteStream on: String new.
-System myUserProfile symbolList names do: [:each |
-  ws nextPutAll: each; lf].
-ws contents`;
-        const result = session.executeFetchString(code);
-        return { content: [{ type: 'text' as const, text: result }] };
+        const names = getDictionaryNames(exec);
+        return { content: [{ type: 'text' as const, text: names.join('\n') }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'list_dictionary_entries',
+    'List every entry in a symbol dictionary, including classes (with their categories) and ' +
+    'globals (non-class entries like pools and shared variables). Richer than list_classes. ' +
+    'Returns tab-separated rows: kind (class|global), category, name.',
+    { dictionaryName: z.string().describe('Dictionary name, e.g. "Globals"') },
+    async ({ dictionaryName }) => {
+      try {
+        const entries = getDictionaryEntries(exec, dictionaryName);
+        if (entries.length === 0) {
+          return { content: [{ type: 'text' as const, text: `Dictionary not found or empty: ${dictionaryName}` }] };
+        }
+        const text = entries
+          .map(e => `${e.isClass ? 'class' : 'global'}\t${e.category}\t${e.name}`)
+          .join('\n');
+        return { content: [{ type: 'text' as const, text }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -310,25 +490,36 @@ ws contents`;
 
   server.tool(
     'list_methods',
-    'List all methods of a class, grouped by category. Returns tab-separated lines: isMeta, category, selector.',
+    'List all methods of a class, grouped by category. Returns tab-separated lines: side (instance|class), category, selector.',
     { className: z.string().describe('Class name') },
     async ({ className }) => {
       try {
-        const code = `| ws class |
-ws := WriteStream on: Unicode7 new.
-class := ${className}.
-{ class. class class } doWithIndex: [:cls :idx |
-  | isMeta |
-  isMeta := idx = 2.
-  cls categoryNames asSortedCollection do: [:cat |
-    (cls sortedSelectorsIn: cat) do: [:sel |
-      ws
-        nextPutAll: (isMeta ifTrue: ['class'] ifFalse: ['instance']); tab;
-        nextPutAll: cat; tab;
-        nextPutAll: sel; lf]]].
-ws contents`;
-        const result = session.executeFetchString(code);
-        return { content: [{ type: 'text' as const, text: result || 'No methods found.' }] };
+        const methods = getMethodList(exec, className);
+        if (methods.length === 0) {
+          return { content: [{ type: 'text' as const, text: 'No methods found.' }] };
+        }
+        const text = methods
+          .map(m => `${m.isMeta ? 'class' : 'instance'}\t${m.category}\t${m.selector}`)
+          .join('\n');
+        return { content: [{ type: 'text' as const, text }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'remove_dictionary',
+    'DESTRUCTIVE: remove a dictionary from the current user\'s symbolList. ' +
+    'NOT committed automatically.',
+    { dictionaryName: z.string().describe('Name of the dictionary to remove') },
+    async ({ dictionaryName }) => {
+      try {
+        const text = removeDictionary(exec, dictionaryName);
+        return { content: [{ type: 'text' as const, text }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -346,25 +537,9 @@ ws contents`;
     },
     async ({ className }) => {
       try {
-        const code = `| suite result ws |
-suite := ${className} suite.
-result := suite run.
-ws := WriteStream on: Unicode7 new.
-ws nextPutAll: result printString; lf; lf.
-result passed do: [:each |
-  ws nextPutAll: 'PASSED: '; nextPutAll: each class name;
-    nextPutAll: ' >> '; nextPutAll: each selector; lf].
-result failures do: [:each |
-  ws nextPutAll: 'FAILED: '; nextPutAll: each testCase class name;
-    nextPutAll: ' >> '; nextPutAll: each testCase selector; lf;
-    nextPutAll: '  '; nextPutAll: (each printString copyFrom: 1 to: (each printString size min: 4096)); lf].
-result errors do: [:each |
-  ws nextPutAll: 'ERROR: '; nextPutAll: each testCase class name;
-    nextPutAll: ' >> '; nextPutAll: each testCase selector; lf;
-    nextPutAll: '  '; nextPutAll: (each printString copyFrom: 1 to: (each printString size min: 4096)); lf].
-ws contents`;
-        const result = session.executeFetchString(code);
-        return { content: [{ type: 'text' as const, text: result }] };
+        const results = runTestClass(exec, className);
+        const text = formatTestResults(results);
+        return { content: [{ type: 'text' as const, text }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -383,30 +558,9 @@ ws contents`;
     },
     async ({ className, selector }) => {
       try {
-        const code = `| testCase result ws startMs endMs |
-startMs := Time millisecondClockValue.
-testCase := ${className} selector: #'${escapeString(selector)}'.
-result := testCase run.
-endMs := Time millisecondClockValue.
-ws := WriteStream on: Unicode7 new.
-(result hasPassed)
-  ifTrue: [ws nextPutAll: 'PASSED']
-  ifFalse: [
-    result failures size > 0
-      ifTrue: [
-        | failure |
-        failure := result failures asArray first.
-        ws nextPutAll: 'FAILED: ';
-          nextPutAll: (failure printString copyFrom: 1 to: (failure printString size min: 4096))]
-      ifFalse: [
-        | err |
-        err := result errors asArray first.
-        ws nextPutAll: 'ERROR: ';
-          nextPutAll: (err printString copyFrom: 1 to: (err printString size min: 4096))]].
-ws nextPutAll: ' ('; nextPutAll: (endMs - startMs) printString; nextPutAll: 'ms)'.
-ws contents`;
-        const result = session.executeFetchString(code);
-        return { content: [{ type: 'text' as const, text: result }] };
+        const r = runTestMethod(exec, className, selector);
+        const text = formatTestResult(r);
+        return { content: [{ type: 'text' as const, text }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -425,13 +579,32 @@ ws contents`;
     },
     async ({ term, ignoreCase }) => {
       try {
-        const caseSensitive = ignoreCase === false ? 'false' : 'true';
-        const code = `| results methods stream limit classDict sl |
-results := ClassOrganizer new substringSearch: '${escapeString(term)}' ignoreCase: ${caseSensitive}.
-methods := results at: 1.
-${methodSerialization(0)}`;
-        const result = session.executeFetchString(code);
-        return { content: [{ type: 'text' as const, text: result || 'No matches found.' }] };
+        const results = searchMethodSource(exec, term, ignoreCase !== false);
+        return { content: [{ type: 'text' as const, text: formatMethodResults(results, 'No matches found.') }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'set_class_comment',
+    'Set the class comment (docstring equivalent). Replaces any existing comment. ' +
+    'NOT committed automatically. Optional dictionaryName disambiguates shadowed class names.',
+    {
+      className: z.string().describe('Class name'),
+      comment: z.string().describe('New comment text'),
+      dictionaryName: z.string().optional().describe(
+        'Optional dictionary to scope the class lookup.',
+      ),
+    },
+    async ({ className, comment, dictionaryName }) => {
+      try {
+        const text = setClassComment(exec, className, comment, dictionaryName);
+        return { content: [{ type: 'text' as const, text }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],

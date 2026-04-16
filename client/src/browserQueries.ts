@@ -2,6 +2,69 @@ import { ActiveSession } from './sessionManager';
 import { OOP_NIL, OOP_ILLEGAL } from './gciConstants';
 import { logQuery, logResult, logError, logGciCall, logGciResult } from './gciLog';
 
+import { QueryExecutor } from './queries/types';
+
+// Read-path shared queries.
+import { getMethodSource as sharedGetMethodSource } from './queries/getMethodSource';
+import { getDictionaryNames as sharedGetDictionaryNames } from './queries/getDictionaryNames';
+import { getPoolDictionaryNames as sharedGetPoolDictionaryNames } from './queries/getPoolDictionaryNames';
+import { getClassNames as sharedGetClassNames } from './queries/getClassNames';
+import { getDictionaryEntries as sharedGetDictionaryEntries } from './queries/getDictionaryEntries';
+import { getGlobalsForDictionary as sharedGetGlobalsForDictionary } from './queries/getGlobalsForDictionary';
+import { getMethodCategories as sharedGetMethodCategories } from './queries/getMethodCategories';
+import { getMethodSelectors as sharedGetMethodSelectors } from './queries/getMethodSelectors';
+import { getClassEnvironments as sharedGetClassEnvironments } from './queries/getClassEnvironments';
+import { getClassDefinition as sharedGetClassDefinition } from './queries/getClassDefinition';
+import { getClassComment as sharedGetClassComment } from './queries/getClassComment';
+import { getSuperclassDictName as sharedGetSuperclassDictName } from './queries/getSuperclassDictName';
+import { canClassBeWritten as sharedCanClassBeWritten } from './queries/canClassBeWritten';
+import { getAllClassNames as sharedGetAllClassNames } from './queries/getAllClassNames';
+import { getClassHierarchy as sharedGetClassHierarchy } from './queries/getClassHierarchy';
+import { fileOutClass as sharedFileOutClass } from './queries/fileOutClass';
+import { describeClass as sharedDescribeClass } from './queries/describeClass';
+import { loadClassInfo as sharedLoadClassInfo } from './queries/loadClassInfo';
+import { getInstVarNames as sharedGetInstVarNames } from './queries/getInstVarNames';
+import { getAllSelectors as sharedGetAllSelectors } from './queries/getAllSelectors';
+import { getMethodList as sharedGetMethodList } from './queries/getMethodList';
+import { getSourceOffsets as sharedGetSourceOffsets } from './queries/getSourceOffsets';
+import { getStepPointSelectorRanges as sharedGetStepPointSelectorRanges } from './queries/getStepPointSelectorRanges';
+import {
+  searchMethodSource as sharedSearchMethodSource,
+  sendersOf as sharedSendersOf,
+  implementorsOf as sharedImplementorsOf,
+  referencesToObject as sharedReferencesToObject,
+} from './queries/methodSearch';
+
+// Write-path shared queries.
+import { compileMethod as sharedCompileMethod } from './queries/compileMethod';
+import { compileClassDefinition as sharedCompileClassDefinition } from './queries/compileClassDefinition';
+import { setClassComment as sharedSetClassComment } from './queries/setClassComment';
+import { deleteMethod as sharedDeleteMethod } from './queries/deleteMethod';
+import { recategorizeMethod as sharedRecategorizeMethod } from './queries/recategorizeMethod';
+import { renameCategory as sharedRenameCategory } from './queries/renameCategory';
+import { deleteClass as sharedDeleteClass } from './queries/deleteClass';
+import { moveClass as sharedMoveClass } from './queries/moveClass';
+import { reclassifyClass as sharedReclassifyClass } from './queries/reclassifyClass';
+import { addDictionary as sharedAddDictionary } from './queries/addDictionary';
+import { removeDictionary as sharedRemoveDictionary } from './queries/removeDictionary';
+import { moveDictionaryUp as sharedMoveDictionaryUp } from './queries/moveDictionaryUp';
+import { moveDictionaryDown as sharedMoveDictionaryDown } from './queries/moveDictionaryDown';
+import { setBreakAtStepPoint as sharedSetBreakAtStepPoint } from './queries/setBreakAtStepPoint';
+import { clearBreakAtStepPoint as sharedClearBreakAtStepPoint } from './queries/clearBreakAtStepPoint';
+import { clearAllBreaks as sharedClearAllBreaks } from './queries/clearAllBreaks';
+
+// Re-export shared types so existing callers (extension.ts, systemBrowser.ts, etc.)
+// can continue to import them from './browserQueries'.
+export type { DictEntry } from './queries/getDictionaryEntries';
+export type { GlobalEntry } from './queries/getGlobalsForDictionary';
+export type { ClassNameEntry } from './queries/getAllClassNames';
+export type { EnvCategoryLine } from './queries/getClassEnvironments';
+export type { ClassHierarchyEntry } from './queries/getClassHierarchy';
+export type { MethodEntry } from './queries/getMethodList';
+export type { StepPointSelectorInfo } from './queries/getStepPointSelectorRanges';
+export type { MethodSearchResult } from './queries/methodSearch';
+export type { ClassInfo } from './queries/loadClassInfo';
+
 const MAX_RESULT = 256 * 1024;
 
 // Cache resolved OOP_CLASS_Utf8 per session handle (Node.js strings are UTF-8 when passed via koffi)
@@ -81,738 +144,163 @@ export function executeFetchString(session: ActiveSession, label: string, code: 
   return data;
 }
 
-function splitLines(result: string): string[] {
-  return result.split('\n').filter(s => s.length > 0);
+// Bind a session to the QueryExecutor shape that shared queries expect.
+function bind(session: ActiveSession): QueryExecutor {
+  return (label, code) => executeFetchString(session, label, code);
 }
 
-function escapeString(s: string): string {
-  return s.replace(/'/g, "''");
-}
-
-function receiver(className: string, isMeta: boolean): string {
-  return isMeta ? `${className} class` : className;
-}
+// ── Read-only queries (thin delegates to client/src/queries/) ─────────────
 
 export function getDictionaryNames(session: ActiveSession): string[] {
-  const code = `| ws |
-ws := WriteStream on: String new.
-System myUserProfile symbolList names do: [:each |
-  ws nextPutAll: each; lf].
-ws contents`;
-  return splitLines(executeFetchString(session, 'getDictionaryNames', code));
+  return sharedGetDictionaryNames(bind(session));
 }
 
 export function getPoolDictionaryNames(session: ActiveSession): string[] {
-  const code = `| ws names |
-names := IdentitySet new.
-System myUserProfile symbolList do: [:dict |
-  dict keysAndValuesDo: [:key :val |
-    (val isKindOf: SymbolDictionary) ifTrue: [names add: key]]].
-ws := WriteStream on: String new.
-names asSortedCollection do: [:each |
-  ws nextPutAll: each; lf].
-ws contents`;
-  return splitLines(executeFetchString(session, 'getPoolDictionaryNames', code));
+  return sharedGetPoolDictionaryNames(bind(session));
 }
 
-export function getClassNames(session: ActiveSession, dictIndex: number): string[] {
-  const code = `| ws dict |
-dict := System myUserProfile symbolList at: ${dictIndex}.
-ws := WriteStream on: String new.
-dict keysAndValuesDo: [:k :v |
-  v isBehavior ifTrue: [ws nextPutAll: k; lf]].
-ws contents`;
-  return splitLines(executeFetchString(session, `getClassNames(dictIndex: ${dictIndex})`, code)).sort();
-}
-
-export interface DictEntry {
-  isClass: boolean;
-  category: string;   // class category for classes, '' for globals
-  name: string;
+export function getClassNames(
+  session: ActiveSession, dict: number | string,
+): string[] {
+  return sharedGetClassNames(bind(session), dict);
 }
 
 export function getDictionaryEntries(
-  session: ActiveSession, dictIndex: number,
-): DictEntry[] {
-  const code = `| ws dict |
-dict := System myUserProfile symbolList at: ${dictIndex}.
-ws := WriteStream on: Unicode7 new.
-dict keysAndValuesDo: [:k :v |
-  v isBehavior
-    ifTrue: [ws nextPutAll: '1'; tab; nextPutAll: (v category ifNil: ['']); tab; nextPutAll: k; lf]
-    ifFalse: [ws nextPutAll: '0'; tab; tab; nextPutAll: k asString; lf]].
-ws contents`;
-
-  const raw = executeFetchString(
-    session, `getDictionaryEntries(dictIndex: ${dictIndex})`, code,
-  );
-
-  const results: DictEntry[] = [];
-  for (const line of raw.split('\n')) {
-    if (line.length === 0) continue;
-    const parts = line.split('\t');
-    if (parts.length < 3) continue;
-    const isClass = parts[0] === '1';
-    const category = parts[1];
-    const name = parts[2];
-    if (name.length > 0) {
-      results.push({ isClass, category, name });
-    }
-  }
-  return results;
+  session: ActiveSession, dict: number | string,
+) {
+  return sharedGetDictionaryEntries(bind(session), dict);
 }
 
-export interface GlobalEntry {
-  name: string;
-  className: string;
-  value: string;
-}
-
-export function getGlobalsForDictionary(
-  session: ActiveSession, dictIndex: number,
-): GlobalEntry[] {
-  const code = `| ws dict |
-dict := System myUserProfile symbolList at: ${dictIndex}.
-ws := WriteStream on: Unicode7 new.
-dict keysAndValuesDo: [:k :v |
-  v isBehavior ifFalse: [
-    | ps |
-    ps := [v printString] on: Error do: [:e | '<error: ' , e messageText , '>'].
-    ps size > 120 ifTrue: [ps := (ps copyFrom: 1 to: 120) , '...'].
-    ws nextPutAll: k asString; tab;
-       nextPutAll: v class name; tab;
-       nextPutAll: ps; lf]].
-ws contents`;
-
-  const raw = executeFetchString(
-    session, `getGlobalsForDictionary(dictIndex: ${dictIndex})`, code,
-  );
-
-  const results: GlobalEntry[] = [];
-  for (const line of raw.split('\n')) {
-    if (!line) continue;
-    const firstTab = line.indexOf('\t');
-    if (firstTab < 0) continue;
-    const secondTab = line.indexOf('\t', firstTab + 1);
-    if (secondTab < 0) continue;
-    results.push({
-      name: line.substring(0, firstTab),
-      className: line.substring(firstTab + 1, secondTab),
-      value: line.substring(secondTab + 1),
-    });
-  }
-  return results;
+export function getGlobalsForDictionary(session: ActiveSession, dictIndex: number) {
+  return sharedGetGlobalsForDictionary(bind(session), dictIndex);
 }
 
 export function getMethodCategories(
-  session: ActiveSession, className: string, isMeta: boolean
+  session: ActiveSession, className: string, isMeta: boolean,
 ): string[] {
-  const recv = receiver(className, isMeta);
-  const code = `| ws |
-ws := WriteStream on: String new.
-${recv} categoryNames asSortedCollection do: [:each |
-  ws nextPutAll: each; lf].
-ws contents`;
-  return splitLines(executeFetchString(session, `getMethodCategories(${recv})`, code));
+  return sharedGetMethodCategories(bind(session), className, isMeta);
 }
 
 export function getMethodSelectors(
-  session: ActiveSession, className: string, isMeta: boolean, category: string
+  session: ActiveSession, className: string, isMeta: boolean, category: string,
 ): string[] {
-  const recv = receiver(className, isMeta);
-  const code = `| ws |
-ws := WriteStream on: String new.
-(${recv} sortedSelectorsIn: '${escapeString(category)}')
-  do: [:each |
-    ws nextPutAll: each; lf].
-ws contents`;
-  return splitLines(executeFetchString(session, `getMethodSelectors(${recv}, '${category}')`, code));
-}
-
-export interface EnvCategoryLine {
-  isMeta: boolean;
-  envId: number;
-  category: string;
-  selectors: string[];
+  return sharedGetMethodSelectors(bind(session), className, isMeta, category);
 }
 
 export function getClassEnvironments(
   session: ActiveSession, dictIndex: number, className: string, maxEnv: number,
-): EnvCategoryLine[] {
-  const code = `| class envs stream |
-envs := ${maxEnv}.
-class := (System myUserProfile symbolList at: ${dictIndex}) at: #'${escapeString(className)}'.
-stream := WriteStream on: Unicode7 new.
-{ class class. class. } do: [:eachClass |
-  0 to: envs do: [:env |
-    (eachClass _unifiedCategorys: env) keysAndValuesDo: [:categoryName :selectors |
-      stream
-        nextPutAll: eachClass name; tab;
-        nextPutAll: env printString; tab;
-        nextPutAll: categoryName; tab;
-        yourself.
-      selectors do: [:each |
-        stream nextPutAll: each; tab.
-      ].
-      stream lf.
-    ].
-  ].
-].
-stream contents`;
-
-  const raw = executeFetchString(
-    session, `getClassEnvironments(${className}, ${maxEnv})`, code,
-  );
-
-  const results: EnvCategoryLine[] = [];
-  for (const line of raw.split('\n')) {
-    if (line.length === 0) continue;
-    const parts = line.split('\t').filter(s => s.length > 0);
-    if (parts.length < 3) continue;
-    const receiverName = parts[0];
-    const envId = parseInt(parts[1], 10);
-    const category = parts[2];
-    const selectors = parts.slice(3).sort();
-    const isMeta = receiverName.endsWith(' class');
-    results.push({ isMeta, envId, category, selectors });
-  }
-  return results;
+) {
+  return sharedGetClassEnvironments(bind(session), dictIndex, className, maxEnv);
 }
 
 export function getMethodSource(
   session: ActiveSession, className: string, isMeta: boolean, selector: string,
   environmentId: number = 0,
 ): string {
-  const recv = receiver(className, isMeta);
-  if (environmentId === 0) {
-    const code = `(${recv} compiledMethodAt: #'${escapeString(selector)}') sourceString`;
-    return executeFetchString(session, `getMethodSource(${recv}>>#${selector})`, code);
-  }
-  const code = `(${recv} compiledMethodAt: #'${escapeString(selector)}' environmentId: ${environmentId}) sourceString`;
-  return executeFetchString(
-    session, `getMethodSource(${recv}>>#${selector} env:${environmentId})`, code,
-  );
+  return sharedGetMethodSource(bind(session), className, isMeta, selector, environmentId);
 }
 
-export function getClassDefinition(
-  session: ActiveSession, className: string
-): string {
-  const code = `${className} definition`;
-  return executeFetchString(session, `getClassDefinition(${className})`, code);
+export function getClassDefinition(session: ActiveSession, className: string): string {
+  return sharedGetClassDefinition(bind(session), className);
 }
 
-export function compileClassDefinition(
-  session: ActiveSession, source: string
-): void {
-  // Wrap so the result is a String (the class name) — GciTsExecuteFetchBytes
-  // requires a byte-object result, but class definitions return a Class.
-  const code = `(${source}) name`;
-  executeFetchString(session, 'compileClassDefinition', code);
-}
-
-export function getClassComment(
-  session: ActiveSession, className: string
-): string {
-  const code = `${className} comment`;
-  return executeFetchString(session, `getClassComment(${className})`, code);
+export function getClassComment(session: ActiveSession, className: string): string {
+  return sharedGetClassComment(bind(session), className);
 }
 
 export function getSuperclassDictName(
   session: ActiveSession, dictIndex: number, className: string,
 ): string {
-  const code = `| cls sc result |
-cls := (System myUserProfile symbolList at: ${dictIndex}) at: #'${escapeString(className)}'.
-sc := cls superclass.
-sc isNil ifTrue: [''].
-sc ifNotNil: [
-  result := ''.
-  System myUserProfile symbolList do: [:d |
-    (d includesKey: sc name asSymbol) ifTrue: [result := d name]].
-  result]`;
-  return executeFetchString(session, `getSuperclassDictName(${className})`, code).trim();
+  return sharedGetSuperclassDictName(bind(session), dictIndex, className);
 }
 
 export function canClassBeWritten(session: ActiveSession, className: string): boolean {
-  const code = `${className} canBeWritten printString`;
-  const result = executeFetchString(session, `canBeWritten(${className})`, code);
-  return result.trim() === 'true';
+  return sharedCanClassBeWritten(bind(session), className);
 }
 
-export function setClassComment(
-  session: ActiveSession, className: string, comment: string
-): void {
-  const code = `${className} comment: '${escapeString(comment)}'. 'ok'`;
-  executeFetchString(session, `setClassComment(${className})`, code);
+export function getAllClassNames(session: ActiveSession) {
+  return sharedGetAllClassNames(bind(session));
 }
 
-export function deleteMethod(
-  session: ActiveSession, className: string, isMeta: boolean, selector: string
-): void {
-  const recv = receiver(className, isMeta);
-  const code = `${recv} removeSelector: #'${escapeString(selector)}'. 'ok'`;
-  executeFetchString(session, `deleteMethod(${recv}>>#${selector})`, code);
-}
-
-export function recategorizeMethod(
-  session: ActiveSession, className: string, isMeta: boolean,
-  selector: string, newCategory: string
-): void {
-  const recv = receiver(className, isMeta);
-  const code = `${recv} moveMethod: #'${escapeString(selector)}' toCategory: '${escapeString(newCategory)}'. 'ok'`;
-  executeFetchString(session, `recategorizeMethod(${recv}>>#${selector} → '${newCategory}')`, code);
-}
-
-export function renameCategory(
-  session: ActiveSession, className: string, isMeta: boolean,
-  oldCategory: string, newCategory: string
-): void {
-  const recv = receiver(className, isMeta);
-  const code = `${recv} renameCategory: '${escapeString(oldCategory)}' to: '${escapeString(newCategory)}'. 'ok'`;
-  executeFetchString(session, `renameCategory(${recv}, '${oldCategory}' → '${newCategory}')`, code);
-}
-
-export function deleteClass(
-  session: ActiveSession, dictIndex: number, className: string
-): void {
-  const code = `(System myUserProfile symbolList at: ${dictIndex})
-  removeKey: #'${escapeString(className)}' ifAbsent: []. 'ok'`;
-  executeFetchString(session, `deleteClass(dictIndex: ${dictIndex}, ${className})`, code);
-}
-
-export function moveClass(
-  session: ActiveSession, srcDictIndex: number, destDictIndex: number, className: string
-): void {
-  const code = `| cls srcDict destDict |
-srcDict := System myUserProfile symbolList at: ${srcDictIndex}.
-destDict := System myUserProfile symbolList at: ${destDictIndex}.
-cls := srcDict removeKey: #'${escapeString(className)}'.
-destDict at: #'${escapeString(className)}' put: cls.
-'ok'`;
-  executeFetchString(session, `moveClass(${className}: ${srcDictIndex} → ${destDictIndex})`, code);
-}
-
-export function reclassifyClass(
-  session: ActiveSession, dictIndex: number, className: string, newCategory: string
-): void {
-  const code = `((System myUserProfile symbolList at: ${dictIndex}) at: #'${escapeString(className)}') category: '${escapeString(newCategory)}'. 'ok'`;
-  executeFetchString(session, `reclassifyClass(${className} → '${newCategory}')`, code);
-}
-
-export function addDictionary(
-  session: ActiveSession, dictName: string
-): void {
-  const code = `| dict |
-dict := SymbolDictionary new.
-dict name: #'${escapeString(dictName)}'.
-System myUserProfile symbolList add: dict.
-dict name`;
-  executeFetchString(session, `addDictionary(${dictName})`, code);
-}
-
-export function removeDictionary(
-  session: ActiveSession, dictIndex: number
-): void {
-  const code = `| sl |
-sl := System myUserProfile symbolList.
-sl remove: (sl at: ${dictIndex}). 'ok'`;
-  executeFetchString(session, `removeDictionary(dictIndex: ${dictIndex})`, code);
-}
-
-export function moveDictionaryUp(
-  session: ActiveSession, dictIndex: number
-): void {
-  const code = `| sl temp |
-sl := System myUserProfile symbolList.
-${dictIndex} > 1 ifTrue: [
-  temp := sl at: ${dictIndex}.
-  sl at: ${dictIndex} put: (sl at: ${dictIndex} - 1).
-  sl at: ${dictIndex} - 1 put: temp].
-'ok'`;
-  executeFetchString(session, `moveDictionaryUp(${dictIndex})`, code);
-}
-
-export function moveDictionaryDown(
-  session: ActiveSession, dictIndex: number
-): void {
-  const code = `| sl temp |
-sl := System myUserProfile symbolList.
-${dictIndex} < sl size ifTrue: [
-  temp := sl at: ${dictIndex}.
-  sl at: ${dictIndex} put: (sl at: ${dictIndex} + 1).
-  sl at: ${dictIndex} + 1 put: temp].
-'ok'`;
-  executeFetchString(session, `moveDictionaryDown(${dictIndex})`, code);
-}
-
-export interface ClassNameEntry {
-  dictIndex: number;
-  dictName: string;
-  className: string;
-}
-
-export function getAllClassNames(session: ActiveSession): ClassNameEntry[] {
-  const code = `| ws sl seen |
-ws := WriteStream on: Unicode7 new.
-sl := System myUserProfile symbolList.
-seen := IdentitySet new.
-1 to: sl size do: [:idx |
-  | dict |
-  dict := sl at: idx.
-  dict keysAndValuesDo: [:k :v |
-    (v isBehavior and: [(seen includes: v) not]) ifTrue: [
-      seen add: v.
-      ws nextPutAll: idx printString; tab; nextPutAll: dict name; tab; nextPutAll: k; lf]]].
-ws contents`;
-
-  const raw = executeFetchString(session, 'getAllClassNames', code);
-  const results: ClassNameEntry[] = [];
-  for (const line of raw.split('\n')) {
-    if (line.length === 0) continue;
-    const parts = line.split('\t');
-    if (parts.length < 3) continue;
-    results.push({
-      dictIndex: parseInt(parts[0], 10),
-      dictName: parts[1],
-      className: parts[2],
-    });
-  }
-  return results;
-}
-
-export interface MethodSearchResult {
-  dictName: string;
-  className: string;
-  isMeta: boolean;
-  selector: string;
-  category: string;
-}
-
-// Shared Smalltalk snippet: build classDict mapping classes to their first dictionary name,
-// then serialize an array of GsNMethods as tab-separated lines.
-// envId parameter controls which environment to use for categoryOfSelector:.
-function methodSerialization(envId: number | string): string {
-  return `sl := System myUserProfile symbolList.
-classDict := IdentityDictionary new.
-sl do: [:dict |
-  dict keysAndValuesDo: [:k :v |
-    (v isBehavior and: [(classDict includesKey: v) not])
-      ifTrue: [classDict at: v put: dict name]]].
-stream := WriteStream on: Unicode7 new.
-limit := methods size min: 500.
-1 to: limit do: [:i |
-  | each cls baseClass |
-  each := methods at: i.
-  cls := each inClass.
-  baseClass := cls theNonMetaClass.
-  stream
-    nextPutAll: (classDict at: baseClass ifAbsent: ['']); tab;
-    nextPutAll: baseClass name; tab;
-    nextPutAll: (cls isMeta ifTrue: ['1'] ifFalse: ['0']); tab;
-    nextPutAll: each selector; tab;
-    nextPutAll: ((cls categoryOfSelector: each selector environmentId: ${envId}) ifNil: ['']); lf.
-].
-stream contents`;
-}
-
-function parseMethodSearchResults(raw: string): MethodSearchResult[] {
-  const results: MethodSearchResult[] = [];
-  for (const line of raw.split('\n')) {
-    if (line.length === 0) continue;
-    const parts = line.split('\t');
-    if (parts.length < 5) continue;
-    results.push({
-      dictName: parts[0],
-      className: parts[1],
-      isMeta: parts[2] === '1',
-      selector: parts[3],
-      category: parts[4],
-    });
-  }
-  return results;
-}
-
-export function searchMethodSource(
-  session: ActiveSession, term: string, ignoreCase: boolean,
-): MethodSearchResult[] {
-  const code = `| results methods stream limit classDict sl |
-results := ClassOrganizer new substringSearch: '${escapeString(term)}' ignoreCase: ${ignoreCase}.
-methods := results at: 1.
-${methodSerialization(0)}`;
-
-  return parseMethodSearchResults(
-    executeFetchString(session, `searchMethodSource('${term}')`, code),
-  );
-}
-
-export function sendersOf(
-  session: ActiveSession, selector: string, environmentId: number = 0,
-): MethodSearchResult[] {
-  const code = `| methods stream limit classDict sl |
-methods := ((ClassOrganizer new environmentId: ${environmentId}; yourself)
-  sendersOf: #'${escapeString(selector)}') at: 1.
-${methodSerialization(environmentId)}`;
-
-  return parseMethodSearchResults(
-    executeFetchString(session, `sendersOf(#${selector}, env:${environmentId})`, code),
-  );
-}
-
-export function implementorsOf(
-  session: ActiveSession, selector: string, environmentId: number = 0,
-): MethodSearchResult[] {
-  const code = `| methods stream limit classDict sl |
-methods := ((ClassOrganizer new environmentId: ${environmentId}; yourself)
-  implementorsOf: #'${escapeString(selector)}') asArray.
-${methodSerialization(environmentId)}`;
-
-  return parseMethodSearchResults(
-    executeFetchString(session, `implementorsOf(#${selector}, env:${environmentId})`, code),
-  );
-}
-
-export interface ClassHierarchyEntry {
-  className: string;
-  dictName: string;
-  kind: 'superclass' | 'self' | 'subclass';
-}
-
-export function getClassHierarchy(
-  session: ActiveSession, className: string,
-): ClassHierarchyEntry[] {
-  const code = `| organizer class supers subs stream classDict sl |
-organizer := ClassOrganizer new.
-class := System myUserProfile symbolList objectNamed: #'${escapeString(className)}'.
-supers := organizer allSuperclassesOf: class.
-subs := organizer subclassesOf: class.
-sl := System myUserProfile symbolList.
-classDict := IdentityDictionary new.
-sl do: [:dict |
-  dict keysAndValuesDo: [:k :v |
-    (v isBehavior and: [(classDict includesKey: v) not])
-      ifTrue: [classDict at: v put: dict name]]].
-stream := WriteStream on: Unicode7 new.
-supers reverseDo: [:each |
-  stream nextPutAll: (classDict at: each ifAbsent: ['']); tab;
-    nextPutAll: each name; tab; nextPutAll: 'superclass'; lf].
-stream nextPutAll: (classDict at: class ifAbsent: ['']); tab;
-  nextPutAll: class name; tab; nextPutAll: 'self'; lf.
-(subs asSortedCollection: [:a :b | a name <= b name]) do: [:each |
-  stream nextPutAll: (classDict at: each ifAbsent: ['']); tab;
-    nextPutAll: each name; tab; nextPutAll: 'subclass'; lf].
-stream contents`;
-
-  const raw = executeFetchString(session, `getClassHierarchy(${className})`, code);
-  const results: ClassHierarchyEntry[] = [];
-  for (const line of raw.split('\n')) {
-    if (line.length === 0) continue;
-    const parts = line.split('\t');
-    if (parts.length < 3) continue;
-    results.push({
-      dictName: parts[0],
-      className: parts[1],
-      kind: parts[2] as 'superclass' | 'self' | 'subclass',
-    });
-  }
-  return results;
-}
-
-export function referencesToObject(
-  session: ActiveSession, objectName: string, environmentId: number = 0,
-): MethodSearchResult[] {
-  const code = `| methods stream limit classDict sl |
-methods := (ClassOrganizer new referencesToObject:
-  (System myUserProfile symbolList objectNamed: #'${escapeString(objectName)}')).
-${methodSerialization(environmentId)}`;
-
-  return parseMethodSearchResults(
-    executeFetchString(session, `referencesToObject(${objectName})`, code),
-  );
+export function getClassHierarchy(session: ActiveSession, className: string) {
+  return sharedGetClassHierarchy(bind(session), className);
 }
 
 export function fileOutClass(
+  session: ActiveSession, className: string, dict?: number | string,
+): string {
+  return sharedFileOutClass(bind(session), className, dict);
+}
+
+export function loadClassInfo(
   session: ActiveSession, dictIndex: number, className: string,
+) {
+  return sharedLoadClassInfo(bind(session), dictIndex, className);
+}
+
+export function describeClass(
+  session: ActiveSession, className: string, dict?: number | string,
 ): string {
-  const code = `((System myUserProfile symbolList at: ${dictIndex}) at: #'${escapeString(className)}') fileOutClass`;
-  return executeFetchString(session, `fileOutClass(${className})`, code);
+  return sharedDescribeClass(bind(session), className, dict);
 }
 
-export function getInstVarNames(
-  session: ActiveSession, className: string,
-): string[] {
-  const code = `| ws |
-ws := WriteStream on: String new.
-${className} allInstVarNames do: [:each |
-  ws nextPutAll: each; lf].
-ws contents`;
-  return splitLines(executeFetchString(session, `getInstVarNames(${className})`, code));
+export function getInstVarNames(session: ActiveSession, className: string): string[] {
+  return sharedGetInstVarNames(bind(session), className);
 }
 
-export function getAllSelectors(
-  session: ActiveSession, className: string,
-): string[] {
-  const code = `| ws |
-ws := WriteStream on: Unicode7 new.
-${className} allSelectors asSortedCollection do: [:each |
-  ws nextPutAll: each; lf].
-ws contents`;
-  return splitLines(executeFetchString(session, `getAllSelectors(${className})`, code));
+export function getAllSelectors(session: ActiveSession, className: string): string[] {
+  return sharedGetAllSelectors(bind(session), className);
 }
 
-export interface MethodEntry {
-  isMeta: boolean;
-  category: string;
-  selector: string;
-}
-
-export function getMethodList(
-  session: ActiveSession, className: string,
-): MethodEntry[] {
-  const code = `| ws class |
-ws := WriteStream on: Unicode7 new.
-class := ${className}.
-{ class. class class } doWithIndex: [:cls :idx |
-  | isMeta |
-  isMeta := idx = 2.
-  cls categoryNames asSortedCollection do: [:cat |
-    (cls sortedSelectorsIn: cat) do: [:sel |
-      ws
-        nextPutAll: (isMeta ifTrue: ['1'] ifFalse: ['0']); tab;
-        nextPutAll: cat; tab;
-        nextPutAll: sel; lf]]].
-ws contents`;
-  const raw = executeFetchString(session, `getMethodList(${className})`, code);
-  const results: MethodEntry[] = [];
-  for (const line of raw.split('\n')) {
-    if (line.length === 0) continue;
-    const parts = line.split('\t');
-    if (parts.length < 3) continue;
-    results.push({
-      isMeta: parts[0] === '1',
-      category: parts[1],
-      selector: parts[2],
-    });
-  }
-  return results;
-}
-
-// ── Breakpoints ──────────────────────────────────────────
-
-function compiledMethodExpr(
-  className: string, isMeta: boolean, selector: string, environmentId: number,
-): string {
-  const recv = receiver(className, isMeta);
-  return `(${recv} compiledMethodAt: #'${escapeString(selector)}' environmentId: ${environmentId})`;
+export function getMethodList(session: ActiveSession, className: string) {
+  return sharedGetMethodList(bind(session), className);
 }
 
 export function getSourceOffsets(
   session: ActiveSession,
   className: string, isMeta: boolean, selector: string, environmentId: number = 0,
 ): number[] {
-  const method = compiledMethodExpr(className, isMeta, selector, environmentId);
-  const code = `| ws |
-ws := WriteStream on: String new.
-${method} _sourceOffsets do: [:each |
-  ws nextPutAll: each printString; lf].
-ws contents`;
-  return splitLines(executeFetchString(
-    session, `getSourceOffsets(${receiver(className, isMeta)}>>#${selector})`, code,
-  )).map(s => parseInt(s, 10));
-}
-
-export function setBreakAtStepPoint(
-  session: ActiveSession,
-  className: string, isMeta: boolean, selector: string,
-  stepPoint: number, environmentId: number = 0,
-): void {
-  const method = compiledMethodExpr(className, isMeta, selector, environmentId);
-  const code = `${method} setBreakAtStepPoint: ${stepPoint}. 'ok'`;
-  executeFetchString(
-    session, `setBreak(${receiver(className, isMeta)}>>#${selector}, step:${stepPoint})`, code,
-  );
-}
-
-export function clearBreakAtStepPoint(
-  session: ActiveSession,
-  className: string, isMeta: boolean, selector: string,
-  stepPoint: number, environmentId: number = 0,
-): void {
-  const method = compiledMethodExpr(className, isMeta, selector, environmentId);
-  const code = `${method} clearBreakAtStepPoint: ${stepPoint}. 'ok'`;
-  executeFetchString(
-    session, `clearBreak(${receiver(className, isMeta)}>>#${selector}, step:${stepPoint})`, code,
-  );
-}
-
-export function clearAllBreaks(
-  session: ActiveSession,
-  className: string, isMeta: boolean, selector: string, environmentId: number = 0,
-): void {
-  const method = compiledMethodExpr(className, isMeta, selector, environmentId);
-  const code = `${method} clearAllBreaks. 'ok'`;
-  executeFetchString(
-    session, `clearAllBreaks(${receiver(className, isMeta)}>>#${selector})`, code,
-  );
-}
-
-// ── Step Point Selector Ranges ───────────────────────────
-
-export interface StepPointSelectorInfo {
-  stepPoint: number;        // 1-based step point index
-  selectorOffset: number;   // 0-based char offset of token in source
-  selectorLength: number;   // char length of the token text
-  selectorText: string;     // the token itself
+  return sharedGetSourceOffsets(bind(session), className, isMeta, selector, environmentId);
 }
 
 export function getStepPointSelectorRanges(
   session: ActiveSession,
   className: string, isMeta: boolean, selector: string, environmentId: number = 0,
-): StepPointSelectorInfo[] {
-  const method = compiledMethodExpr(className, isMeta, selector, environmentId);
-  // Scan the source text at each _sourceOffsets position to extract the token.
-  // _sourceOffsets returns 1-based offsets (Smalltalk convention).
-  // We convert to 0-based for JavaScript by subtracting 1 in the output.
-  const code = `| method source offsets ws |
-method := ${method}.
-source := method sourceString.
-offsets := method _sourceOffsets.
-ws := WriteStream on: String new.
-1 to: offsets size do: [:stepIdx |
-  | offset1 end ch |
-  offset1 := offsets at: stepIdx.
-  (offset1 >= 1 and: [offset1 <= source size]) ifTrue: [
-    ch := source at: offset1.
-    (ch isLetter or: [ch = $_]) ifTrue: [
-      end := offset1 + 1.
-      [end <= source size and: [
-        | c |
-        c := source at: end.
-        c isLetter or: [c isDigit or: [c = $: or: [c = $_]]]]]
-          whileTrue: [end := end + 1].
-      ws nextPutAll: stepIdx printString; tab;
-         nextPutAll: (offset1 - 1) printString; tab;
-         nextPutAll: (end - offset1) printString; tab;
-         nextPutAll: (source copyFrom: offset1 to: end - 1); lf]]].
-ws contents`;
+) {
+  return sharedGetStepPointSelectorRanges(bind(session), className, isMeta, selector, environmentId);
+}
 
-  const raw = executeFetchString(
-    session,
-    `getStepPointSelectorRanges(${receiver(className, isMeta)}>>#${selector})`,
-    code,
-  );
+export function searchMethodSource(
+  session: ActiveSession, term: string, ignoreCase: boolean,
+) {
+  return sharedSearchMethodSource(bind(session), term, ignoreCase);
+}
 
-  const results: StepPointSelectorInfo[] = [];
-  for (const line of raw.split('\n')) {
-    if (line.length === 0) continue;
-    const parts = line.split('\t');
-    if (parts.length < 4) continue;
-    results.push({
-      stepPoint: parseInt(parts[0], 10),
-      selectorOffset: parseInt(parts[1], 10),
-      selectorLength: parseInt(parts[2], 10),
-      selectorText: parts[3],
-    });
-  }
-  return results;
+export function sendersOf(
+  session: ActiveSession, selector: string, environmentId: number = 0,
+) {
+  return sharedSendersOf(bind(session), selector, environmentId);
+}
+
+export function implementorsOf(
+  session: ActiveSession, selector: string, environmentId: number = 0,
+) {
+  return sharedImplementorsOf(bind(session), selector, environmentId);
+}
+
+export function referencesToObject(
+  session: ActiveSession, objectName: string, environmentId: number = 0,
+) {
+  return sharedReferencesToObject(bind(session), objectName, environmentId);
+}
+
+// ── Write-path queries (mutations) ─────────────────────────────────────────
+// All of these delegate to the shared layer. None auto-commit.
+
+export function compileClassDefinition(
+  session: ActiveSession, source: string,
+): string {
+  return sharedCompileClassDefinition(bind(session), source);
 }
 
 export function compileMethod(
@@ -822,74 +310,101 @@ export function compileMethod(
   category: string,
   source: string,
   environmentId: number = 0,
-): bigint {
-  const recv = receiver(className, isMeta);
-  logQuery(session.id, `compileMethod(${recv}, '${category}')`, source);
-
-  // Resolve the base class OOP
-  const { result: baseClassOop, err: resolveErr } = session.gci.GciTsResolveSymbol(
-    session.handle, className, OOP_NIL,
+  dict?: number | string,
+): string {
+  return sharedCompileMethod(
+    bind(session), className, isMeta, category, source, environmentId, dict,
   );
-  if (resolveErr.number !== 0) {
-    throw new BrowserQueryError(
-      resolveErr.message || `Cannot resolve ${className}`, resolveErr.number
-    );
-  }
+}
 
-  // For class side, send #class to get the metaclass OOP
-  let classOop = baseClassOop;
-  if (isMeta) {
-    const { result: metaOop, err: metaErr } = session.gci.GciTsPerform(
-      session.handle, baseClassOop, OOP_ILLEGAL, 'class', [], 0, 0,
-    );
-    if (metaErr.number !== 0) {
-      throw new BrowserQueryError(
-        metaErr.message || `Cannot get metaclass for ${className}`, metaErr.number
-      );
-    }
-    classOop = metaOop;
-  }
+export function setClassComment(
+  session: ActiveSession, className: string, comment: string, dict?: number | string,
+): string {
+  return sharedSetClassComment(bind(session), className, comment, dict);
+}
 
-  // Create source String OOP
-  const { result: sourceOop, err: srcErr } = session.gci.GciTsNewString(
-    session.handle, source,
+export function deleteMethod(
+  session: ActiveSession, className: string, isMeta: boolean, selector: string,
+  dict?: number | string,
+): string {
+  return sharedDeleteMethod(bind(session), className, isMeta, selector, dict);
+}
+
+export function recategorizeMethod(
+  session: ActiveSession, className: string, isMeta: boolean,
+  selector: string, newCategory: string,
+): string {
+  return sharedRecategorizeMethod(bind(session), className, isMeta, selector, newCategory);
+}
+
+export function renameCategory(
+  session: ActiveSession, className: string, isMeta: boolean,
+  oldCategory: string, newCategory: string,
+): string {
+  return sharedRenameCategory(bind(session), className, isMeta, oldCategory, newCategory);
+}
+
+export function deleteClass(
+  session: ActiveSession, dict: number | string, className: string,
+): string {
+  return sharedDeleteClass(bind(session), dict, className);
+}
+
+export function moveClass(
+  session: ActiveSession, srcDictIndex: number, destDictIndex: number, className: string,
+): string {
+  return sharedMoveClass(bind(session), srcDictIndex, destDictIndex, className);
+}
+
+export function reclassifyClass(
+  session: ActiveSession, dictIndex: number, className: string, newCategory: string,
+): string {
+  return sharedReclassifyClass(bind(session), dictIndex, className, newCategory);
+}
+
+export function addDictionary(session: ActiveSession, dictName: string): string {
+  return sharedAddDictionary(bind(session), dictName);
+}
+
+export function removeDictionary(
+  session: ActiveSession, dict: number | string,
+): string {
+  return sharedRemoveDictionary(bind(session), dict);
+}
+
+export function moveDictionaryUp(session: ActiveSession, dictIndex: number): string {
+  return sharedMoveDictionaryUp(bind(session), dictIndex);
+}
+
+export function moveDictionaryDown(session: ActiveSession, dictIndex: number): string {
+  return sharedMoveDictionaryDown(bind(session), dictIndex);
+}
+
+export function setBreakAtStepPoint(
+  session: ActiveSession,
+  className: string, isMeta: boolean, selector: string,
+  stepPoint: number, environmentId: number = 0,
+): string {
+  return sharedSetBreakAtStepPoint(
+    bind(session), className, isMeta, selector, stepPoint, environmentId,
   );
-  if (srcErr.number !== 0) {
-    throw new BrowserQueryError(
-      srcErr.message || 'Cannot create source string', srcErr.number
-    );
-  }
+}
 
-  // Create category Symbol OOP
-  const { result: catOop, err: catErr } = session.gci.GciTsNewSymbol(
-    session.handle, category,
+export function clearBreakAtStepPoint(
+  session: ActiveSession,
+  className: string, isMeta: boolean, selector: string,
+  stepPoint: number, environmentId: number = 0,
+): string {
+  return sharedClearBreakAtStepPoint(
+    bind(session), className, isMeta, selector, stepPoint, environmentId,
   );
-  if (catErr.number !== 0) {
-    throw new BrowserQueryError(
-      catErr.message || 'Cannot create category symbol', catErr.number
-    );
-  }
+}
 
-  // Compile the method
-  const { result: methodOop, err: compileErr } = session.gci.GciTsCompileMethod(
-    session.handle,
-    sourceOop,
-    classOop,
-    catOop,
-    OOP_NIL,       // symbolList (use default)
-    OOP_NIL,       // overrideSelector
-    0,             // compileFlags
-    environmentId,
+export function clearAllBreaks(
+  session: ActiveSession,
+  className: string, isMeta: boolean, selector: string, environmentId: number = 0,
+): string {
+  return sharedClearAllBreaks(
+    bind(session), className, isMeta, selector, environmentId,
   );
-  if (compileErr.number !== 0) {
-    if (compileErr.context !== OOP_NIL && compileErr.context !== 0n) {
-      try { session.gci.GciTsClearStack(session.handle, compileErr.context); } catch { /* ignore */ }
-    }
-    const msg = compileErr.message || `Compile error ${compileErr.number}`;
-    logError(session.id, msg);
-    throw new BrowserQueryError(msg, compileErr.number);
-  }
-
-  logResult(session.id, `Compiled → OOP ${methodOop}`);
-  return methodOop;
 }

@@ -2,6 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { ActiveSession } from './sessionManager';
 import * as queries from './browserQueries';
+import * as sunit from './sunitQueries';
+import type { TestRunResult } from './queries/runTestMethod';
 
 /**
  * Register the Jasper MCP tools against the user's currently selected
@@ -57,9 +59,18 @@ export function registerMcpTools(
     'Abort the current transaction on the user\'s active session, discarding uncommitted changes.',
     {},
     async () => wrap<Record<string, unknown>>((session) => {
-      const out = executeString(session, `System abortTransaction. 'Transaction aborted'`);
-      return out;
+      return executeString(session, `System abortTransaction. 'Transaction aborted'`);
     })({}),
+  );
+
+  server.tool(
+    'add_dictionary',
+    'Create a new SymbolDictionary and append it to the current user\'s symbolList. ' +
+    'NOT committed automatically — call commit to persist or abort to undo.',
+    { dictionaryName: z.string().describe('Name of the new dictionary') },
+    async (args) => wrap<typeof args>((session, a) => {
+      return queries.addDictionary(session, a.dictionaryName);
+    })(args),
   );
 
   server.tool(
@@ -74,25 +85,87 @@ export function registerMcpTools(
   );
 
   server.tool(
+    'compile_class_definition',
+    'Evaluate a class-definition expression (e.g. `Object subclass: \'Foo\' ... inDictionary: \'UserGlobals\'`). ' +
+    'Creates the class if new, updates it if it exists. The source embeds its own dictionary target. ' +
+    'NOT committed automatically.',
+    {
+      source: z.string().describe(
+        'Full class-definition Smalltalk expression including the "subclass:" keyword send and inDictionary:',
+      ),
+    },
+    async (args) => wrap<typeof args>((session, a) => {
+      return `Class: ${queries.compileClassDefinition(session, a.source)}`;
+    })(args),
+  );
+
+  server.tool(
     'compile_method',
-    'Compile (add or update) a method on a class in the user\'s active session. Not committed automatically.',
+    'Compile (add or update) a method on a class in the user\'s active session. Not committed automatically. ' +
+    'Optional dictionaryName disambiguates shadowed class names.',
     {
       className: z.string().describe('Class name'),
       isMeta: z.boolean().describe('true for class-side, false for instance-side'),
       category: z.string().describe('Method category, e.g. "accessing"'),
       source: z.string().describe('Full method source including the selector line'),
       environmentId: z.number().optional().describe('Environment ID (default 0)'),
+      dictionaryName: z.string().optional().describe(
+        'Optional dictionary to scope the class lookup. Omit for first-match resolution.',
+      ),
     },
     async (args) => wrap<typeof args>((session, a) => {
-      const recv = a.isMeta ? `${a.className} class` : a.className;
-      const envId = a.environmentId ?? 0;
-      const code = `${recv}
-  compileMethod: '${escapeString(a.source)}'
-  dictionaries: System myUserProfile symbolList
-  category: '${escapeString(a.category)}'
-  environmentId: ${envId}.
-'Compiled successfully: ${escapeString(recv)} >> ' , (('${escapeString(a.source)}' copyUpTo: Character lf) copyUpTo: Character cr)`;
-      return executeString(session, code);
+      return queries.compileMethod(
+        session, a.className, a.isMeta, a.category, a.source, a.environmentId ?? 0, a.dictionaryName,
+      );
+    })(args),
+  );
+
+  server.tool(
+    'delete_class',
+    'DESTRUCTIVE: remove a class from a specific dictionary. Requires dictionaryName because ' +
+    'deletion must target a specific dictionary (names can be shadowed across dicts). ' +
+    'NOT committed automatically — abort undoes it.',
+    {
+      className: z.string().describe('Class name to delete'),
+      dictionaryName: z.string().describe('Name of the dictionary that contains the class'),
+    },
+    async (args) => wrap<typeof args>((session, a) => {
+      return queries.deleteClass(session, a.dictionaryName, a.className);
+    })(args),
+  );
+
+  server.tool(
+    'delete_method',
+    'Remove a method from a class. NOT committed automatically. Optional dictionaryName ' +
+    'disambiguates shadowed class names.',
+    {
+      className: z.string().describe('Class name'),
+      isMeta: z.boolean().describe('true for class-side, false for instance-side'),
+      selector: z.string().describe('Method selector to remove'),
+      dictionaryName: z.string().optional().describe(
+        'Optional dictionary to scope the class lookup.',
+      ),
+    },
+    async (args) => wrap<typeof args>((session, a) => {
+      return queries.deleteMethod(session, a.className, a.isMeta, a.selector, a.dictionaryName);
+    })(args),
+  );
+
+  server.tool(
+    'describe_class',
+    'Agent-focused: combined class description in one round trip. Returns the class definition ' +
+    '(superclass, instance/class variables, pool dictionaries), class comment, and own methods ' +
+    'grouped by category for both instance and class sides. Does NOT include inherited selectors. ' +
+    'Prefer this over calling get_class_definition + list_methods separately when you want to ' +
+    'understand a class. Optional dictionaryName disambiguates shadowed class names.',
+    {
+      className: z.string().describe('Class name, e.g. "Array"'),
+      dictionaryName: z.string().optional().describe(
+        'Optional dictionary to scope the lookup. Omit to use first-match resolution across the symbolList.',
+      ),
+    },
+    async (args) => wrap<typeof args>((session, a) => {
+      return queries.describeClass(session, a.className, a.dictionaryName);
     })(args),
   );
 
@@ -106,6 +179,23 @@ export function registerMcpTools(
   );
 
   server.tool(
+    'export_class_source',
+    'Export a class as Topaz file-in source (full definition plus all methods). Useful for ' +
+    'backing up a class or transporting it between environments. Optional dictionaryName ' +
+    'disambiguates shadowed class names; without it, resolves to the first match in the ' +
+    'symbolList (the class the user\'s code actually binds to).',
+    {
+      className: z.string().describe('Class name, e.g. "Array"'),
+      dictionaryName: z.string().optional().describe(
+        'Optional dictionary to scope the lookup. Omit for first-match resolution.',
+      ),
+    },
+    async (args) => wrap<typeof args>((session, a) => {
+      return queries.fileOutClass(session, a.className, a.dictionaryName);
+    })(args),
+  );
+
+  server.tool(
     'find_implementors',
     'Find all classes that implement a given selector. Returns up to 500 results.',
     {
@@ -115,6 +205,21 @@ export function registerMcpTools(
     async (args) => wrap<typeof args>((session, a) => {
       const results = queries.implementorsOf(session, a.selector, a.environmentId ?? 0);
       return formatMethodResults(results, 'No implementors found.');
+    })(args),
+  );
+
+  server.tool(
+    'find_references_to',
+    'Find all methods that reference a named global (class, pool, or shared variable). ' +
+    'Sister to find_senders, which matches a selector; this matches a global by name. ' +
+    'Returns up to 500 results.',
+    {
+      objectName: z.string().describe('Name of the global to find references to, e.g. "AllUsers"'),
+      environmentId: z.number().optional().describe('Environment ID (default 0)'),
+    },
+    async (args) => wrap<typeof args>((session, a) => {
+      const results = queries.referencesToObject(session, a.objectName, a.environmentId ?? 0);
+      return formatMethodResults(results, 'No references found.');
     })(args),
   );
 
@@ -167,15 +272,27 @@ export function registerMcpTools(
   );
 
   server.tool(
+    'list_all_classes',
+    'Enumerate every class in the user\'s symbol list along with its dictionary. ' +
+    'Bulk schema discovery; use when you don\'t know which dictionary a class lives in. ' +
+    'Returns tab-separated rows: dictIndex, dictName, className. May be large on big schemas.',
+    {},
+    async () => wrap<Record<string, unknown>>((session) => {
+      const entries = queries.getAllClassNames(session);
+      return entries
+        .map(e => `${e.dictIndex}\t${e.dictName}\t${e.className}`)
+        .join('\n');
+    })({}),
+  );
+
+  server.tool(
     'list_classes',
     'List all classes in a given symbol dictionary.',
     { dictionaryName: z.string().describe('Dictionary name, e.g. "Globals"') },
     async (args) => wrap<typeof args>((session, a) => {
-      // Resolve dictionary name to index, then list classes.
-      const names = queries.getDictionaryNames(session);
-      const idx = names.findIndex(n => n === a.dictionaryName);
-      if (idx < 0) return `Dictionary not found: ${a.dictionaryName}`;
-      return queries.getClassNames(session, idx + 1).join('\n');
+      const names = queries.getClassNames(session, a.dictionaryName);
+      if (names.length === 0) return `Dictionary not found or empty: ${a.dictionaryName}`;
+      return names.join('\n');
     })(args),
   );
 
@@ -186,6 +303,21 @@ export function registerMcpTools(
     async () => wrap<Record<string, unknown>>((session) => {
       return queries.getDictionaryNames(session).join('\n');
     })({}),
+  );
+
+  server.tool(
+    'list_dictionary_entries',
+    'List every entry in a symbol dictionary, including classes (with their categories) and ' +
+    'globals (non-class entries like pools and shared variables). Richer than list_classes. ' +
+    'Returns tab-separated rows: kind (class|global), category, name.',
+    { dictionaryName: z.string().describe('Dictionary name, e.g. "Globals"') },
+    async (args) => wrap<typeof args>((session, a) => {
+      const entries = queries.getDictionaryEntries(session, a.dictionaryName);
+      if (entries.length === 0) return `Dictionary not found or empty: ${a.dictionaryName}`;
+      return entries
+        .map(e => `${e.isClass ? 'class' : 'global'}\t${e.category}\t${e.name}`)
+        .join('\n');
+    })(args),
   );
 
   server.tool(
@@ -202,28 +334,22 @@ export function registerMcpTools(
   );
 
   server.tool(
+    'remove_dictionary',
+    'DESTRUCTIVE: remove a dictionary from the current user\'s symbolList. ' +
+    'NOT committed automatically.',
+    { dictionaryName: z.string().describe('Name of the dictionary to remove') },
+    async (args) => wrap<typeof args>((session, a) => {
+      return queries.removeDictionary(session, a.dictionaryName);
+    })(args),
+  );
+
+  server.tool(
     'run_test_class',
     'Run all SUnit test methods in a TestCase subclass and return per-method pass/fail/error results.',
     { className: z.string().describe('TestCase subclass name') },
     async (args) => wrap<typeof args>((session, a) => {
-      const code = `| suite result ws |
-suite := ${a.className} suite.
-result := suite run.
-ws := WriteStream on: Unicode7 new.
-ws nextPutAll: result printString; lf; lf.
-result passed do: [:each |
-  ws nextPutAll: 'PASSED: '; nextPutAll: each class name;
-    nextPutAll: ' >> '; nextPutAll: each selector; lf].
-result failures do: [:each |
-  ws nextPutAll: 'FAILED: '; nextPutAll: each testCase class name;
-    nextPutAll: ' >> '; nextPutAll: each testCase selector; lf;
-    nextPutAll: '  '; nextPutAll: (each printString copyFrom: 1 to: (each printString size min: 4096)); lf].
-result errors do: [:each |
-  ws nextPutAll: 'ERROR: '; nextPutAll: each testCase class name;
-    nextPutAll: ' >> '; nextPutAll: each testCase selector; lf;
-    nextPutAll: '  '; nextPutAll: (each printString copyFrom: 1 to: (each printString size min: 4096)); lf].
-ws contents`;
-      return executeString(session, code);
+      const results = sunit.runTestClass(session, a.className);
+      return formatTestResults(results);
     })(args),
   );
 
@@ -235,29 +361,8 @@ ws contents`;
       selector: z.string().describe('Test method selector, e.g. "testAdd"'),
     },
     async (args) => wrap<typeof args>((session, a) => {
-      const code = `| testCase result ws startMs endMs |
-startMs := Time millisecondClockValue.
-testCase := ${a.className} selector: #'${escapeString(a.selector)}'.
-result := testCase run.
-endMs := Time millisecondClockValue.
-ws := WriteStream on: Unicode7 new.
-(result hasPassed)
-  ifTrue: [ws nextPutAll: 'PASSED']
-  ifFalse: [
-    result failures size > 0
-      ifTrue: [
-        | failure |
-        failure := result failures asArray first.
-        ws nextPutAll: 'FAILED: ';
-          nextPutAll: (failure printString copyFrom: 1 to: (failure printString size min: 4096))]
-      ifFalse: [
-        | err |
-        err := result errors asArray first.
-        ws nextPutAll: 'ERROR: ';
-          nextPutAll: (err printString copyFrom: 1 to: (err printString size min: 4096))]].
-ws nextPutAll: ' ('; nextPutAll: (endMs - startMs) printString; nextPutAll: 'ms)'.
-ws contents`;
-      return executeString(session, code);
+      const r = sunit.runTestMethod(session, a.className, a.selector);
+      return formatTestResult(r);
     })(args),
   );
 
@@ -271,6 +376,22 @@ ws contents`;
     async (args) => wrap<typeof args>((session, a) => {
       const results = queries.searchMethodSource(session, a.term, a.ignoreCase ?? true);
       return formatMethodResults(results, 'No matches found.');
+    })(args),
+  );
+
+  server.tool(
+    'set_class_comment',
+    'Set the class comment (docstring equivalent). Replaces any existing comment. ' +
+    'NOT committed automatically. Optional dictionaryName disambiguates shadowed class names.',
+    {
+      className: z.string().describe('Class name'),
+      comment: z.string().describe('New comment text'),
+      dictionaryName: z.string().optional().describe(
+        'Optional dictionary to scope the class lookup.',
+      ),
+    },
+    async (args) => wrap<typeof args>((session, a) => {
+      return queries.setClassComment(session, a.className, a.comment, a.dictionaryName);
     })(args),
   );
 
@@ -295,10 +416,6 @@ ws contents`;
 
 // ── Helpers (local) ────────────────────────────────────────────────────────
 
-function escapeString(s: string): string {
-  return s.replace(/'/g, "''");
-}
-
 function formatMethodResults(
   results: queries.MethodSearchResult[],
   fallback: string,
@@ -306,6 +423,22 @@ function formatMethodResults(
   if (results.length === 0) return fallback;
   return results
     .map(r => `${r.dictName}\t${r.className}\t${r.isMeta ? 'class' : 'instance'}\t${r.selector}\t${r.category}`)
+    .join('\n');
+}
+
+function formatTestResult(r: TestRunResult): string {
+  const prefix = r.status === 'passed' ? 'PASSED' : r.status === 'failed' ? 'FAILED' : 'ERROR';
+  const msg = r.message ? `: ${r.message}` : '';
+  return `${prefix}${msg} (${r.durationMs}ms)`;
+}
+
+function formatTestResults(results: TestRunResult[]): string {
+  return results
+    .map(r => {
+      const prefix = r.status === 'passed' ? 'PASSED' : r.status === 'failed' ? 'FAILED' : 'ERROR';
+      const msg = r.message ? `\n  ${r.message}` : '';
+      return `${prefix}: ${r.className} >> ${r.selector}${msg}`;
+    })
     .join('\n');
 }
 
