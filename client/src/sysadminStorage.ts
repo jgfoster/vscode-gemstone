@@ -175,6 +175,83 @@ export class SysadminStorage {
     return extents;
   }
 
+  // ── Windows client distribution helpers ────────────────────
+
+  /** Root path resolved via native os.homedir() (no WSL translation) */
+  getNativeRootPath(): string {
+    const config = vscode.workspace.getConfiguration('gemstone');
+    const raw = config.get<string>('rootPath', '~/Documents/GemStone');
+    return raw.replace(/^~/, os.homedir());
+  }
+
+  /** Ensure the native root directory exists (for Windows client downloads) */
+  ensureNativeRootPath(): void {
+    const rootPath = this.getNativeRootPath();
+    if (!fs.existsSync(rootPath)) {
+      fs.mkdirSync(rootPath, { recursive: true });
+    }
+  }
+
+  private static readonly WIN_CLIENT_SUFFIX = '-x86.Windows_NT';
+  private static readonly WIN_CLIENT_PREFIX = 'GemStone64BitClient';
+
+  /** Get the extracted Windows client directory for a version */
+  getWindowsClientPath(version: string): string | undefined {
+    const dir = path.join(
+      this.getNativeRootPath(),
+      `${SysadminStorage.WIN_CLIENT_PREFIX}${version}${SysadminStorage.WIN_CLIENT_SUFFIX}`,
+    );
+    return fs.existsSync(dir) ? dir : undefined;
+  }
+
+  /** Get the GCI DLL path from an extracted Windows client */
+  getWindowsClientGciPath(version: string): string | undefined {
+    const clientPath = this.getWindowsClientPath(version);
+    if (!clientPath) return undefined;
+    // Windows client distributions place DLLs in bin/, not lib/
+    const dllPath = path.join(clientPath, 'bin', `libgcits-${version}-64.dll`);
+    return fs.existsSync(dllPath) ? dllPath : undefined;
+  }
+
+  /** Scan for extracted Windows client version directories */
+  getExtractedWindowsClientVersions(): string[] {
+    const rootPath = this.getNativeRootPath();
+    if (!fs.existsSync(rootPath)) return [];
+    const prefix = SysadminStorage.WIN_CLIENT_PREFIX;
+    const suffix = SysadminStorage.WIN_CLIENT_SUFFIX;
+    const versions: string[] = [];
+    for (const entry of fs.readdirSync(rootPath)) {
+      if (entry.startsWith(prefix) && entry.endsWith(suffix)) {
+        const dirPath = path.join(rootPath, entry);
+        if (fs.statSync(dirPath).isDirectory()) {
+          const version = entry.slice(prefix.length, -suffix.length);
+          versions.push(version);
+        }
+      }
+    }
+    versions.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    return versions;
+  }
+
+  /** Get downloaded Windows client zip files */
+  getDownloadedWindowsClientFiles(): Map<string, number> {
+    const rootPath = this.getNativeRootPath();
+    if (!fs.existsSync(rootPath)) return new Map();
+    const prefix = SysadminStorage.WIN_CLIENT_PREFIX;
+    const suffix = SysadminStorage.WIN_CLIENT_SUFFIX;
+    const files = new Map<string, number>();
+    for (const entry of fs.readdirSync(rootPath)) {
+      if (entry.startsWith(prefix) && entry.endsWith(`${suffix}.zip`)) {
+        const filePath = path.join(rootPath, entry);
+        if (fs.statSync(filePath).isFile()) {
+          const version = entry.slice(prefix.length, -(suffix.length + 4));
+          files.set(version, fs.statSync(filePath).size);
+        }
+      }
+    }
+    return files;
+  }
+
   /** Get downloaded files in the root path */
   getDownloadedFiles(): Map<string, number> {
     const rootPath = this.getRootPath();

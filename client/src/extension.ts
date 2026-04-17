@@ -37,6 +37,7 @@ import * as queries from './browserQueries';
 import { SysadminStorage } from './sysadminStorage';
 import { appendSysadmin } from './sysadminChannel';
 import { VersionManager } from './versionManager';
+import { GemStoneVersion } from './sysadminTypes';
 import { VersionTreeProvider, VersionItem } from './versionTreeProvider';
 import { DatabaseManager } from './databaseManager';
 import { DatabaseTreeProvider, DatabaseNode } from './databaseTreeProvider';
@@ -487,6 +488,51 @@ export function activate(context: vscode.ExtensionContext) {
           if (fs.existsSync(candidate)) {
             gciPath = candidate;
           }
+        }
+      }
+
+      // Auto-detect from extracted Windows client distribution
+      if (!gciPath && process.platform === 'win32') {
+        const clientGci = sysadminStorage.getWindowsClientGciPath(login.version);
+        if (clientGci) {
+          gciPath = clientGci;
+        }
+      }
+
+      // On Windows, offer to download the client distribution before falling
+      // back to the manual file picker.
+      if (!gciPath && process.platform === 'win32') {
+        const choice = await vscode.window.showInformationMessage(
+          `Windows client library not found for GemStone ${login.version}. Download it?`,
+          'Download', 'Browse...',
+        );
+        if (choice === 'Download') {
+          try {
+            const fileName = `GemStone64BitClient${login.version}-x86.Windows_NT.zip`;
+            const url = `https://downloads.gemtalksystems.com/pub/GemStone64/${login.version}/${fileName}`;
+            const ver: GemStoneVersion = {
+              version: login.version, fileName, url, size: 0, date: '',
+              downloaded: false, extracted: false,
+            };
+            await vscode.window.withProgress(
+              { location: vscode.ProgressLocation.Notification, title: `Downloading Windows client ${login.version}...`, cancellable: true },
+              (progress, token) => versionManager.downloadWindowsClient(ver, progress, token),
+            );
+            await vscode.window.withProgress(
+              { location: vscode.ProgressLocation.Notification, title: `Extracting Windows client ${login.version}...` },
+              (progress) => versionManager.extractWindowsClient(ver, progress),
+            );
+            await versionManager.deleteWindowsClientDownload(ver);
+            gciPath = sysadminStorage.getWindowsClientGciPath(login.version);
+            if (gciPath) {
+              await storage.setGciLibraryPath(login.version, gciPath);
+            }
+          } catch (e) {
+            vscode.window.showErrorMessage(`Windows client download failed: ${e instanceof Error ? e.message : e}`);
+            return;
+          }
+        } else if (choice !== 'Browse...') {
+          return; // cancelled
         }
       }
 
@@ -1281,6 +1327,72 @@ export function activate(context: vscode.ExtensionContext) {
       if (gsPath) {
         vscode.env.openExternal(vscode.Uri.file(gsPath));
       }
+    }),
+
+    vscode.commands.registerCommand('gemstone.downloadWindowsClient', async () => {
+      let versions: GemStoneVersion[];
+      try {
+        versions = await vscode.window.withProgress(
+          { location: vscode.ProgressLocation.Notification, title: 'Fetching available Windows client versions...' },
+          () => versionManager.fetchAvailableWindowsClientVersions(),
+        );
+      } catch (e) {
+        vscode.window.showErrorMessage(`Failed to fetch versions: ${e instanceof Error ? e.message : e}`);
+        return;
+      }
+      if (versions.length === 0) {
+        vscode.window.showErrorMessage('No Windows client versions found.');
+        return;
+      }
+      const items = versions.map(v => ({
+        label: v.version,
+        description: v.extracted ? 'extracted' : v.downloaded ? 'downloaded' : '',
+        version: v,
+      }));
+      const pick = await vscode.window.showQuickPick(items, {
+        placeHolder: 'Select a GemStone version to download the Windows client',
+      });
+      if (!pick) return;
+      const version = pick.version;
+
+      if (!version.extracted) {
+        if (!version.downloaded) {
+          try {
+            await vscode.window.withProgress(
+              { location: vscode.ProgressLocation.Notification, title: `Downloading Windows client ${version.version}...`, cancellable: true },
+              (progress, token) => versionManager.downloadWindowsClient(version, progress, token),
+            );
+            version.downloaded = true;
+          } catch (e) {
+            vscode.window.showErrorMessage(`Download failed: ${e instanceof Error ? e.message : e}`);
+            return;
+          }
+        }
+        try {
+          await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Notification, title: `Extracting Windows client ${version.version}...` },
+            (progress) => versionManager.extractWindowsClient(version, progress),
+          );
+          version.extracted = true;
+        } catch (e) {
+          vscode.window.showErrorMessage(`Extraction failed: ${e instanceof Error ? e.message : e}`);
+          return;
+        }
+        // Clean up the zip after successful extraction
+        if (version.downloaded) {
+          await versionManager.deleteWindowsClientDownload(version);
+        }
+      }
+
+      // Auto-register GCI library path
+      const gciPath = sysadminStorage.getWindowsClientGciPath(version.version);
+      if (gciPath) {
+        await storage.setGciLibraryPath(version.version, gciPath);
+      }
+      treeProvider.refresh();
+      vscode.window.showInformationMessage(
+        `Windows client for GemStone ${version.version} is ready.${gciPath ? ' GCI library registered.' : ''}`,
+      );
     }),
 
     vscode.commands.registerCommand('gemstone.createDatabase', async () => {

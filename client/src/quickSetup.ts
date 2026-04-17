@@ -197,7 +197,35 @@ export async function runQuickSetup(deps: QuickSetupDeps): Promise<void> {
   };
 
   // Auto-detect GCI library path
-  if (!isWindows()) {
+  if (isWindows()) {
+    // Download and extract the Windows client for this version so the
+    // native GCI DLL is available for login.
+    try {
+      const fileName = `GemStone64BitClient${version.version}-x86.Windows_NT.zip`;
+      const url = `https://downloads.gemtalksystems.com/pub/GemStone64/${version.version}/${fileName}`;
+      const clientVer: GemStoneVersion = {
+        version: version.version, fileName, url, size: 0, date: '',
+        downloaded: false, extracted: false,
+      };
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: `Quick Setup: Downloading Windows client ${version.version}...`, cancellable: true },
+        (progress, token) => versionManager.downloadWindowsClient(clientVer, progress, token),
+      );
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: `Quick Setup: Extracting Windows client ${version.version}...` },
+        (progress) => versionManager.extractWindowsClient(clientVer, progress),
+      );
+      await versionManager.deleteWindowsClientDownload(clientVer);
+      const dllPath = sysadminStorage.getWindowsClientGciPath(version.version);
+      if (dllPath) {
+        await loginStorage.setGciLibraryPath(version.version, dllPath);
+      }
+      refreshVersions();
+    } catch (e) {
+      appendSysadmin(`Windows client download failed: ${e instanceof Error ? e.message : e}`);
+      // Non-fatal: the user can still manually configure the GCI library
+    }
+  } else {
     const gsPath = sysadminStorage.getGemstonePath(version.version);
     if (gsPath) {
       const ext = process.platform === 'darwin' ? 'dylib' : 'so';

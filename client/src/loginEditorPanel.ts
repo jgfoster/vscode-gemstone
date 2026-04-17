@@ -22,6 +22,12 @@ export class LoginEditorPanel {
     for (const v of sysadminStorage.getExtractedVersions()) {
       versionSet.add(v);
     }
+    // Windows client distributions
+    if (process.platform === 'win32') {
+      for (const v of sysadminStorage.getExtractedWindowsClientVersions()) {
+        versionSet.add(v);
+      }
+    }
     // Versions with manually configured GCI library paths
     const config = vscode.workspace.getConfiguration('gemstone');
     const gciLibraries = config.get<Record<string, string>>('gciLibraries', {});

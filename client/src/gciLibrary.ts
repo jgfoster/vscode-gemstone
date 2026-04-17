@@ -164,9 +164,9 @@ export class GciLibrary {
   private _GciTsLogin: koffi.KoffiFunction;
   private _GciTsLogout: koffi.KoffiFunction;
   private _GciTsLogin_: koffi.KoffiFunction;
-  private _GciTsNbLogin: koffi.KoffiFunction;
-  private _GciTsNbLogin_: koffi.KoffiFunction;
-  private _GciTsNbLoginFinished: koffi.KoffiFunction;
+  private _GciTsNbLogin: koffi.KoffiFunction | null = null;
+  private _GciTsNbLogin_: koffi.KoffiFunction | null = null;
+  private _GciTsNbLoginFinished: koffi.KoffiFunction | null = null;
   private _GciTsNbLogout: koffi.KoffiFunction;
   private _GciTsSessionIsRemote: koffi.KoffiFunction;
   private _GciTsEncrypt: koffi.KoffiFunction;
@@ -246,8 +246,8 @@ export class GciLibrary {
   private _GciTsDirtyExportedObjs: koffi.KoffiFunction;
   private _GciTsKeepAliveCount: koffi.KoffiFunction;
   private _GciTsKeyfilePermissions: koffi.KoffiFunction;
-  private _GciTsDebugConnectToGem: koffi.KoffiFunction;
-  private _GciTsDebugStartDebugService: koffi.KoffiFunction;
+  private _GciTsDebugConnectToGem: koffi.KoffiFunction | null = null;
+  private _GciTsDebugStartDebugService: koffi.KoffiFunction | null = null;
   private _GciShutdown: koffi.KoffiFunction;
   private _GciMalloc: koffi.KoffiFunction;
   private _GciFree: koffi.KoffiFunction;
@@ -293,15 +293,18 @@ export class GciLibrary {
     this._GciTsLogin_ = this.lib.func(
       `GciSessionPtr GciTsLogin_(const char *, const char *, const char *, int, const char *, const char *, const char *, const char *, unsigned int, int, _Out_ int *, _Out_ GciErrSType *)`
     );
-    this._GciTsNbLogin = this.lib.func(
-      `GciSessionPtr GciTsNbLogin(const char *, const char *, const char *, int, const char *, const char *, const char *, unsigned int, int, _Out_ int *)`
-    );
-    this._GciTsNbLogin_ = this.lib.func(
-      `GciSessionPtr GciTsNbLogin_(const char *, const char *, const char *, int, const char *, const char *, const char *, const char *, unsigned int, int, _Out_ int *)`
-    );
-    this._GciTsNbLoginFinished = this.lib.func(
-      `int GciTsNbLoginFinished(GciSessionPtr, _Out_ int *, _Out_ GciErrSType *)`
-    );
+    // Non-blocking login functions are not available in the Windows client DLL
+    try {
+      this._GciTsNbLogin = this.lib.func(
+        `GciSessionPtr GciTsNbLogin(const char *, const char *, const char *, int, const char *, const char *, const char *, unsigned int, int, _Out_ int *)`
+      );
+      this._GciTsNbLogin_ = this.lib.func(
+        `GciSessionPtr GciTsNbLogin_(const char *, const char *, const char *, int, const char *, const char *, const char *, const char *, unsigned int, int, _Out_ int *)`
+      );
+      this._GciTsNbLoginFinished = this.lib.func(
+        `int GciTsNbLoginFinished(GciSessionPtr, _Out_ int *, _Out_ GciErrSType *)`
+      );
+    } catch { /* optional: not present in Windows client distributions */ }
     this._GciTsNbLogout = this.lib.func(`int GciTsNbLogout(GciSessionPtr, _Out_ GciErrSType *)`);
     this._GciTsSessionIsRemote = this.lib.func(`int GciTsSessionIsRemote(GciSessionPtr)`);
     this._GciTsEncrypt = this.lib.func(`char* GciTsEncrypt(const char *, _Out_ char *, size_t)`);
@@ -515,12 +518,15 @@ export class GciLibrary {
     this._GciTsKeyfilePermissions = this.lib.func(
       `int64 GciTsKeyfilePermissions(GciSessionPtr, _Out_ GciErrSType *)`
     );
-    this._GciTsDebugConnectToGem = this.lib.func(
-      `GciSessionPtr GciTsDebugConnectToGem(int, _Out_ GciErrSType *)`
-    );
-    this._GciTsDebugStartDebugService = this.lib.func(
-      `int GciTsDebugStartDebugService(GciSessionPtr, uint64, _Out_ GciErrSType *)`
-    );
+    // Debug functions are not available in the Windows client DLL
+    try {
+      this._GciTsDebugConnectToGem = this.lib.func(
+        `GciSessionPtr GciTsDebugConnectToGem(int, _Out_ GciErrSType *)`
+      );
+      this._GciTsDebugStartDebugService = this.lib.func(
+        `int GciTsDebugStartDebugService(GciSessionPtr, uint64, _Out_ GciErrSType *)`
+      );
+    } catch { /* optional: not present in Windows client distributions */ }
     this._GciTsFetchTraversal = this.lib.func(
       `int GciTsFetchTraversal(GciSessionPtr, const ${OopType} *, int, _Inout_ GciClampedTravArgsSType *, _Out_ GciErrSType *)`
     );
@@ -686,6 +692,7 @@ export class GciLibrary {
     loginFlags: number,
     haltOnErrNum: number,
   ): { session: unknown; loginPollSocket: number } {
+    if (!this._GciTsNbLogin) throw new Error('GciTsNbLogin is not available in this GCI library');
     const loginPollSocket = [0];
     const session = this._GciTsNbLogin(
       stoneNrs, hostUserId, hostPassword,
@@ -709,6 +716,7 @@ export class GciLibrary {
     loginFlags: number,
     haltOnErrNum: number,
   ): { session: unknown; loginPollSocket: number } {
+    if (!this._GciTsNbLogin_) throw new Error('GciTsNbLogin_ is not available in this GCI library');
     const loginPollSocket = [0];
     const session = this._GciTsNbLogin_(
       stoneNrs, hostUserId, hostPassword,
@@ -721,6 +729,7 @@ export class GciLibrary {
   }
 
   GciTsNbLoginFinished(session: unknown): { result: number; executedSessionInit: boolean; err: GciError } {
+    if (!this._GciTsNbLoginFinished) throw new Error('GciTsNbLoginFinished is not available in this GCI library');
     const executedSessionInit = [0];
     const err: Record<string, unknown> = {};
     const result = this._GciTsNbLoginFinished(session, executedSessionInit, err);
@@ -1705,6 +1714,9 @@ export class GciLibrary {
   GciTsDebugConnectToGem(
     gemPid: number,
   ): { session: unknown; err: GciError } {
+    if (!this._GciTsDebugConnectToGem) {
+      throw new Error('GciTsDebugConnectToGem is not available in this GCI library');
+    }
     const err: Record<string, unknown> = {};
     const session = this._GciTsDebugConnectToGem(gemPid, err);
     return { session, err: err as unknown as GciError };
@@ -1714,6 +1726,9 @@ export class GciLibrary {
     session: unknown,
     token: bigint,
   ): { success: boolean; err: GciError } {
+    if (!this._GciTsDebugStartDebugService) {
+      throw new Error('GciTsDebugStartDebugService is not available in this GCI library');
+    }
     const err: Record<string, unknown> = {};
     const result = this._GciTsDebugStartDebugService(session, token, err);
     return { success: result !== 0, err: err as unknown as GciError };

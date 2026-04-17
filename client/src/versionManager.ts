@@ -8,6 +8,8 @@ import { GemStoneVersion } from './sysadminTypes';
 import { appendSysadmin, showSysadmin } from './sysadminChannel';
 import { needsWsl, wslSpawn, wslExecSync } from './wslBridge';
 
+const WIN_CLIENT_BASE_URL = 'https://downloads.gemtalksystems.com/pub/GemStone64/';
+
 export class VersionManager {
   constructor(private storage: SysadminStorage) {}
 
@@ -118,14 +120,23 @@ export class VersionManager {
       });
     }
 
-    // On macOS/Linux, download with native Node.js https
+    return this.downloadFile(version.url, targetPath, progress, token);
+  }
+
+  /** Download a file via native Node.js HTTPS with redirect following */
+  private downloadFile(
+    url: string,
+    targetPath: string,
+    progress: vscode.Progress<{ message?: string; increment?: number }>,
+    token: vscode.CancellationToken,
+  ): Promise<void> {
     const cleanup = () => {
       if (fs.existsSync(targetPath)) {
         fs.unlinkSync(targetPath);
       }
     };
 
-    const doDownload = (url: string): Promise<void> => {
+    const doDownload = (downloadUrl: string): Promise<void> => {
       return new Promise<void>((resolve, reject) => {
         const file = fs.createWriteStream(targetPath);
         let cancelled = false;
@@ -138,7 +149,7 @@ export class VersionManager {
           reject(new Error('Download cancelled'));
         });
 
-        const request = https.get(url, (res) => {
+        const request = https.get(downloadUrl, (res) => {
           if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
             file.close(() => {
               if (!cancelled) {
@@ -149,7 +160,7 @@ export class VersionManager {
           }
           if (res.statusCode !== 200) {
             file.close(() => cleanup());
-            reject(new Error(`HTTP ${res.statusCode} downloading ${url}`));
+            reject(new Error(`HTTP ${res.statusCode} downloading ${downloadUrl}`));
             return;
           }
 
@@ -185,7 +196,7 @@ export class VersionManager {
       });
     };
 
-    return doDownload(version.url);
+    return doDownload(url);
   }
 
   /** Extract a downloaded version */
@@ -295,6 +306,83 @@ export class VersionManager {
         fs.rmSync(gsPath, { recursive: true });
       }
       appendSysadmin(`Deleted extracted version: ${path.basename(gsPath)}`);
+    }
+  }
+
+  // ── Windows client distribution ────────────────────────────
+
+  /** Fetch available Windows client versions from the downloads page */
+  async fetchAvailableWindowsClientVersions(): Promise<GemStoneVersion[]> {
+    const html = await this.fetchUrl(WIN_CLIENT_BASE_URL);
+
+    // Parse version directories from the listing (e.g., href="3.7.5/")
+    const versionRegex = /href="(\d+\.\d+(?:\.\d+)*)\/?"/g;
+    const versionSet = new Set<string>();
+    let match;
+    while ((match = versionRegex.exec(html)) !== null) {
+      versionSet.add(match[1]);
+    }
+
+    const downloaded = this.storage.getDownloadedWindowsClientFiles();
+    const extractedVersions = new Set(this.storage.getExtractedWindowsClientVersions());
+
+    const versions: GemStoneVersion[] = [];
+    for (const version of versionSet) {
+      const fileName = `GemStone64BitClient${version}-x86.Windows_NT.zip`;
+      const url = `${WIN_CLIENT_BASE_URL}${version}/${fileName}`;
+      versions.push({
+        version,
+        fileName,
+        url,
+        size: 0,
+        date: '',
+        downloaded: downloaded.has(version),
+        extracted: extractedVersions.has(version),
+      });
+    }
+
+    versions.sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }));
+    return versions;
+  }
+
+  /** Download a Windows client version (always uses native HTTPS, not WSL) */
+  async downloadWindowsClient(
+    version: GemStoneVersion,
+    progress: vscode.Progress<{ message?: string; increment?: number }>,
+    token: vscode.CancellationToken,
+  ): Promise<void> {
+    this.storage.ensureNativeRootPath();
+    const targetPath = path.join(this.storage.getNativeRootPath(), version.fileName);
+    return this.downloadFile(version.url, targetPath, progress, token);
+  }
+
+  /** Extract a downloaded Windows client zip using tar (built into Windows 10+) */
+  async extractWindowsClient(
+    version: GemStoneVersion,
+    progress: vscode.Progress<{ message?: string }>,
+  ): Promise<void> {
+    const rootPath = this.storage.getNativeRootPath();
+    const zipPath = path.join(rootPath, version.fileName);
+    progress.report({ message: 'Extracting zip...' });
+    execSync(`tar -xf "${zipPath}" -C "${rootPath}"`, { stdio: 'ignore' });
+    appendSysadmin(`Extracted Windows client: ${version.fileName}`);
+  }
+
+  /** Delete a downloaded Windows client zip */
+  async deleteWindowsClientDownload(version: GemStoneVersion): Promise<void> {
+    const filePath = path.join(this.storage.getNativeRootPath(), version.fileName);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      appendSysadmin(`Deleted Windows client download: ${version.fileName}`);
+    }
+  }
+
+  /** Delete an extracted Windows client directory */
+  async deleteWindowsClientExtracted(version: GemStoneVersion): Promise<void> {
+    const clientPath = this.storage.getWindowsClientPath(version.version);
+    if (clientPath && fs.existsSync(clientPath)) {
+      fs.rmSync(clientPath, { recursive: true });
+      appendSysadmin(`Deleted Windows client: ${path.basename(clientPath)}`);
     }
   }
 

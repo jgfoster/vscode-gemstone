@@ -24,6 +24,7 @@ function makeLogin(overrides: Partial<GemStoneLogin> = {}): GemStoneLogin {
 function makeSysadminStorage(extractedVersions: string[] = []): SysadminStorage {
   return {
     getExtractedVersions: vi.fn(() => extractedVersions),
+    getExtractedWindowsClientVersions: vi.fn(() => []),
   } as any;
 }
 

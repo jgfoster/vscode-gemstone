@@ -2,20 +2,70 @@
 
 A full-featured GemStone/S 64 Bit development environment for Visual Studio Code. Write, browse, debug, and test GemStone Smalltalk code — and manage your GemStone infrastructure — all from a single editor.
 
+Jasper works on **macOS**, **Linux**, and **Windows**:
+
+| Platform | Server management | Client IDE (connect to remote GemStone) |
+|----------|-------------------|-----------------------------------------|
+| macOS    | Yes               | Yes                                     |
+| Linux    | Yes               | Yes                                     |
+| Windows (with WSL) | Yes (via WSL) | Yes                              |
+| Windows (no WSL)   | No            | Yes                              |
+
 ## Getting Started
+
+### Connecting to an existing GemStone server (any platform)
+
+If you already have a GemStone server running on another machine (or locally), you only need a login configuration and the native GCI client library for your version of GemStone.
 
 1. Install the extension from the VS Code Marketplace.
 2. Open the **GemStone** sidebar (gem icon in the activity bar).
-3. If on macOS, check the **Shared Memory** section and run the setup script if needed.
+3. Click the **+** button in the **Logins** section to create a new login.
+4. Fill in the connection details: GemStone version, host, stone name, NetLDI, and credentials.
+5. Click **Login** to connect.
+
+The first time you log in with a given GemStone version, Jasper needs the native GCI library (`libgcits`) for that version:
+
+- **On Windows**, Jasper will offer to **download the Windows client distribution** automatically. This downloads and extracts the library — no WSL or manual setup required.
+- **On macOS/Linux**, the library is included in the GemStone server distribution. If you have a local installation, Jasper auto-detects it. Otherwise, use the **Versions** section to download the distribution for your platform, or point Jasper to an existing library path via the `gemstone.gciLibraries` setting.
+
+### Full local setup (macOS, Linux, or Windows with WSL)
+
+To install, manage, and run a GemStone server locally:
+
+1. Install the extension from the VS Code Marketplace.
+2. Open the **GemStone** sidebar (gem icon in the activity bar).
+3. On macOS, check the **Shared Memory** section and run the setup script if needed.
 4. Use the **Versions** section to download and extract a GemStone release.
 5. Use the **Databases** section to create a new database.
 6. Start the stone and NetLDI from the database tree.
 7. Click **Create Login** on the database to generate a login configuration.
 8. Click **Login** to connect and start developing.
 
+Alternatively, run **Quick Setup** (button in the Versions view) to do all of the above in one step.
+
+## Windows Usage
+
+Jasper supports two Windows configurations:
+
+### Windows without WSL — Client IDE only
+
+Connect to a GemStone server running on a remote host (or in a VM). No WSL installation is required.
+
+1. Create a login with the remote host, stone name, and NetLDI.
+2. On first login, Jasper offers to download the **Windows client distribution** for your GemStone version. This is a small download (~15 MB) containing only the native GCI DLL.
+3. After the download, Jasper auto-detects the library and connects.
+
+You can also download client libraries ahead of time using the **Download Windows Client** button in the **Versions** view.
+
+The Versions, Databases, and Processes sections are hidden when WSL is not available, since server management requires a Linux environment.
+
+### Windows with WSL — Full server management
+
+With WSL installed and a Linux distribution configured, Jasper can manage GemStone servers running inside WSL while the VS Code extension runs natively on Windows. The GemStone server distribution is downloaded and extracted inside WSL, while the Windows client distribution provides the native DLL for VS Code to communicate with the server.
+
 ## Infrastructure Management
 
-Manage your GemStone installation directly from VS Code, no separate tools required.
+Manage your GemStone installation directly from VS Code (macOS, Linux, or Windows with WSL).
 
 ### Shared Memory (macOS)
 
@@ -29,6 +79,8 @@ The **Versions** view lists GemStone releases available for your platform (macOS
 - **Extract** the archive (automatic DMG mounting on macOS, unzip on Linux)
 - **Open** the extracted directory in Finder/Explorer
 - **Delete** the download or extracted files
+
+On Windows, the **Download Windows Client** button fetches the native client distribution for connecting to remote GemStone servers.
 
 ### Database Management
 
@@ -214,7 +266,13 @@ Fine-tune the Smalltalk formatter under `gemstoneSmalltalk.formatter.*`:
 
 ## GCI Library
 
-The extension communicates with GemStone databases using the GemStone C Interface (GCI) thread-safe library (`libgcits`), loaded at runtime via [koffi](https://koffi.dev/). The library path is configured per-version in `gemstone.gciLibraries` or auto-detected when creating a login from a local database.
+The extension communicates with GemStone databases using the GemStone C Interface (GCI) thread-safe library (`libgcits`), loaded at runtime via [koffi](https://koffi.dev/). The library path is resolved in this order:
+
+1. **Auto-detected** from extracted distributions (server or Windows client) matching the login's GemStone version
+2. **Configured** per-version in the `gemstone.gciLibraries` setting
+3. **Prompted** — on Windows you are offered an automatic download; on all platforms you can browse to the library manually
+
+The Windows client distribution exports a subset of the full GCI interface — non-blocking login and debug-attach functions are not available, but all standard session operations work normally.
 
 ## Development
 

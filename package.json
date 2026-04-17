@@ -2,7 +2,7 @@
   "name": "gemstone-ide",
   "displayName": "Jasper: A GemStone Smalltalk IDE",
   "description": "GemStone/S IDE for Visual Studio Code",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "publisher": "gemtalksystems",
   "license": "MIT",
   "author": "James Foster",
@@ -531,6 +531,12 @@
         "icon": "$(folder-opened)"
       },
       {
+        "command": "gemstone.downloadWindowsClient",
+        "title": "Download Windows Client…",
+        "category": "GemStone Admin",
+        "icon": "$(desktop-download)"
+      },
+      {
         "command": "gemstone.quickSetup",
         "title": "Quick Setup",
         "category": "GemStone"
@@ -639,14 +645,19 @@
           "group": "navigation"
         },
         {
+          "command": "gemstone.downloadWindowsClient",
+          "when": "view == gemstoneVersions && gemstone.isWindows",
+          "group": "navigation@1"
+        },
+        {
           "command": "gemstone.registerLocalVersion",
           "when": "view == gemstoneVersions",
-          "group": "navigation@1"
+          "group": "navigation@2"
         },
         {
           "command": "gemstone.refreshVersions",
           "when": "view == gemstoneVersions",
-          "group": "navigation@2"
+          "group": "navigation@3"
         },
         {
           "command": "gemstone.createDatabase",

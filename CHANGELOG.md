@@ -4,6 +4,22 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-04-17
+
+### Added
+
+- **Windows client distribution support** — Jasper can now automatically download and extract the native Windows GCI client library (`libgcits-{version}-64.dll`) for connecting to remote GemStone servers from Windows without WSL. Available as a standalone **Download Windows Client** button in the Versions view and as an automatic prompt during login when the library is missing.
+- **GCI auto-detection for Windows client** — the login flow checks extracted Windows client distributions (`GemStone64BitClient{version}-x86.Windows_NT/bin/`) before prompting the user to browse for a library.
+- **Quick Setup downloads Windows client** — on Windows, Quick Setup now downloads and extracts both the WSL server distribution and the native Windows client distribution, then auto-registers the GCI library path.
+- **Login editor shows Windows client versions** — the version dropdown in the login editor includes versions from extracted Windows client distributions on Windows.
+- **Graceful handling of missing GCI functions** — the GCI library loader now tolerates functions absent from the Windows client DLL (`GciTsNbLogin`, `GciTsNbLogin_`, `GciTsNbLoginFinished`, `GciTsDebugConnectToGem`, `GciTsDebugStartDebugService`); calling them throws a descriptive error instead of failing at load time.
+
+### Changed
+
+- **README rewritten for Windows users** — Getting Started now leads with the simpler "connect to an existing server" path before the full local setup; new Windows Usage section explains client-only and WSL configurations; platform support table at the top.
+- **`tar` instead of PowerShell for Windows extraction** — Windows client zip extraction uses `tar -xf` (built into Windows 10+) instead of `Expand-Archive`, avoiding PowerShell execution policy issues.
+- **VS Code tasks use `cmd.exe` on Windows** — build tasks now specify `cmd.exe` as the shell on Windows to avoid `npm.ps1` execution policy errors.
+
 ## [1.3.1] - 2026-04-16
 
 ### Changed
