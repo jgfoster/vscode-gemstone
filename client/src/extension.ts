@@ -37,7 +37,6 @@ import * as queries from './browserQueries';
 import { SysadminStorage } from './sysadminStorage';
 import { appendSysadmin } from './sysadminChannel';
 import { VersionManager } from './versionManager';
-import { GemStoneVersion } from './sysadminTypes';
 import { VersionTreeProvider, VersionItem } from './versionTreeProvider';
 import { DatabaseManager } from './databaseManager';
 import { DatabaseTreeProvider, DatabaseNode } from './databaseTreeProvider';
@@ -47,7 +46,8 @@ import { McpSocketServer, writeClaudeCodeMcpConfig } from './mcpSocketServer';
 import { ProcessTreeProvider } from './processTreeProvider';
 import { OsConfigTreeProvider } from './sharedMemoryTreeProvider';
 import { runQuickSetup } from './quickSetup';
-import { isWindows, getWslInfo } from './wslBridge';
+import { isWindows, getWslInfo, getWslInfoAsync, invalidateWslCache } from './wslBridge';
+import { wslExistsSync, wslSymlinkSync } from './wslFs';
 
 let client: LanguageClient;
 let sessionManager: SessionManager;
@@ -479,11 +479,13 @@ export function activate(context: vscode.ExtensionContext) {
       // Ensure GCI library is configured for this version
       let gciPath = storage.getGciLibraryPath(login.version);
 
-      // Auto-detect from extracted version's lib/ directory
-      if (!gciPath) {
+      // Auto-detect from extracted version's lib/ directory.
+      // Skipped on Windows: the product dir is a Linux build (only .so), so
+      // the GCI for a Windows host has to come from the Windows client below.
+      if (!gciPath && process.platform !== 'win32') {
         const gsPath = sysadminStorage.getGemstonePath(login.version);
         if (gsPath) {
-          const ext = process.platform === 'win32' ? 'dll' : process.platform === 'darwin' ? 'dylib' : 'so';
+          const ext = process.platform === 'darwin' ? 'dylib' : 'so';
           const candidate = path.join(gsPath, 'lib', `libgcits-${login.version}-64.${ext}`);
           if (fs.existsSync(candidate)) {
             gciPath = candidate;
@@ -502,33 +504,36 @@ export function activate(context: vscode.ExtensionContext) {
       // On Windows, offer to download the client distribution before falling
       // back to the manual file picker.
       if (!gciPath && process.platform === 'win32') {
+        if (!login.version || !login.version.trim()) {
+          vscode.window.showErrorMessage(
+            'Cannot download a Windows client: the login has no GemStone version set. Edit the login to choose a version first.',
+          );
+          return;
+        }
         const choice = await vscode.window.showInformationMessage(
           `Windows client library not found for GemStone ${login.version}. Download it?`,
           'Download', 'Browse...',
         );
         if (choice === 'Download') {
           try {
-            const fileName = `GemStone64BitClient${login.version}-x86.Windows_NT.zip`;
-            const url = `https://downloads.gemtalksystems.com/pub/GemStone64/${login.version}/${fileName}`;
-            const ver: GemStoneVersion = {
-              version: login.version, fileName, url, size: 0, date: '',
-              downloaded: false, extracted: false,
-            };
             await vscode.window.withProgress(
-              { location: vscode.ProgressLocation.Notification, title: `Downloading Windows client ${login.version}...`, cancellable: true },
-              (progress, token) => versionManager.downloadWindowsClient(ver, progress, token),
+              {
+                location: vscode.ProgressLocation.Notification,
+                title: `Installing Windows client ${login.version}...`,
+                cancellable: true,
+              },
+              (progress, token) =>
+                versionManager.downloadAndExtractWindowsClient(login.version, progress, token),
             );
-            await vscode.window.withProgress(
-              { location: vscode.ProgressLocation.Notification, title: `Extracting Windows client ${login.version}...` },
-              (progress) => versionManager.extractWindowsClient(ver, progress),
-            );
-            await versionManager.deleteWindowsClientDownload(ver);
             gciPath = sysadminStorage.getWindowsClientGciPath(login.version);
             if (gciPath) {
               await storage.setGciLibraryPath(login.version, gciPath);
             }
+            versionProvider.loadVersions();
           } catch (e) {
-            vscode.window.showErrorMessage(`Windows client download failed: ${e instanceof Error ? e.message : e}`);
+            vscode.window.showErrorMessage(
+              `Windows client install failed: ${e instanceof Error ? e.message : e}`,
+            );
             return;
           }
         } else if (choice !== 'Browse...') {
@@ -1096,23 +1101,59 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // ── SysAdmin ──────────────────────────────────────────────
+  // WSL detection runs asynchronously so it never blocks activation and so a
+  // cold-start WSL2 VM (not yet running when VS Code launches) doesn't produce
+  // a false negative that sticks for the whole session. If the first probe
+  // reports unavailable, we wait briefly and retry once before concluding WSL
+  // is genuinely missing. The "install WSL" warning is deferred until that
+  // second probe also fails, and a subsequent refresh of the Versions view
+  // will re-probe — giving the user a recovery path without reloading.
   if (isWindows()) {
-    const wslInfo = getWslInfo();
     vscode.commands.executeCommand('setContext', 'gemstone.isWindows', true);
-    vscode.commands.executeCommand('setContext', 'gemstone.wslAvailable', wslInfo.available);
-    if (!wslInfo.available) {
-      vscode.window.showWarningMessage(
-        'GemStone system administration features require Windows Subsystem for Linux (WSL2). ' +
-        'Install WSL with: wsl --install',
-        'Learn More',
-      ).then(choice => {
+    (async () => {
+      let wslInfo = await getWslInfoAsync();
+      if (!wslInfo.available) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        invalidateWslCache();
+        wslInfo = await getWslInfoAsync();
+      }
+      vscode.commands.executeCommand('setContext', 'gemstone.wslAvailable', wslInfo.available);
+      if (wslInfo.available) {
+        // Allow the extension host to access the WSL filesystem via \\wsl$\... UNC
+        // paths. VS Code blocks unknown UNC hosts by default; the Node-side
+        // allowlist is read at extension-host startup, so when we add a host we
+        // must prompt the user to reload the window before any fs operation on
+        // \\wsl$\... will succeed.
+        const secConfig = vscode.workspace.getConfiguration('security');
+        const allowedHosts = secConfig.get<string[]>('allowedUNCHosts', []);
+        const toAdd = ['wsl$', 'wsl.localhost'].filter(h => !allowedHosts.includes(h));
+        if (toAdd.length > 0) {
+          await secConfig.update(
+            'allowedUNCHosts',
+            [...allowedHosts, ...toAdd],
+            vscode.ConfigurationTarget.Global,
+          );
+          const choice = await vscode.window.showWarningMessage(
+            'GemStone added the WSL filesystem to security.allowedUNCHosts. Reload the window to enable access to \\\\wsl$\\... paths.',
+            'Reload Window',
+          );
+          if (choice === 'Reload Window') {
+            vscode.commands.executeCommand('workbench.action.reloadWindow');
+          }
+        }
+      } else {
+        const choice = await vscode.window.showWarningMessage(
+          'GemStone system administration features require Windows Subsystem for Linux (WSL2). ' +
+          'Install WSL with: wsl --install',
+          'Learn More',
+        );
         if (choice === 'Learn More') {
           vscode.env.openExternal(
             vscode.Uri.parse('https://learn.microsoft.com/en-us/windows/wsl/install'),
           );
         }
-      });
-    }
+      }
+    })();
   }
 
   const processManager = new ProcessManager(sysadminStorage);
@@ -1163,8 +1204,8 @@ export function activate(context: vscode.ExtensionContext) {
   const versionManager = new VersionManager(sysadminStorage);
   const databaseManager = new DatabaseManager(sysadminStorage, processManager);
 
-  // OS Configuration (macOS and Linux)
-  if (process.platform === 'darwin' || process.platform === 'linux') {
+  // OS Configuration (macOS, Linux, and Windows)
+  if (process.platform === 'darwin' || process.platform === 'linux' || isWindows()) {
     const osConfigProvider = new OsConfigTreeProvider();
     context.subscriptions.push(
       vscode.window.createTreeView('gemstoneSharedMemory', {
@@ -1227,7 +1268,12 @@ export function activate(context: vscode.ExtensionContext) {
 
   // ── SysAdmin Commands ───────────────────────────────────
   context.subscriptions.push(
-    vscode.commands.registerCommand('gemstone.refreshVersions', () => {
+    vscode.commands.registerCommand('gemstone.refreshVersions', async () => {
+      if (isWindows()) {
+        invalidateWslCache();
+        const wslInfo = await getWslInfoAsync();
+        vscode.commands.executeCommand('setContext', 'gemstone.wslAvailable', wslInfo.available);
+      }
       versionProvider.loadVersions();
     }),
 
@@ -1300,12 +1346,13 @@ export function activate(context: vscode.ExtensionContext) {
       const suffix = sysadminStorage.getPlatformSuffix();
       const linkName = `GemStone64Bit${info.version}${suffix}`;
       const linkPath = path.join(sysadminStorage.getRootPath(), linkName);
-      if (fs.existsSync(linkPath)) {
+      if (wslExistsSync(linkPath)) {
         vscode.window.showErrorMessage(`Version ${info.version} already exists in ${sysadminStorage.getRootPath()}.`);
         return;
       }
       sysadminStorage.ensureRootPath();
-      fs.symlinkSync(productPath, linkPath);
+      wslSymlinkSync(productPath, linkPath);
+      sysadminStorage.invalidateExtractedCache();
       appendSysadmin(`Registered local version: ${info.version} → ${productPath}`);
       vscode.window.showInformationMessage(`Registered local GemStone ${info.version} (${info.description || 'local build'}).`);
       versionProvider.loadVersions();
@@ -1329,70 +1376,52 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }),
 
-    vscode.commands.registerCommand('gemstone.downloadWindowsClient', async () => {
-      let versions: GemStoneVersion[];
+    vscode.commands.registerCommand('gemstone.downloadWindowsClient', async (item: VersionItem) => {
+      const version = item.version.version;
       try {
-        versions = await vscode.window.withProgress(
-          { location: vscode.ProgressLocation.Notification, title: 'Fetching available Windows client versions...' },
-          () => versionManager.fetchAvailableWindowsClientVersions(),
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: `Installing Windows client ${version}...`,
+            cancellable: true,
+          },
+          (progress, token) => versionManager.downloadAndExtractWindowsClient(version, progress, token),
         );
       } catch (e) {
-        vscode.window.showErrorMessage(`Failed to fetch versions: ${e instanceof Error ? e.message : e}`);
+        vscode.window.showErrorMessage(
+          `Windows client install failed: ${e instanceof Error ? e.message : e}`,
+        );
+        versionProvider.loadVersions();
         return;
-      }
-      if (versions.length === 0) {
-        vscode.window.showErrorMessage('No Windows client versions found.');
-        return;
-      }
-      const items = versions.map(v => ({
-        label: v.version,
-        description: v.extracted ? 'extracted' : v.downloaded ? 'downloaded' : '',
-        version: v,
-      }));
-      const pick = await vscode.window.showQuickPick(items, {
-        placeHolder: 'Select a GemStone version to download the Windows client',
-      });
-      if (!pick) return;
-      const version = pick.version;
-
-      if (!version.extracted) {
-        if (!version.downloaded) {
-          try {
-            await vscode.window.withProgress(
-              { location: vscode.ProgressLocation.Notification, title: `Downloading Windows client ${version.version}...`, cancellable: true },
-              (progress, token) => versionManager.downloadWindowsClient(version, progress, token),
-            );
-            version.downloaded = true;
-          } catch (e) {
-            vscode.window.showErrorMessage(`Download failed: ${e instanceof Error ? e.message : e}`);
-            return;
-          }
-        }
-        try {
-          await vscode.window.withProgress(
-            { location: vscode.ProgressLocation.Notification, title: `Extracting Windows client ${version.version}...` },
-            (progress) => versionManager.extractWindowsClient(version, progress),
-          );
-          version.extracted = true;
-        } catch (e) {
-          vscode.window.showErrorMessage(`Extraction failed: ${e instanceof Error ? e.message : e}`);
-          return;
-        }
-        // Clean up the zip after successful extraction
-        if (version.downloaded) {
-          await versionManager.deleteWindowsClientDownload(version);
-        }
       }
 
       // Auto-register GCI library path
-      const gciPath = sysadminStorage.getWindowsClientGciPath(version.version);
+      const gciPath = sysadminStorage.getWindowsClientGciPath(version);
       if (gciPath) {
-        await storage.setGciLibraryPath(version.version, gciPath);
+        await storage.setGciLibraryPath(version, gciPath);
       }
-      treeProvider.refresh();
+      versionProvider.loadVersions();
       vscode.window.showInformationMessage(
-        `Windows client for GemStone ${version.version} is ready.${gciPath ? ' GCI library registered.' : ''}`,
+        `Windows client for GemStone ${version} is ready.${gciPath ? ' GCI library registered.' : ''}`,
       );
+    }),
+
+    vscode.commands.registerCommand('gemstone.openWindowsClientFolder', (item: VersionItem) => {
+      const clientPath = sysadminStorage.getWindowsClientPath(item.version.version);
+      if (clientPath) {
+        vscode.env.openExternal(vscode.Uri.file(clientPath));
+      }
+    }),
+
+    vscode.commands.registerCommand('gemstone.deleteWindowsClientExtracted', async (item: VersionItem) => {
+      const confirmed = await vscode.window.showWarningMessage(
+        `Delete the Windows client distribution for GemStone ${item.version.version}?`,
+        { modal: true },
+        'Delete',
+      );
+      if (confirmed !== 'Delete') return;
+      await versionManager.deleteWindowsClientExtracted(item.version);
+      versionProvider.loadVersions();
     }),
 
     vscode.commands.registerCommand('gemstone.createDatabase', async () => {
@@ -1404,7 +1433,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('gemstone.deleteDatabase', async (node: DatabaseNode) => {
-      if (node.kind !== 'database') return;
+      if (node?.kind !== 'database') return;
       const deleted = await databaseManager.deleteDatabase(node.db);
       if (deleted) {
         refreshAdminViews();
@@ -1416,7 +1445,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('gemstone.startStone', async (node: DatabaseNode) => {
-      if (node.kind !== 'stone') return;
+      if (node?.kind !== 'stone') return;
       try {
         await processManager.startStone(node.db);
         vscode.window.showInformationMessage(`Stone "${node.db.config.stoneName}" started.`);
@@ -1428,7 +1457,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('gemstone.stopStone', async (node: DatabaseNode) => {
-      if (node.kind !== 'stone') return;
+      if (node?.kind !== 'stone') return;
       if (mcpServerManager.isRunning(node.db.config.stoneName)) {
         await mcpServerManager.stopServer(node.db.config.stoneName);
         appendSysadmin('MCP Server stopped (stone shutting down)');
@@ -1444,7 +1473,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('gemstone.startNetldi', async (node: DatabaseNode) => {
-      if (node.kind !== 'netldi') return;
+      if (node?.kind !== 'netldi') return;
       try {
         await processManager.startNetldi(node.db);
         vscode.window.showInformationMessage(`NetLDI "${node.db.config.ldiName}" started.`);
@@ -1456,7 +1485,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('gemstone.stopNetldi', async (node: DatabaseNode) => {
-      if (node.kind !== 'netldi') return;
+      if (node?.kind !== 'netldi') return;
       try {
         await processManager.stopNetldi(node.db);
         vscode.window.showInformationMessage(`NetLDI "${node.db.config.ldiName}" stopped.`);
@@ -1468,7 +1497,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('gemstone.startMcpServer', async (node: DatabaseNode) => {
-      if (node.kind !== 'mcpServer') return;
+      if (node?.kind !== 'mcpServer') return;
       const login = await pickMcpLogin(node.db, storage);
       if (!login) return;
       try {
@@ -1484,7 +1513,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('gemstone.stopMcpServer', async (node: DatabaseNode) => {
-      if (node.kind !== 'mcpServer') return;
+      if (node?.kind !== 'mcpServer') return;
       // Dispose the Inspector terminal before stopping the server
       const inspectorTerminal = inspectorTerminals.get(node.db.config.stoneName);
       if (inspectorTerminal) {
@@ -1502,7 +1531,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('gemstone.openMcpInspector', (node: DatabaseNode) => {
-      if (node.kind !== 'mcpServer' || !node.running || !node.port) return;
+      if (node?.kind !== 'mcpServer' || !node.running || !node.port) return;
       // Dispose any existing Inspector terminal for this stone
       const existing = inspectorTerminals.get(node.db.config.stoneName);
       if (existing) {
@@ -1514,8 +1543,11 @@ export function activate(context: vscode.ExtensionContext) {
       });
       inspectorTerminals.set(node.db.config.stoneName, terminal);
       terminal.show();
+      // Windows PowerShell blocks `npx` (resolves to npx.ps1) under the default
+      // ExecutionPolicy; `npx.cmd` goes through CreateProcess and works anyway.
+      const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
       terminal.sendText(
-        `npx @modelcontextprotocol/inspector --transport sse --server-url ${serverUrl}`,
+        `${npx} @modelcontextprotocol/inspector --transport sse --server-url ${serverUrl}`,
       );
     }),
 
@@ -1565,7 +1597,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('gemstone.replaceExtent', async (node: DatabaseNode) => {
-      if (node.kind !== 'stone') return;
+      if (node?.kind !== 'stone') return;
       const replaced = await databaseManager.replaceExtent(node.db);
       if (replaced) {
         refreshAdminViews();

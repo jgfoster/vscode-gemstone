@@ -380,7 +380,28 @@ describe('registerMcpTools', () => {
       expect(code).toContain('myUserProfile');
       expect(code).toContain('stoneName');
       expect(code).toContain('inTransaction');
+      expect(code).toContain('needsCommit');
       expect(result.content[0].text).toContain('DataCurator');
+    });
+
+    // Regression: nextPutAll: sends do: to its argument. If any value passed
+    // is a SmallInteger (as System stoneVersionReport was observed returning),
+    // GemStone raises "SmallInteger does not understand #do:". Every value
+    // put into the stream must be a CharacterCollection.
+    it('coerces every value streamed in status to a CharacterCollection', async () => {
+      vi.mocked(queries.executeFetchString).mockReturnValue('');
+      await server.getTool('status')!.handler({});
+      const code = vi.mocked(queries.executeFetchString).mock.calls[0][2];
+
+      expect(code).toMatch(/myUserProfile userId (asString|printString)/);
+      expect(code).toMatch(/stoneName (asString|printString)/);
+      expect(code).toMatch(/session printString/);
+      expect(code).toContain('needsCommit');
+      // stoneVersionReport returned a SmallInteger in 3.7.x (SmallInteger DNU
+      // do:); modifiedObjects isn't a recognized System class method there
+      // (DNU #modifiedObjects). Neither should be re-introduced.
+      expect(code).not.toContain('stoneVersionReport');
+      expect(code).not.toContain('modifiedObjects');
     });
 
     it('catches errors from queries and returns isError responses', async () => {

@@ -1,10 +1,10 @@
-import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { SysadminStorage } from './sysadminStorage';
 import { ProcessManager } from './processManager';
 import { McpServerManager } from './mcpServerManager';
 import { GemStoneDatabase } from './sysadminTypes';
+import { wslExistsSync, wslReaddirSync, wslIsFile } from './wslFs';
 
 export type DatabaseNode =
   | { kind: 'database'; db: GemStoneDatabase }
@@ -136,10 +136,10 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<DatabaseNod
   }
 
   private listFiles(dirPath: string): DatabaseNode[] {
-    if (!fs.existsSync(dirPath)) return [];
-    const entries = fs.readdirSync(dirPath).sort();
-    return entries
-      .filter(e => fs.statSync(path.join(dirPath, e)).isFile())
+    if (!wslExistsSync(dirPath)) return [];
+    return wslReaddirSync(dirPath)
+      .sort()
+      .filter(e => wslIsFile(path.join(dirPath, e)))
       .map(e => ({ kind: 'file' as const, filePath: path.join(dirPath, e) }));
   }
 }

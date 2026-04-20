@@ -5,6 +5,7 @@ vi.mock('fs');
 vi.mock('../sysadminChannel', () => ({ appendSysadmin: vi.fn(), showSysadmin: vi.fn() }));
 
 import * as fs from 'fs';
+import * as path from 'path';
 import { socketPathFor, writeClaudeCodeMcpConfig } from '../mcpSocketServer';
 
 describe('socketPathFor', () => {
@@ -76,7 +77,8 @@ describe('writeClaudeCodeMcpConfig', () => {
   });
 
   it('does not rewrite the file when the entry is already correct', () => {
-    const proxyScript = '/ext/mcp-server/out/index.js';
+    // Use path.join to match the platform-specific path the source builds
+    const proxyScript = path.join('/ext', 'mcp-server', 'out', 'index.js');
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
       mcpServers: {
         gemstone: {
@@ -92,7 +94,7 @@ describe('writeClaudeCodeMcpConfig', () => {
   });
 
   it('rewrites when the socket path has changed', () => {
-    const proxyScript = '/ext/mcp-server/out/index.js';
+    const proxyScript = path.join('/ext', 'mcp-server', 'out', 'index.js');
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
       mcpServers: {
         gemstone: {

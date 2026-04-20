@@ -57,9 +57,7 @@ function makeDeps(overrides?: Partial<QuickSetupDeps>): QuickSetupDeps {
       fetchAvailableVersions: vi.fn(async () => [makeVersion()]),
       download: vi.fn(async () => {}),
       extract: vi.fn(async () => {}),
-      downloadWindowsClient: vi.fn(async () => {}),
-      extractWindowsClient: vi.fn(async () => {}),
-      deleteWindowsClientDownload: vi.fn(async () => {}),
+      downloadAndExtractWindowsClient: vi.fn(async () => {}),
     } as any,
     databaseManager: {
       createDatabaseDirect: vi.fn(async () => ({
@@ -335,23 +333,21 @@ describe('runQuickSetup', () => {
 
   // ── Windows client download ──────────────────────────────
 
-  it('downloads Windows client and sets GCI library on Windows', async () => {
+  it('installs Windows client and sets GCI library on Windows', async () => {
     setPlatform('win32');
     const version = makeVersion({ extracted: true });
     vi.mocked(vscode.window.showQuickPick).mockResolvedValue({ label: '3.7.4', version } as any);
     const deps = makeDeps();
     vi.mocked(deps.sysadminStorage.getWindowsClientGciPath as any).mockReturnValue('/native/lib/libgcits-3.7.4-64.dll');
     await runQuickSetup(deps);
-    expect(deps.versionManager.downloadWindowsClient).toHaveBeenCalled();
-    expect(deps.versionManager.extractWindowsClient).toHaveBeenCalled();
-    expect(deps.versionManager.deleteWindowsClientDownload).toHaveBeenCalled();
+    expect(deps.versionManager.downloadAndExtractWindowsClient).toHaveBeenCalled();
     expect(deps.loginStorage.setGciLibraryPath).toHaveBeenCalledWith(
       '3.7.4',
       '/native/lib/libgcits-3.7.4-64.dll',
     );
   });
 
-  it('continues setup even if Windows client download fails', async () => {
+  it('continues setup even if Windows client install fails', async () => {
     setPlatform('win32');
     const version = makeVersion({ extracted: true });
     vi.mocked(vscode.window.showQuickPick).mockResolvedValue({ label: '3.7.4', version } as any);
@@ -360,26 +356,24 @@ describe('runQuickSetup', () => {
         fetchAvailableVersions: vi.fn(async () => [version]),
         download: vi.fn(async () => {}),
         extract: vi.fn(async () => {}),
-        downloadWindowsClient: vi.fn(async () => { throw new Error('network error'); }),
-        extractWindowsClient: vi.fn(async () => {}),
-        deleteWindowsClientDownload: vi.fn(async () => {}),
+        downloadAndExtractWindowsClient: vi.fn(async () => { throw new Error('network error'); }),
       } as any,
     });
     await runQuickSetup(deps);
-    // Should still complete setup despite Windows client download failure
+    // Should still complete setup despite Windows client install failure
     expect(deps.loginStorage.saveLogin).toHaveBeenCalled();
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
       expect.stringContaining('Quick Setup complete'),
     );
   });
 
-  it('does not download Windows client on non-Windows platforms', async () => {
+  it('does not install Windows client on non-Windows platforms', async () => {
     setPlatform('darwin');
     const version = makeVersion({ extracted: true });
     vi.mocked(vscode.window.showQuickPick).mockResolvedValue({ label: '3.7.4', version } as any);
     const deps = makeDeps();
     await runQuickSetup(deps);
-    expect(deps.versionManager.downloadWindowsClient).not.toHaveBeenCalled();
+    expect(deps.versionManager.downloadAndExtractWindowsClient).not.toHaveBeenCalled();
     expect(deps.loginStorage.setGciLibraryPath).toHaveBeenCalledWith(
       '3.7.4',
       expect.stringContaining('libgcits-3.7.4-64.dylib'),

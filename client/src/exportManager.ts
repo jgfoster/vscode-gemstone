@@ -52,6 +52,8 @@ export class ExportManager {
         .replace(/\{host}/g, gem_host)
         .replace(/\{stone}/g, stone)
         .replace(/\{user}/g, gs_user);
+      // Normalize separators for current platform (e.g. forward slashes in config become backslashes on Windows)
+      resolved = path.normalize(resolved);
       // Handle relative paths (substitute dict vars with dummies to test)
       const testPath = resolved.replace(/\{index}/g, '0').replace(/\{dictName}/g, 'X');
       if (!path.isAbsolute(testPath)) {

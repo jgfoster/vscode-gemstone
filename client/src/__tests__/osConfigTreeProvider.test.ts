@@ -3,11 +3,18 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 vi.mock('vscode', () => import('../__mocks__/vscode'));
 vi.mock('child_process');
 vi.mock('fs');
+vi.mock('../wslBridge', () => ({
+  needsWsl: vi.fn(() => false),
+  getWslInfo: vi.fn(() => ({ available: false, defaultDistro: undefined, homeDir: undefined, arch: undefined, wslVersion: undefined })),
+  invalidateWslCache: vi.fn(),
+  wslExecSync: vi.fn(() => ''),
+}));
 
 import { exec } from 'child_process';
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 import { OsConfigTreeProvider } from '../sharedMemoryTreeProvider';
+import * as wslBridge from '../wslBridge';
 
 // ── Helpers ────────────────────────────────────────────────
 
@@ -77,8 +84,12 @@ describe('OsConfigTreeProvider', () => {
   let originalPlatform: string;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     originalPlatform = process.platform;
     provider = new OsConfigTreeProvider();
+
+    // Default: not Windows, so wslBridge is not used
+    vi.mocked(wslBridge.needsWsl).mockReturnValue(false);
 
     // Default: sysctl succeeds with empty output, no logind files
     mockExec('');
@@ -239,7 +250,7 @@ describe('OsConfigTreeProvider', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readdirSync).mockReturnValue(['zz-override.conf'] as any);
       vi.mocked(fs.readFileSync).mockImplementation((filepath: any) => {
-        if (String(filepath).includes('.d/')) {
+        if (String(filepath).includes('logind.conf.d')) {
           return 'RemoveIPC=yes\n' as any;
         }
         return 'RemoveIPC=no\n' as any;
@@ -516,6 +527,191 @@ describe('OsConfigTreeProvider', () => {
       const [macCmd] = mockTerminal.sendText.mock.calls[0];
 
       expect(linuxCmd).not.toBe(macCmd);
+    });
+  });
+
+  // ── Windows / WSL ─────────────────────────────────────────
+
+  describe('Windows WSL status', () => {
+    beforeEach(() => {
+      setPlatform('win32');
+      vi.mocked(wslBridge.needsWsl).mockReturnValue(true);
+    });
+
+    it('shows wslStatus + shared memory + removeIpc when version is 2', async () => {
+      vi.mocked(wslBridge.getWslInfo).mockReturnValue({
+        available: true, defaultDistro: 'Ubuntu', homeDir: '/home/user', arch: 'x86_64', wslVersion: 2,
+      });
+      mockExec(LINUX_SYSCTL_4GB);
+      const nodes = await getRootNodes(provider);
+      expect(nodes).toHaveLength(3);
+      expect(nodes[0]).toMatchObject({ kind: 'wslStatus', distro: 'Ubuntu', wslVersion: 2 });
+      expect(nodes[1].kind).toBe('sharedMemoryStatus');
+      expect(nodes[2].kind).toBe('removeIpcStatus');
+    });
+
+    it('shows only wslStatus when version is not 2 (avoids noise before upgrade)', async () => {
+      vi.mocked(wslBridge.getWslInfo).mockReturnValue({
+        available: true, defaultDistro: 'Ubuntu', homeDir: '/home/user', arch: 'x86_64', wslVersion: 1,
+      });
+      const nodes = await getRootNodes(provider);
+      expect(nodes).toHaveLength(1);
+      expect(nodes[0]).toMatchObject({ kind: 'wslStatus', wslVersion: 1 });
+    });
+
+    it('shared memory on WSL: runs sysctl via wsl.exe and parses Linux format', async () => {
+      vi.mocked(wslBridge.getWslInfo).mockReturnValue({
+        available: true, defaultDistro: 'Ubuntu', homeDir: '/home/user', arch: 'x86_64', wslVersion: 2,
+      });
+      mockExec(LINUX_SYSCTL_1GB);
+      const nodes = await getRootNodes(provider);
+      expect(vi.mocked(exec).mock.calls[0][0]).toBe('wsl.exe -e sysctl kernel.shmmax kernel.shmall');
+      const shm = nodes.find((n: any) => n.kind === 'sharedMemoryStatus') as any;
+      expect(shm.configured).toBe(true);
+    });
+
+    it('removeIpc on WSL: routes logind.conf reads through wslExecSync', async () => {
+      vi.mocked(wslBridge.getWslInfo).mockReturnValue({
+        available: true, defaultDistro: 'Ubuntu', homeDir: '/home/user', arch: 'x86_64', wslVersion: 2,
+      });
+      mockExec(LINUX_SYSCTL_4GB);
+      vi.mocked(wslBridge.wslExecSync).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('ls ')) return ''; // no drop-ins
+        if (cmd.startsWith('cat ')) return '[Login]\nRemoveIPC=no\n';
+        return '';
+      });
+      const nodes = await getRootNodes(provider);
+      const removeIpc = nodes.find((n: any) => n.kind === 'removeIpcStatus') as any;
+      expect(removeIpc.configured).toBe(true);
+      // fs was NOT consulted on the WSL path
+      expect(fs.readFileSync).not.toHaveBeenCalled();
+    });
+
+    it('removeIpc on WSL: drop-in file overrides main logind.conf', async () => {
+      vi.mocked(wslBridge.getWslInfo).mockReturnValue({
+        available: true, defaultDistro: 'Ubuntu', homeDir: '/home/user', arch: 'x86_64', wslVersion: 2,
+      });
+      mockExec(LINUX_SYSCTL_4GB);
+      vi.mocked(wslBridge.wslExecSync).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('ls ')) return 'zz-gemstone.conf\n';
+        if (cmd.includes('logind.conf.d/zz-gemstone.conf')) return 'RemoveIPC=no\n';
+        if (cmd.includes('/etc/systemd/logind.conf')) return 'RemoveIPC=yes\n';
+        return '';
+      });
+      const nodes = await getRootNodes(provider);
+      const removeIpc = nodes.find((n: any) => n.kind === 'removeIpcStatus') as any;
+      expect(removeIpc.configured).toBe(true);
+    });
+
+    it('not-configured shared memory on WSL offers the Linux setup script', async () => {
+      const parent = { kind: 'sharedMemoryStatus' as const, configured: false, gbLabel: '0' };
+      const children = await provider.getChildren(parent);
+      expect(children[0]).toMatchObject({ kind: 'action', command: 'gemstone.runSetSharedMemoryLinux' });
+    });
+
+    it('runSetSharedMemoryLinux on Windows opens a WSL shell with /mnt/<drive> script path', () => {
+      provider.registerCommands({ extensionPath: 'C:\\ext', subscriptions: { push: vi.fn() } } as any);
+      const mockTerminal = { show: vi.fn(), sendText: vi.fn() };
+      vi.mocked(vscode.window.createTerminal).mockReturnValue(mockTerminal as any);
+
+      getCommand('gemstone.runSetSharedMemoryLinux')?.();
+
+      const createArgs = vi.mocked(vscode.window.createTerminal).mock.calls[0][0] as any;
+      expect(createArgs.shellPath).toBe('wsl.exe');
+      expect(mockTerminal.sendText).toHaveBeenCalledWith(
+        expect.stringContaining('/mnt/c/ext/resources/setSharedMemoryLinux.sh'),
+      );
+    });
+
+    it('runSetRemoveIPC on Windows opens a WSL shell with /mnt/<drive> script path', () => {
+      provider.registerCommands({ extensionPath: 'C:\\ext', subscriptions: { push: vi.fn() } } as any);
+      const mockTerminal = { show: vi.fn(), sendText: vi.fn() };
+      vi.mocked(vscode.window.createTerminal).mockReturnValue(mockTerminal as any);
+
+      getCommand('gemstone.runSetRemoveIPC')?.();
+
+      const createArgs = vi.mocked(vscode.window.createTerminal).mock.calls[0][0] as any;
+      expect(createArgs.shellPath).toBe('wsl.exe');
+      expect(mockTerminal.sendText).toHaveBeenCalledWith(
+        expect.stringContaining('/mnt/c/ext/resources/setRemoveIPC.sh'),
+      );
+    });
+
+    it('wslStatus WSL 2: check icon, None collapsible state', () => {
+      const item = provider.getTreeItem({ kind: 'wslStatus', distro: 'Ubuntu', wslVersion: 2 });
+      expect(item.label).toContain('WSL 2');
+      expect(item.label).toContain('Ubuntu');
+      expect((item.iconPath as any).id).toBe('check');
+      expect(item.collapsibleState).toBe(vscode.TreeItemCollapsibleState.None);
+      expect(item.tooltip).toBeUndefined();
+    });
+
+    it('wslStatus WSL 1: warning icon, Expanded state, tooltip with upgrade command', () => {
+      const item = provider.getTreeItem({ kind: 'wslStatus', distro: 'Ubuntu', wslVersion: 1 });
+      expect(item.label).toContain('WSL 1');
+      expect(item.label).toContain('upgrade required');
+      expect((item.iconPath as any).id).toBe('warning');
+      expect(item.collapsibleState).toBe(vscode.TreeItemCollapsibleState.Expanded);
+      expect(String(item.tooltip)).toContain('wsl --set-version');
+    });
+
+    it('wslStatus unknown version: warning icon', () => {
+      const item = provider.getTreeItem({ kind: 'wslStatus', distro: 'Debian', wslVersion: undefined });
+      expect((item.iconPath as any).id).toBe('warning');
+      expect(String(item.tooltip)).toContain('Debian');
+    });
+
+    it('wslStatus WSL 1 returns upgrade action child', async () => {
+      const parent = { kind: 'wslStatus' as const, distro: 'Ubuntu', wslVersion: 1 };
+      const children = await provider.getChildren(parent);
+      expect(children).toHaveLength(1);
+      expect(children[0]).toMatchObject({ kind: 'action', command: 'gemstone.upgradeWsl2' });
+    });
+
+    it('wslStatus WSL 2 returns no children', async () => {
+      const parent = { kind: 'wslStatus' as const, distro: 'Ubuntu', wslVersion: 2 };
+      expect(await provider.getChildren(parent)).toHaveLength(0);
+    });
+
+    it('upgradeWsl2 action: terminal icon', () => {
+      const item = provider.getTreeItem({ kind: 'action', text: 'Upgrade', command: 'gemstone.upgradeWsl2' });
+      expect((item.iconPath as any).id).toBe('terminal');
+    });
+
+    it('registers gemstone.upgradeWsl2 command', () => {
+      provider.registerCommands(makeContext());
+      const registeredIds = vi.mocked(vscode.commands.registerCommand).mock.calls.map(([id]) => id);
+      expect(registeredIds).toContain('gemstone.upgradeWsl2');
+    });
+
+    it('upgradeWsl2 opens terminal with wsl --set-version command', () => {
+      vi.mocked(wslBridge.getWslInfo).mockReturnValue({
+        available: true, defaultDistro: 'Ubuntu', homeDir: '/home/user', arch: 'x86_64', wslVersion: 1,
+      });
+      provider.registerCommands(makeContext());
+      const mockTerminal = { show: vi.fn(), sendText: vi.fn() };
+      vi.mocked(vscode.window.createTerminal).mockReturnValue(mockTerminal as any);
+
+      getCommand('gemstone.upgradeWsl2')?.();
+
+      expect(mockTerminal.sendText).toHaveBeenCalledWith(expect.stringContaining('wsl --set-version Ubuntu 2'));
+    });
+
+    it('upgradeWsl2 invalidates WSL cache and refreshes when terminal closes', () => {
+      vi.mocked(wslBridge.getWslInfo).mockReturnValue({
+        available: true, defaultDistro: 'Ubuntu', homeDir: '/home/user', arch: 'x86_64', wslVersion: 1,
+      });
+      provider.registerCommands(makeContext());
+      const mockTerminal = { show: vi.fn(), sendText: vi.fn() };
+      vi.mocked(vscode.window.createTerminal).mockReturnValue(mockTerminal as any);
+      const refreshSpy = vi.spyOn(provider, 'refresh');
+
+      getCommand('gemstone.upgradeWsl2')?.();
+      const closeListener = vi.mocked(vscode.window.onDidCloseTerminal).mock.calls[0][0] as (t: unknown) => void;
+
+      closeListener(mockTerminal);
+      expect(wslBridge.invalidateWslCache).toHaveBeenCalled();
+      expect(refreshSpy).toHaveBeenCalledOnce();
     });
   });
 });

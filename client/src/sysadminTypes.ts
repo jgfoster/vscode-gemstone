@@ -25,10 +25,12 @@ export interface GemStoneVersion {
   size: number;
   /** Date string from the directory listing */
   date: string;
-  /** Whether the file has been downloaded to rootPath */
+  /** Whether the server archive has been downloaded to rootPath */
   downloaded: boolean;
-  /** Whether the version has been extracted to rootPath */
+  /** Whether the server version has been extracted to rootPath */
   extracted: boolean;
+  /** Whether the Windows client distribution is extracted (Windows only) */
+  clientExtracted?: boolean;
   /** Whether this is a locally registered version (symlink) */
   local?: boolean;
   /** Build description from version.txt (for local versions) */

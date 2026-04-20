@@ -1,0 +1,222 @@
+import * as fs from 'fs';
+import { spawnSync } from 'child_process';
+import { needsWsl, windowsPathToWsl, wslExecSync } from './wslBridge';
+
+/**
+ * Filesystem helpers that transparently route through WSL when the target
+ * path is on the WSL side (\\wsl$\... or \\wsl.localhost\...). VS Code's
+ * Node-side UNC enforcement can silently block or reject fs operations on
+ * those paths even when the host is in security.allowedUNCHosts, so we run
+ * the operation inside WSL to avoid the UNC surface entirely.
+ *
+ * On non-Windows hosts, and for paths that aren't on the WSL UNC share, each
+ * helper falls through to the standard fs call.
+ */
+
+function isWslUncPath(p: string): boolean {
+  return /^\\\\wsl(\$|\.localhost)\\/i.test(p);
+}
+
+function shouldRoute(p: string): boolean {
+  return needsWsl() && isWslUncPath(p);
+}
+
+function shellQuote(p: string): string {
+  return `'${p.replace(/'/g, `'\\''`)}'`;
+}
+
+export function wslExistsSync(p: string): boolean {
+  if (!shouldRoute(p)) return fs.existsSync(p);
+  try {
+    wslExecSync(`test -e ${shellQuote(windowsPathToWsl(p))}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function wslIsDirectory(p: string): boolean {
+  if (!shouldRoute(p)) {
+    try { return fs.statSync(p).isDirectory(); } catch { return false; }
+  }
+  try {
+    wslExecSync(`test -d ${shellQuote(windowsPathToWsl(p))}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function wslIsFile(p: string): boolean {
+  if (!shouldRoute(p)) {
+    try { return fs.statSync(p).isFile(); } catch { return false; }
+  }
+  try {
+    wslExecSync(`test -f ${shellQuote(windowsPathToWsl(p))}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function wslIsSymlink(p: string): boolean {
+  if (!shouldRoute(p)) {
+    try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; }
+  }
+  try {
+    wslExecSync(`test -L ${shellQuote(windowsPathToWsl(p))}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function wslFileSize(p: string): number {
+  if (!shouldRoute(p)) {
+    try { return fs.statSync(p).size; } catch { return -1; }
+  }
+  try {
+    const out = wslExecSync(`stat -c %s ${shellQuote(windowsPathToWsl(p))}`).trim();
+    const n = parseInt(out, 10);
+    return Number.isFinite(n) ? n : -1;
+  } catch {
+    return -1;
+  }
+}
+
+export function wslReaddirSync(p: string): string[] {
+  if (!shouldRoute(p)) {
+    try { return fs.readdirSync(p); } catch { return []; }
+  }
+  try {
+    // -A includes dotfiles except . and ..; -1 one-per-line; -- ends options
+    const out = wslExecSync(`ls -A1 -- ${shellQuote(windowsPathToWsl(p))}`);
+    return out.split('\n').map(s => s.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+export function wslReadFileSync(p: string): string | undefined {
+  if (!shouldRoute(p)) {
+    try { return fs.readFileSync(p, 'utf-8'); } catch { return undefined; }
+  }
+  try {
+    return wslExecSync(`cat ${shellQuote(windowsPathToWsl(p))}`);
+  } catch {
+    return undefined;
+  }
+}
+
+export function wslMkdirSync(p: string, options?: { recursive?: boolean }): void {
+  if (!shouldRoute(p)) {
+    fs.mkdirSync(p, options);
+    return;
+  }
+  const flag = options?.recursive ? '-p' : '';
+  wslExecSync(`mkdir ${flag} ${shellQuote(windowsPathToWsl(p))}`.trim());
+}
+
+/**
+ * Write a file by piping content to `sh -c "cat > path"` inside WSL.
+ * This avoids any dependence on VS Code's UNC allowlist.
+ */
+export function wslWriteFileSync(p: string, content: string): void {
+  if (!shouldRoute(p)) {
+    fs.writeFileSync(p, content);
+    return;
+  }
+  const wslPath = windowsPathToWsl(p);
+  const result = spawnSync(
+    'wsl.exe',
+    ['-e', 'sh', '-c', `cat > ${shellQuote(wslPath)}`],
+    { input: content, encoding: 'utf-8', env: process.env },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(
+      `Failed to write ${p} via WSL (exit ${result.status}): ${result.stderr || 'no stderr'}`,
+    );
+  }
+}
+
+/**
+ * Copy a file. If either endpoint is a \\wsl$\ path, runs `cp` inside WSL.
+ * Both paths must be on the WSL side (or both native); mixed copies aren't
+ * supported here — they aren't needed by current callers.
+ */
+export function wslCopyFileSync(src: string, dst: string): void {
+  const srcRoute = shouldRoute(src);
+  const dstRoute = shouldRoute(dst);
+  if (!srcRoute && !dstRoute) {
+    fs.copyFileSync(src, dst);
+    return;
+  }
+  if (srcRoute !== dstRoute) {
+    throw new Error(
+      `wslCopyFileSync: cannot copy between Windows and WSL filesystems (src=${src}, dst=${dst})`,
+    );
+  }
+  wslExecSync(
+    `cp -p ${shellQuote(windowsPathToWsl(src))} ${shellQuote(windowsPathToWsl(dst))}`,
+  );
+}
+
+export function wslUnlinkSync(p: string): void {
+  if (!shouldRoute(p)) {
+    fs.unlinkSync(p);
+    return;
+  }
+  wslExecSync(`rm -f ${shellQuote(windowsPathToWsl(p))}`);
+}
+
+export function wslRmSync(p: string, options?: { recursive?: boolean; force?: boolean }): void {
+  if (!shouldRoute(p)) {
+    fs.rmSync(p, options);
+    return;
+  }
+  const flags = [
+    options?.recursive ? 'r' : '',
+    options?.force ? 'f' : '',
+  ].join('');
+  const arg = flags ? `-${flags}` : '';
+  wslExecSync(`rm ${arg} ${shellQuote(windowsPathToWsl(p))}`.trim());
+}
+
+/**
+ * Translate a path into something usable from inside WSL.
+ *   \\wsl$\Ubuntu\home\x   → /home/x
+ *   C:\Users\x             → /mnt/c/Users/x
+ *   /already/linux         → unchanged
+ * Only meaningful on Windows; on other platforms returns the input.
+ */
+export function toWslPath(p: string): string {
+  if (isWslUncPath(p)) return windowsPathToWsl(p);
+  const drive = p.match(/^([A-Za-z]):[\\\/](.*)$/);
+  if (drive) return `/mnt/${drive[1].toLowerCase()}/${drive[2].replace(/\\/g, '/')}`;
+  return p;
+}
+
+/**
+ * Create a symlink at `linkPath` pointing at `target`. When `linkPath` is a
+ * WSL UNC path, runs `ln -s` inside WSL (with `target` translated via
+ * toWslPath so Windows-side sources end up as /mnt/c/... on the Linux side).
+ */
+export function wslSymlinkSync(target: string, linkPath: string): void {
+  if (!shouldRoute(linkPath)) {
+    fs.symlinkSync(target, linkPath);
+    return;
+  }
+  wslExecSync(
+    `ln -s ${shellQuote(toWslPath(target))} ${shellQuote(windowsPathToWsl(linkPath))}`,
+  );
+}
+
+export function wslChmodSync(p: string, mode: number | string): void {
+  if (!shouldRoute(p)) {
+    fs.chmodSync(p, mode);
+    return;
+  }
+  const modeStr = typeof mode === 'number' ? mode.toString(8) : mode;
+  wslExecSync(`chmod ${modeStr} ${shellQuote(windowsPathToWsl(p))}`);
+}

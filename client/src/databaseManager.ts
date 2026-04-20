@@ -5,7 +5,17 @@ import { SysadminStorage } from './sysadminStorage';
 import { ProcessManager } from './processManager';
 import { GemStoneDatabase } from './sysadminTypes';
 import { appendSysadmin } from './sysadminChannel';
-import { needsWsl, windowsPathToWsl } from './wslBridge';
+import { needsWsl, windowsPathToWsl, wslExecSync } from './wslBridge';
+import {
+  wslExistsSync,
+  wslMkdirSync,
+  wslWriteFileSync,
+  wslCopyFileSync,
+  wslUnlinkSync,
+  wslRmSync,
+  wslChmodSync,
+  wslReaddirSync,
+} from './wslFs';
 
 export class DatabaseManager {
   constructor(
@@ -62,7 +72,16 @@ export class DatabaseManager {
     // Create directory structure
     return vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Creating GemStone database...' },
-      (progress) => this.createDatabaseDirect(version, baseExtent, stoneName, ldiName, progress),
+      async (progress) => {
+        try {
+          return await this.createDatabaseDirect(version, baseExtent, stoneName, ldiName, progress);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          appendSysadmin(`createDatabase failed: ${msg}`);
+          vscode.window.showErrorMessage(`Create database failed: ${msg}`);
+          return undefined;
+        }
+      },
     );
   }
 
@@ -79,11 +98,11 @@ export class DatabaseManager {
     const dbDir = path.join(this.storage.getRootPath(), `db-${dbNum}`);
 
     progress?.report({ message: 'Creating directories...' });
-    fs.mkdirSync(dbDir);
-    fs.mkdirSync(path.join(dbDir, 'conf'));
-    fs.mkdirSync(path.join(dbDir, 'data'));
-    fs.mkdirSync(path.join(dbDir, 'log'));
-    fs.mkdirSync(path.join(dbDir, 'stat'));
+    wslMkdirSync(dbDir);
+    wslMkdirSync(path.join(dbDir, 'conf'));
+    wslMkdirSync(path.join(dbDir, 'data'));
+    wslMkdirSync(path.join(dbDir, 'log'));
+    wslMkdirSync(path.join(dbDir, 'stat'));
 
     progress?.report({ message: 'Writing configuration...' });
 
@@ -91,11 +110,11 @@ export class DatabaseManager {
     const confPath = needsWsl() ? windowsPathToWsl(dbDir) : dbDir;
 
     // database.yaml
-    fs.writeFileSync(path.join(dbDir, 'database.yaml'),
+    wslWriteFileSync(path.join(dbDir, 'database.yaml'),
       `---\nbaseExtent: "${baseExtent}.dbf"\nldiName: "${ldiName}"\nstoneName: "${stoneName}"\nversion: "${version}"\n`);
 
     // gem.conf
-    fs.writeFileSync(path.join(dbDir, 'conf', 'gem.conf'),
+    wslWriteFileSync(path.join(dbDir, 'conf', 'gem.conf'),
       `# Edit this file to change your gem or topaz configuration\n\n` +
       `GEM_TEMPOBJ_CACHE_SIZE = 50000;\n` +
       `GEM_TEMPOBJ_POMGEN_PRUNE_ON_VOTE = 90;\n\n` +
@@ -104,14 +123,14 @@ export class DatabaseManager {
       `GEM_NATIVE_CODE_ENABLED = TRUE;\n`);
 
     // stoneName.conf
-    fs.writeFileSync(path.join(dbDir, 'conf', `${stoneName}.conf`),
+    wslWriteFileSync(path.join(dbDir, 'conf', `${stoneName}.conf`),
       `# Edit this file to change your stone configuration.\n` +
       `# For example, you might want a larger Shared Page Cache.\n\n` +
       `SHR_PAGE_CACHE_SIZE_KB = 100000;\n` +
       `KEYFILE = "${confPath}/conf/gemstone.key";\n`);
 
     // system.conf
-    fs.writeFileSync(path.join(dbDir, 'conf', 'system.conf'),
+    wslWriteFileSync(path.join(dbDir, 'conf', 'system.conf'),
       `# See $GEMSTONE/data/system.conf for descriptions of these lines.\n` +
       `# In general, this file should not be edited.\n` +
       `# You may customize the stone config file (stonename.conf) or gem.conf\n\n` +
@@ -123,16 +142,15 @@ export class DatabaseManager {
     progress?.report({ message: 'Copying key file...' });
     const gsPath = this.storage.getGemstonePath(version)!;
     const keySource = path.join(gsPath, 'sys', 'community.starter.key');
-    if (fs.existsSync(keySource)) {
-      fs.copyFileSync(keySource, path.join(dbDir, 'conf', 'gemstone.key'));
+    if (wslExistsSync(keySource)) {
+      wslCopyFileSync(keySource, path.join(dbDir, 'conf', 'gemstone.key'));
     }
 
     progress?.report({ message: 'Copying base extent (this may take a moment)...' });
     const extentSource = path.join(gsPath, 'bin', `${baseExtent}.dbf`);
     const extentDest = path.join(dbDir, 'data', 'extent0.dbf');
-    fs.copyFileSync(extentSource, extentDest);
-    // Make extent writable
-    fs.chmodSync(extentDest, 0o644);
+    wslCopyFileSync(extentSource, extentDest);
+    wslChmodSync(extentDest, 0o644);
 
     appendSysadmin(`Created database db-${dbNum} with stone "${stoneName}", version ${version}`);
 
@@ -166,7 +184,7 @@ export class DatabaseManager {
     );
     if (confirmed !== 'Delete') return false;
 
-    fs.rmSync(db.path, { recursive: true });
+    wslRmSync(db.path, { recursive: true, force: true });
     appendSysadmin(`Deleted database ${db.dirName}`);
     return true;
   }
@@ -212,9 +230,9 @@ export class DatabaseManager {
 
         // Delete all .dbf files in data/
         progress.report({ message: 'Removing old extent and transaction logs...' });
-        for (const entry of fs.readdirSync(dataDir)) {
+        for (const entry of wslReaddirSync(dataDir)) {
           if (entry.endsWith('.dbf')) {
-            fs.unlinkSync(path.join(dataDir, entry));
+            wslUnlinkSync(path.join(dataDir, entry));
           }
         }
 
@@ -227,12 +245,12 @@ export class DatabaseManager {
         }
         const extentSource = path.join(gsPath, 'bin', `${newExtent}.dbf`);
         const extentDest = path.join(dataDir, 'extent0.dbf');
-        fs.copyFileSync(extentSource, extentDest);
-        fs.chmodSync(extentDest, 0o644);
+        wslCopyFileSync(extentSource, extentDest);
+        wslChmodSync(extentDest, 0o644);
 
         // Update database.yaml
         progress.report({ message: 'Updating configuration...' });
-        fs.writeFileSync(path.join(db.path, 'database.yaml'),
+        wslWriteFileSync(path.join(db.path, 'database.yaml'),
           `---\nbaseExtent: "${newExtent}.dbf"\nldiName: "${db.config.ldiName}"\n` +
           `stoneName: "${db.config.stoneName}"\nversion: "${db.config.version}"\n`);
 

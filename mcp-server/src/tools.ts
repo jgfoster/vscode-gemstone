@@ -616,18 +616,21 @@ export function registerTools(server: McpServer, session: McpSession): void {
 
   server.tool(
     'status',
-    'Report information about the current GemStone session: user, stone, version, transaction state, and dirty objects.',
+    'Report information about the current GemStone session: user, stone, transaction state, and whether there are uncommitted changes.',
     {},
     async () => {
       try {
+        // Every value put into the stream must be a CharacterCollection;
+        // otherwise nextPutAll: sends do: to it and GemStone complains (e.g.
+        // SmallInteger DNU do:). Coerce with asString / printString to keep
+        // it robust across GemStone versions.
         const code = `| ws |
-ws := WriteStream on: Unicode7 new.
-ws nextPutAll: 'User: '; nextPutAll: System myUserProfile userId; lf.
-ws nextPutAll: 'Stone: '; nextPutAll: System stoneName; lf.
-ws nextPutAll: 'Version: '; nextPutAll: System stoneVersionReport; lf.
+ws := WriteStream on: String new.
+ws nextPutAll: 'User: '; nextPutAll: System myUserProfile userId asString; lf.
+ws nextPutAll: 'Stone: '; nextPutAll: System stoneName asString; lf.
 ws nextPutAll: 'Session ID: '; nextPutAll: System session printString; lf.
 ws nextPutAll: 'Transaction: '; nextPutAll: (System inTransaction ifTrue: ['active'] ifFalse: ['none']); lf.
-ws nextPutAll: 'Dirty objects: '; nextPutAll: System modifiedObjects size printString; lf.
+ws nextPutAll: 'Uncommitted changes: '; nextPutAll: (System needsCommit ifTrue: ['yes'] ifFalse: ['no']); lf.
 ws contents`;
         const result = session.executeFetchString(code);
         return { content: [{ type: 'text' as const, text: result }] };

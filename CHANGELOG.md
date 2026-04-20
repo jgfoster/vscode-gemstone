@@ -4,6 +4,15 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-04-19
+
+### Fixed
+
+- **WSL Support** — WSL support (Linux in Windows) now mostly works.
+- **MCP Inspector launch on Windows** — the "Open MCP Inspector" button now invokes `npx.cmd` instead of `npx` on Windows, bypassing the `npx.ps1` PowerShell ExecutionPolicy block that prevented the inspector from starting.
+- **`status` MCP tool on GemStone 3.7.x** — the Smalltalk query no longer calls `System stoneVersionReport` (which could return a SmallInteger, causing `does not understand #'do:'`) or `System modifiedObjects` (absent in some versions); it now reports user, stone, session, transaction state, and uncommitted-changes flag via reliable methods, with every streamed value coerced to a string.
+- **Tree-view commands crashing from the Command Palette** — handlers for `gemstone.stopStone` and 8 other commands read `node.kind` without a guard, crashing with `Cannot read properties of undefined (reading 'kind')` when invoked from the palette (where `node` is `undefined`). All handlers now use optional chaining, and a source-scan regression test keeps them guarded.
+
 ## [1.3.2] - 2026-04-17
 
 ### Added

@@ -200,118 +200,15 @@ describe('SysadminStorage.getDownloadedWindowsClientFiles', () => {
   });
 });
 
-// ── VersionManager.fetchAvailableWindowsClientVersions ────
+// ── VersionManager.windowsClientArtifact ──────────────────
 
-describe('VersionManager.fetchAvailableWindowsClientVersions', () => {
-  it('parses version directories from HTML listing', async () => {
-    const storage = new SysadminStorage();
-    const manager = new VersionManager(storage);
-
-    const html = `
-      <a href="3.7.5/">3.7.5/</a>  12-Mar-2026 10:00  -
-      <a href="3.6.4/">3.6.4/</a>  06-Jun-2022 10:00  -
-      <a href="3.7.4.3/">3.7.4.3/</a>  15-Jan-2025 10:00  -
-    `;
-    vi.spyOn(manager as any, 'fetchUrl').mockResolvedValue(html);
-
-    const versions = await manager.fetchAvailableWindowsClientVersions();
-    expect(versions.length).toBe(3);
-    expect(versions[0].version).toBe('3.7.5');
-    expect(versions[1].version).toBe('3.7.4.3');
-    expect(versions[2].version).toBe('3.6.4');
-  });
-
-  it('constructs correct download URLs', async () => {
-    const storage = new SysadminStorage();
-    const manager = new VersionManager(storage);
-
-    const html = '<a href="3.7.5/">3.7.5/</a>';
-    vi.spyOn(manager as any, 'fetchUrl').mockResolvedValue(html);
-
-    const versions = await manager.fetchAvailableWindowsClientVersions();
-    expect(versions[0].url).toBe(
+describe('VersionManager.windowsClientArtifact', () => {
+  it('constructs the canonical filename and URL for a version', () => {
+    const { fileName, url } = VersionManager.windowsClientArtifact('3.7.5');
+    expect(fileName).toBe('GemStone64BitClient3.7.5-x86.Windows_NT.zip');
+    expect(url).toBe(
       'https://downloads.gemtalksystems.com/pub/GemStone64/3.7.5/GemStone64BitClient3.7.5-x86.Windows_NT.zip',
     );
-    expect(versions[0].fileName).toBe('GemStone64BitClient3.7.5-x86.Windows_NT.zip');
-  });
-
-  it('marks versions as downloaded when zip exists locally', async () => {
-    createWindowsClientZip('3.7.5');
-    const storage = new SysadminStorage();
-    const manager = new VersionManager(storage);
-
-    const html = '<a href="3.7.5/">3.7.5/</a>';
-    vi.spyOn(manager as any, 'fetchUrl').mockResolvedValue(html);
-
-    const versions = await manager.fetchAvailableWindowsClientVersions();
-    expect(versions[0].downloaded).toBe(true);
-    expect(versions[0].extracted).toBe(false);
-  });
-
-  it('marks versions as extracted when client directory exists', async () => {
-    createWindowsClientDir('3.7.5');
-    const storage = new SysadminStorage();
-    const manager = new VersionManager(storage);
-
-    const html = '<a href="3.7.5/">3.7.5/</a>';
-    vi.spyOn(manager as any, 'fetchUrl').mockResolvedValue(html);
-
-    const versions = await manager.fetchAvailableWindowsClientVersions();
-    expect(versions[0].extracted).toBe(true);
-  });
-
-  it('returns empty array when no version directories found', async () => {
-    const storage = new SysadminStorage();
-    const manager = new VersionManager(storage);
-
-    vi.spyOn(manager as any, 'fetchUrl').mockResolvedValue('<html>no versions here</html>');
-
-    const versions = await manager.fetchAvailableWindowsClientVersions();
-    expect(versions).toEqual([]);
-  });
-
-  it('sorts versions newest first', async () => {
-    const storage = new SysadminStorage();
-    const manager = new VersionManager(storage);
-
-    const html = '<a href="3.6.4/">3.6.4/</a>\n<a href="3.7.5/">3.7.5/</a>\n<a href="3.7.4/">3.7.4/</a>';
-    vi.spyOn(manager as any, 'fetchUrl').mockResolvedValue(html);
-
-    const versions = await manager.fetchAvailableWindowsClientVersions();
-    expect(versions.map(v => v.version)).toEqual(['3.7.5', '3.7.4', '3.6.4']);
-  });
-});
-
-// ── VersionManager.deleteWindowsClientDownload ────────────
-
-describe('VersionManager.deleteWindowsClientDownload', () => {
-  it('removes the zip file', async () => {
-    createWindowsClientZip('3.7.5');
-    const storage = new SysadminStorage();
-    const manager = new VersionManager(storage);
-
-    const zipPath = path.join(tmpDir, 'GemStone64BitClient3.7.5-x86.Windows_NT.zip');
-    expect(fs.existsSync(zipPath)).toBe(true);
-
-    const version: GemStoneVersion = {
-      version: '3.7.5',
-      fileName: 'GemStone64BitClient3.7.5-x86.Windows_NT.zip',
-      url: '', size: 0, date: '', downloaded: true, extracted: false,
-    };
-    await manager.deleteWindowsClientDownload(version);
-    expect(fs.existsSync(zipPath)).toBe(false);
-  });
-
-  it('does nothing when zip does not exist', async () => {
-    const storage = new SysadminStorage();
-    const manager = new VersionManager(storage);
-
-    const version: GemStoneVersion = {
-      version: '9.9.9',
-      fileName: 'GemStone64BitClient9.9.9-x86.Windows_NT.zip',
-      url: '', size: 0, date: '', downloaded: false, extracted: false,
-    };
-    await manager.deleteWindowsClientDownload(version); // should not throw
   });
 });
 
@@ -345,46 +242,91 @@ describe('VersionManager.deleteWindowsClientExtracted', () => {
   });
 });
 
-// ── VersionManager.extractWindowsClient ───────────────────
+// ── VersionManager.fetchAvailableVersions (client state) ──
 
-describe('VersionManager.extractWindowsClient', () => {
-  it('uses tar for extraction, not PowerShell', async () => {
-    createWindowsClientZip('3.7.5');
+describe('VersionManager.fetchAvailableVersions (client state)', () => {
+  it('marks a version as clientExtracted when the client directory exists', async () => {
+    // Set platform to win32 so the Windows-client scan kicks in
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    try {
+      createWindowsClientDir('3.7.5');
+      const storage = new SysadminStorage();
+      const manager = new VersionManager(storage);
+      const html =
+        '<a href="GemStone64Bit3.7.5-x86_64.Linux.zip">file</a>  12-Mar-2026 10:00  100000000';
+      vi.spyOn(manager as any, 'fetchUrl').mockResolvedValue(html);
+
+      const versions = await manager.fetchAvailableVersions();
+      const v = versions.find(x => x.version === '3.7.5');
+      expect(v?.clientExtracted).toBe(true);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+    }
+  });
+});
+
+// ── VersionManager.downloadAndExtractWindowsClient ────────
+
+describe('VersionManager.downloadAndExtractWindowsClient', () => {
+  const noopToken = { isCancellationRequested: false, onCancellationRequested: () => ({ dispose: () => {} }) } as any;
+
+  it('throws when version is empty', async () => {
     const storage = new SysadminStorage();
     const manager = new VersionManager(storage);
+    await expect(
+      manager.downloadAndExtractWindowsClient('', { report: vi.fn() }, noopToken),
+    ).rejects.toThrow(/no GemStone version/i);
+  });
 
-    const version: GemStoneVersion = {
-      version: '3.7.5',
-      fileName: 'GemStone64BitClient3.7.5-x86.Windows_NT.zip',
-      url: '', size: 0, date: '', downloaded: true, extracted: false,
-    };
-    const progress = { report: vi.fn() };
-    await manager.extractWindowsClient(version, progress);
+  it('throws when version is whitespace', async () => {
+    const storage = new SysadminStorage();
+    const manager = new VersionManager(storage);
+    await expect(
+      manager.downloadAndExtractWindowsClient('   ', { report: vi.fn() }, noopToken),
+    ).rejects.toThrow(/no GemStone version/i);
+  });
 
+  it('translates HTTP 404 into a friendly message pointing at the base URL', async () => {
+    const storage = new SysadminStorage();
+    const manager = new VersionManager(storage);
+    vi.spyOn(manager as any, 'downloadFile').mockRejectedValue(
+      new Error('HTTP 404 downloading https://example/'),
+    );
+    await expect(
+      manager.downloadAndExtractWindowsClient('9.9.9', { report: vi.fn() }, noopToken),
+    ).rejects.toThrow(/No Windows client distribution has been published for GemStone 9\.9\.9/);
+  });
+
+  it('does not mask non-404 download errors', async () => {
+    const storage = new SysadminStorage();
+    const manager = new VersionManager(storage);
+    vi.spyOn(manager as any, 'downloadFile').mockRejectedValue(new Error('ECONNREFUSED'));
+    await expect(
+      manager.downloadAndExtractWindowsClient('3.7.5', { report: vi.fn() }, noopToken),
+    ).rejects.toThrow(/ECONNREFUSED/);
+  });
+
+  it('downloads, extracts with tar, and removes the zip on success', async () => {
+    const storage = new SysadminStorage();
+    const manager = new VersionManager(storage);
+    const zipPath = path.join(tmpDir, 'GemStone64BitClient3.7.5-x86.Windows_NT.zip');
+    vi.spyOn(manager as any, 'downloadFile').mockImplementation(async () => {
+      // Simulate the download by dropping a file at the expected location.
+      fs.writeFileSync(zipPath, '');
+    });
+
+    await manager.downloadAndExtractWindowsClient('3.7.5', { report: vi.fn() }, noopToken);
+
+    // Extraction used tar, not PowerShell
     expect(execSync).toHaveBeenCalledWith(
       expect.stringContaining('tar -xf'),
       expect.anything(),
     );
-    // Ensure we don't use PowerShell (which can be blocked by execution policy)
-    const calls = vi.mocked(execSync).mock.calls;
-    for (const call of calls) {
+    for (const call of vi.mocked(execSync).mock.calls) {
       expect(String(call[0]).toLowerCase()).not.toContain('powershell');
     }
-  });
-
-  it('reports progress', async () => {
-    createWindowsClientZip('3.7.5');
-    const storage = new SysadminStorage();
-    const manager = new VersionManager(storage);
-
-    const version: GemStoneVersion = {
-      version: '3.7.5',
-      fileName: 'GemStone64BitClient3.7.5-x86.Windows_NT.zip',
-      url: '', size: 0, date: '', downloaded: true, extracted: false,
-    };
-    const progress = { report: vi.fn() };
-    await manager.extractWindowsClient(version, progress);
-
-    expect(progress.report).toHaveBeenCalledWith({ message: 'Extracting zip...' });
+    // Zip cleaned up after extract
+    expect(fs.existsSync(zipPath)).toBe(false);
   });
 });

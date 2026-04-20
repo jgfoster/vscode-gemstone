@@ -1,11 +1,21 @@
 import * as vscode from 'vscode';
 import { GemStoneVersion } from './sysadminTypes';
 import { VersionManager } from './versionManager';
+import { isWindows, getWslInfo } from './wslBridge';
 
 function formatSize(bytes: number): string {
   if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
   if (bytes >= 1_000_000) return `${Math.round(bytes / 1_000_000)} MB`;
   return `${Math.round(bytes / 1_000)} KB`;
+}
+
+/**
+ * True when server management isn't available in this session — the Versions
+ * view reduces to a Windows-client-only catalog. The row icon then reflects
+ * client state instead of server state.
+ */
+function isClientOnlyMode(): boolean {
+  return isWindows() && !getWslInfo().available;
 }
 
 export class VersionItem extends vscode.TreeItem {
@@ -19,25 +29,49 @@ export class VersionItem extends vscode.TreeItem {
       this.tooltip = version.buildDescription
         ? `${version.version} — local build\n${version.buildDescription}`
         : `${version.version} — local build`;
-    } else {
-      this.description = `${formatSize(version.size)} | ${version.date}`;
+      return;
+    }
 
-      let ctx = 'gemstoneVersion';
-      if (version.downloaded) ctx += 'Downloaded';
-      if (version.extracted) ctx += 'Extracted';
-      this.contextValue = ctx;
+    const clientOnly = isClientOnlyMode();
+    const sizeLabel = version.size > 0 ? formatSize(version.size) : '';
+    this.description = [sizeLabel, version.date].filter(Boolean).join(' | ');
 
-      if (version.extracted) {
+    // Independent flag suffixes so `when` clauses can match each state with a
+    // simple substring regex (e.g. /ServerExtracted/) without worrying about
+    // cross-state overlap.
+    let ctx = 'gemstoneVersion';
+    if (version.downloaded) ctx += 'ServerDownloaded';
+    if (version.extracted) ctx += 'ServerExtracted';
+    if (version.clientExtracted) ctx += 'ClientExtracted';
+    this.contextValue = ctx;
+
+    const tooltipBits: string[] = [version.version];
+    if (clientOnly) {
+      // Windows-no-WSL: icon reflects Windows-client state only.
+      if (version.clientExtracted) {
         this.iconPath = new vscode.ThemeIcon('check', new vscode.ThemeColor('testing.iconPassed'));
-        this.tooltip = `${version.version} — extracted and ready to use`;
-      } else if (version.downloaded) {
-        this.iconPath = new vscode.ThemeIcon('cloud-download');
-        this.tooltip = `${version.version} — downloaded, not yet extracted`;
+        tooltipBits.push('Windows client extracted');
       } else {
         this.iconPath = new vscode.ThemeIcon('cloud');
-        this.tooltip = `${version.version} — available for download`;
+        tooltipBits.push('Windows client available for download');
+      }
+    } else {
+      // Server state drives the primary icon.
+      if (version.extracted) {
+        this.iconPath = new vscode.ThemeIcon('check', new vscode.ThemeColor('testing.iconPassed'));
+        tooltipBits.push('extracted and ready to use');
+      } else if (version.downloaded) {
+        this.iconPath = new vscode.ThemeIcon('cloud-download');
+        tooltipBits.push('downloaded, not yet extracted');
+      } else {
+        this.iconPath = new vscode.ThemeIcon('cloud');
+        tooltipBits.push('available for download');
+      }
+      if (isWindows() && version.clientExtracted) {
+        tooltipBits.push('Windows client extracted');
       }
     }
+    this.tooltip = tooltipBits.join(' — ');
   }
 }
 

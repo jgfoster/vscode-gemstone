@@ -158,7 +158,7 @@ Open with **Cmd+; B** (Ctrl+; B) or from a session's inline button. The browser 
 - **Method Categories** — method categories with `** ALL METHODS **`
 - **Methods** — method selectors
 
-Click a method to view and edit its source. **Cmd+S** compiles changes back to GemStone. Class definitions and comments are also editable.
+Click a method to view and edit its source. **Cmd+S** (Ctrl+S) compiles changes back to GemStone. Class definitions and comments are also editable.
 
 Context menu operations include:
 
@@ -181,7 +181,7 @@ The **Inspector** sidebar view displays GemStone objects with drill-down into na
 - **Search Method Source** — full-text search across method source code
 - **Class Hierarchy** — view superclass chain and subclasses
 - **Workspace Symbol** (Cmd+T / Ctrl+T) — search classes and methods across both local files and the active GemStone session
-- **Go to Definition** (Cmd+Click / F12) — jump to implementors of a selector or a class definition
+- **Go to Definition** (Cmd+Click / Ctrl+Click / F12) — jump to implementors of a selector or a class definition
 
 ### Debugging
 

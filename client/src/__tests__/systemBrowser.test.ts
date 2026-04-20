@@ -48,6 +48,7 @@ vi.mock('fs', async () => {
 
 import * as fs from 'fs';
 
+import * as path from 'path';
 import { window, workspace, ViewColumn, TextEditorRevealType, Range, Selection, Position, commands, __setConfig, __resetConfig } from '../__mocks__/vscode';
 import { SystemBrowser, extractSelector } from '../systemBrowser';
 import * as queries from '../browserQueries';
@@ -57,6 +58,8 @@ import type { ActiveSession } from '../sessionManager';
 import type { ExportManager } from '../exportManager';
 
 // ── Helpers ──────────────────────────────────────────────────
+
+const SESSION_ROOT = path.join('/tmp', 'gemstone', 'localhost', 'gs64stone', 'DataCurator');
 
 function makeSession(id = 1, label = 'test'): ActiveSession {
   return {
@@ -69,7 +72,7 @@ function makeSession(id = 1, label = 'test'): ActiveSession {
   } as unknown as ActiveSession;
 }
 
-function makeExportManager(sessionRoot: string | undefined = '/tmp/gemstone/localhost/gs64stone/DataCurator'): ExportManager {
+function makeExportManager(sessionRoot: string | undefined = SESSION_ROOT): ExportManager {
   return {
     getSessionRoot: vi.fn(() => sessionRoot),
   } as unknown as ExportManager;
@@ -717,7 +720,7 @@ describe('SystemBrowser', () => {
       await messageHandler({ command: 'ctxAddDictionary' });
 
       expect(fs.mkdirSync).toHaveBeenCalledWith(
-        '/tmp/gemstone/localhost/gs64stone/DataCurator/3-NewDict',
+        path.join(SESSION_ROOT, '3-NewDict'),
         { recursive: true },
       );
     });
@@ -811,7 +814,7 @@ describe('SystemBrowser', () => {
       await messageHandler({ command: 'ctxRemoveDictionary' });
 
       expect(fs.rmSync).toHaveBeenCalledWith(
-        '/tmp/gemstone/localhost/gs64stone/DataCurator/1-UserGlobals',
+        path.join(SESSION_ROOT, '1-UserGlobals'),
         { recursive: true, force: true },
       );
     });

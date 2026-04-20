@@ -7,6 +7,7 @@ import { SysadminStorage } from './sysadminStorage';
 import { GemStoneVersion } from './sysadminTypes';
 import { appendSysadmin, showSysadmin } from './sysadminChannel';
 import { needsWsl, wslSpawn, wslExecSync } from './wslBridge';
+import { wslExistsSync } from './wslFs';
 
 const WIN_CLIENT_BASE_URL = 'https://downloads.gemtalksystems.com/pub/GemStone64/';
 
@@ -15,11 +16,8 @@ export class VersionManager {
 
   /** Fetch available versions from the downloads page */
   async fetchAvailableVersions(): Promise<GemStoneVersion[]> {
-    const platformKey = this.storage.getPlatformKey();
-    if (!platformKey) {
-      throw new Error(`Unsupported platform: ${process.platform} ${process.arch}`);
-    }
-    const ext = this.storage.getDownloadExtension();
+    const platformKey = this.storage.getCatalogPlatformKey();
+    const ext = platformKey.endsWith('.Darwin') ? 'dmg' : 'zip';
     const url = `https://downloads.gemtalksystems.com/platforms/${platformKey}/`;
     const html = await this.fetchUrl(url);
 
@@ -30,26 +28,30 @@ export class VersionManager {
       'g',
     );
 
-    const downloaded = this.storage.getDownloadedFiles();
-    const extractedVersions = new Set(this.storage.getExtractedVersions());
+    const hasLocalServer = this.storage.getPlatformKey() !== undefined;
+    const downloaded = hasLocalServer ? this.storage.getDownloadedFiles() : new Map<string, number>();
+    const extractedInfos = hasLocalServer ? this.storage.getExtractedVersionInfos() : [];
+    const extractedMap = new Map(extractedInfos.map(e => [e.version, e.isLocal]));
+    const clientExtracted = new Set(
+      process.platform === 'win32' ? this.storage.getExtractedWindowsClientVersions() : [],
+    );
 
     // Add local (symlinked) versions first
-    for (const ver of extractedVersions) {
-      if (this.storage.isLocalVersion(ver)) {
-        const gsPath = this.storage.getGemstonePath(ver);
-        const info = gsPath ? SysadminStorage.readVersionTxt(gsPath) : undefined;
-        versions.push({
-          version: ver,
-          fileName: '',
-          url: '',
-          size: 0,
-          date: info?.date ?? '',
-          downloaded: false,
-          extracted: true,
-          local: true,
-          buildDescription: info?.description,
-        });
-      }
+    for (const info of extractedInfos) {
+      if (!info.isLocal) continue;
+      const gsPath = this.storage.getGemstonePath(info.version);
+      const txt = gsPath ? SysadminStorage.readVersionTxt(gsPath) : undefined;
+      versions.push({
+        version: info.version,
+        fileName: '',
+        url: '',
+        size: 0,
+        date: txt?.date ?? '',
+        downloaded: false,
+        extracted: true,
+        local: true,
+        buildDescription: txt?.description,
+      });
     }
 
     let match;
@@ -59,6 +61,7 @@ export class VersionManager {
       const date = match[3];
       const size = parseInt(match[4], 10);
       const isDownloaded = downloaded.has(version) && downloaded.get(version) === size;
+      const extractedKind = extractedMap.get(version);
       versions.push({
         version,
         fileName,
@@ -66,7 +69,8 @@ export class VersionManager {
         size,
         date,
         downloaded: isDownloaded,
-        extracted: extractedVersions.has(version) && !this.storage.isLocalVersion(version),
+        extracted: extractedKind === false, // dir, not symlink
+        clientExtracted: clientExtracted.has(version),
       });
     }
 
@@ -204,17 +208,21 @@ export class VersionManager {
     version: GemStoneVersion,
     progress: vscode.Progress<{ message?: string }>,
   ): Promise<void> {
-    if (process.platform === 'darwin') {
-      const rootPath = this.storage.getRootPath();
-      const filePath = path.join(rootPath, version.fileName);
-      await this.extractDmg(filePath, rootPath, progress);
-    } else {
-      // Linux and Windows (via WSL) both use zip
-      const rootPath = needsWsl()
-        ? this.storage.getWslRootPath()
-        : this.storage.getRootPath();
-      const filePath = `${rootPath}/${version.fileName}`;
-      await this.extractZip(filePath, rootPath, progress);
+    try {
+      if (process.platform === 'darwin') {
+        const rootPath = this.storage.getRootPath();
+        const filePath = path.join(rootPath, version.fileName);
+        await this.extractDmg(filePath, rootPath, progress);
+      } else {
+        // Linux and Windows (via WSL) both use zip
+        const rootPath = needsWsl()
+          ? this.storage.getWslRootPath()
+          : this.storage.getRootPath();
+        const filePath = `${rootPath}/${version.fileName}`;
+        await this.extractZip(filePath, rootPath, progress);
+      }
+    } finally {
+      this.storage.invalidateExtractedCache();
     }
   }
 
@@ -263,7 +271,50 @@ export class VersionManager {
   ): Promise<void> {
     progress.report({ message: 'Extracting zip...' });
     if (needsWsl()) {
-      wslExecSync(`unzip -o "${zipPath}" -d "${destDir}"`);
+      // WSL distros (Ubuntu, Debian) usually don't ship unzip, but python3 is
+      // nearly always present. Try unzip first; on "command not found" fall
+      // back to python3 -m zipfile.
+      const unzip = await this.runWslExtract('unzip', ['-o', '-q', zipPath, '-d', destDir]);
+      if (unzip.code === 0) {
+        appendSysadmin(`Extracted ${path.basename(zipPath)} to ${destDir}`);
+        return;
+      }
+      if (unzip.code !== 127) {
+        throw new Error(
+          `unzip failed with exit code ${unzip.code}` +
+          (unzip.stderr ? `: ${unzip.stderr.trim().split('\n').slice(-3).join(' | ')}` : ''),
+        );
+      }
+      // Unlike `python3 -m zipfile -e`, this preserves the Unix mode bits
+      // recorded in each zip entry, so extracted binaries keep their +x bit.
+      // Two-pass: extract everything first, then chmod in reverse depth order
+      // so a locked-down dir mode (e.g. 0o555) doesn't block writes into it.
+      const pyScript =
+        'import zipfile,os,sys\n' +
+        'p=sys.argv[2]\n' +
+        'with zipfile.ZipFile(sys.argv[1]) as z:\n' +
+        '  infos=z.infolist()\n' +
+        '  z.extractall(p)\n' +
+        '  for i in sorted(infos,key=lambda x:-len(x.filename)):\n' +
+        '    m=(i.external_attr>>16)&0o7777\n' +
+        '    if not m: continue\n' +
+        '    try: os.chmod(os.path.join(p,i.filename),m)\n' +
+        '    except OSError: pass\n';
+      const py = await this.runWslExtract('python3', ['-c', pyScript, zipPath, destDir]);
+      if (py.code === 0) {
+        appendSysadmin(`Extracted ${path.basename(zipPath)} to ${destDir} (via python3)`);
+        return;
+      }
+      if (py.code === 127) {
+        throw new Error(
+          "Neither 'unzip' nor 'python3' is available in your WSL distro. " +
+          "Install one with: wsl -e sudo apt-get install -y unzip",
+        );
+      }
+      throw new Error(
+        `python3 zipfile extract failed with exit code ${py.code}` +
+        (py.stderr ? `: ${py.stderr.trim().split('\n').slice(-3).join(' | ')}` : ''),
+      );
     } else {
       const result = spawnSync('unzip', ['-o', zipPath, '-d', destDir], { stdio: 'ignore' });
       if (result.error) {
@@ -276,8 +327,31 @@ export class VersionManager {
     appendSysadmin(`Extracted ${path.basename(zipPath)} to ${destDir}`);
   }
 
+  private runWslExtract(
+    cmd: string,
+    args: string[],
+  ): Promise<{ code: number; stderr: string }> {
+    return new Promise((resolve, reject) => {
+      const proc = wslSpawn(cmd, args);
+      let stderr = '';
+      proc.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+      proc.on('close', (code) => resolve({ code: code ?? 1, stderr }));
+      proc.on('error', reject);
+    });
+  }
+
   /** Delete a downloaded file */
   async deleteDownload(version: GemStoneVersion): Promise<void> {
+    if (needsWsl()) {
+      const wslFilePath = `${this.storage.getWslRootPath()}/${version.fileName}`;
+      try {
+        wslExecSync(`rm -f "${wslFilePath}"`);
+        appendSysadmin(`Deleted download: ${version.fileName}`);
+      } catch {
+        /* file may not exist */
+      }
+      return;
+    }
     const filePath = path.join(this.storage.getRootPath(), version.fileName);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
@@ -288,10 +362,16 @@ export class VersionManager {
   /** Delete an extracted version directory */
   async deleteExtracted(version: GemStoneVersion): Promise<void> {
     const gsPath = this.storage.getGemstonePath(version.version);
-    if (gsPath && fs.existsSync(gsPath)) {
+    if (gsPath && wslExistsSync(gsPath)) {
       // Safety: if this is a symlink (local version), only remove the link
       if (this.storage.isLocalVersion(version.version)) {
-        fs.unlinkSync(gsPath);
+        if (needsWsl()) {
+          const wslPath = this.storage.getWslGemstonePath(version.version);
+          if (wslPath) wslExecSync(`rm -f "${wslPath}"`);
+        } else {
+          fs.unlinkSync(gsPath);
+        }
+        this.storage.invalidateExtractedCache();
         appendSysadmin(`Unregistered local version: ${version.version}`);
         return;
       }
@@ -305,75 +385,62 @@ export class VersionManager {
         execSync(`chmod -R u+w "${gsPath}"`);
         fs.rmSync(gsPath, { recursive: true });
       }
+      this.storage.invalidateExtractedCache();
       appendSysadmin(`Deleted extracted version: ${path.basename(gsPath)}`);
     }
   }
 
   // ── Windows client distribution ────────────────────────────
 
-  /** Fetch available Windows client versions from the downloads page */
-  async fetchAvailableWindowsClientVersions(): Promise<GemStoneVersion[]> {
-    const html = await this.fetchUrl(WIN_CLIENT_BASE_URL);
-
-    // Parse version directories from the listing (e.g., href="3.7.5/")
-    const versionRegex = /href="(\d+\.\d+(?:\.\d+)*)\/?"/g;
-    const versionSet = new Set<string>();
-    let match;
-    while ((match = versionRegex.exec(html)) !== null) {
-      versionSet.add(match[1]);
-    }
-
-    const downloaded = this.storage.getDownloadedWindowsClientFiles();
-    const extractedVersions = new Set(this.storage.getExtractedWindowsClientVersions());
-
-    const versions: GemStoneVersion[] = [];
-    for (const version of versionSet) {
-      const fileName = `GemStone64BitClient${version}-x86.Windows_NT.zip`;
-      const url = `${WIN_CLIENT_BASE_URL}${version}/${fileName}`;
-      versions.push({
-        version,
-        fileName,
-        url,
-        size: 0,
-        date: '',
-        downloaded: downloaded.has(version),
-        extracted: extractedVersions.has(version),
-      });
-    }
-
-    versions.sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }));
-    return versions;
+  /** Build the canonical Windows-client zip filename and download URL for a version. */
+  static windowsClientArtifact(version: string): { fileName: string; url: string } {
+    const fileName = `GemStone64BitClient${version}-x86.Windows_NT.zip`;
+    return { fileName, url: `${WIN_CLIENT_BASE_URL}${version}/${fileName}` };
   }
 
-  /** Download a Windows client version (always uses native HTTPS, not WSL) */
-  async downloadWindowsClient(
-    version: GemStoneVersion,
+  /**
+   * Download, extract, and clean up the Windows client distribution for `version`.
+   *
+   * On HTTP 404 (GemTalk hasn't published a client for this version), throws a
+   * friendly error the caller can show verbatim. The zip is always deleted after
+   * a successful extract — the client distribution is small enough that keeping
+   * it around doesn't add value.
+   */
+  async downloadAndExtractWindowsClient(
+    version: string,
     progress: vscode.Progress<{ message?: string; increment?: number }>,
     token: vscode.CancellationToken,
   ): Promise<void> {
+    if (!version || !version.trim()) {
+      throw new Error('Cannot download Windows client: no GemStone version specified.');
+    }
     this.storage.ensureNativeRootPath();
-    const targetPath = path.join(this.storage.getNativeRootPath(), version.fileName);
-    return this.downloadFile(version.url, targetPath, progress, token);
-  }
-
-  /** Extract a downloaded Windows client zip using tar (built into Windows 10+) */
-  async extractWindowsClient(
-    version: GemStoneVersion,
-    progress: vscode.Progress<{ message?: string }>,
-  ): Promise<void> {
     const rootPath = this.storage.getNativeRootPath();
-    const zipPath = path.join(rootPath, version.fileName);
-    progress.report({ message: 'Extracting zip...' });
-    execSync(`tar -xf "${zipPath}" -C "${rootPath}"`, { stdio: 'ignore' });
-    appendSysadmin(`Extracted Windows client: ${version.fileName}`);
-  }
+    const { fileName, url } = VersionManager.windowsClientArtifact(version);
+    const zipPath = path.join(rootPath, fileName);
 
-  /** Delete a downloaded Windows client zip */
-  async deleteWindowsClientDownload(version: GemStoneVersion): Promise<void> {
-    const filePath = path.join(this.storage.getNativeRootPath(), version.fileName);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-      appendSysadmin(`Deleted Windows client download: ${version.fileName}`);
+    progress.report({ message: 'Downloading...' });
+    try {
+      await this.downloadFile(url, zipPath, progress, token);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/HTTP 404/.test(msg)) {
+        throw new Error(
+          `No Windows client distribution has been published for GemStone ${version}. ` +
+            `Check ${WIN_CLIENT_BASE_URL} for available versions.`,
+        );
+      }
+      throw e;
+    }
+
+    try {
+      progress.report({ message: 'Extracting...' });
+      execSync(`tar -xf "${zipPath}" -C "${rootPath}"`, { stdio: 'ignore' });
+      appendSysadmin(`Extracted Windows client: ${fileName}`);
+    } finally {
+      if (fs.existsSync(zipPath)) {
+        try { fs.unlinkSync(zipPath); } catch { /* best effort */ }
+      }
     }
   }
 

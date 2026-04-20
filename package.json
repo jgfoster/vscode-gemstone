@@ -2,7 +2,7 @@
   "name": "gemstone-ide",
   "displayName": "Jasper: A GemStone Smalltalk IDE",
   "description": "GemStone/S IDE for Visual Studio Code",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "publisher": "gemtalksystems",
   "license": "MIT",
   "author": "James Foster",
@@ -250,7 +250,7 @@
           "name": "Configure OS",
           "type": "tree",
           "icon": "$(memory)",
-          "when": "isMac || isLinux",
+          "when": "isMac || isLinux || gemstone.isWindows",
           "visibility": "collapsed"
         },
         {
@@ -294,17 +294,17 @@
     "viewsWelcome": [
       {
         "view": "gemstoneInspector",
-        "contents": "No objects inspected yet.\nSelect code and press Cmd+I to inspect."
+        "contents": "No objects inspected yet.\nSelect code and press Cmd+I to inspect.",
+        "when": "isMac"
+      },
+      {
+        "view": "gemstoneInspector",
+        "contents": "No objects inspected yet.\nSelect code and press Ctrl+I to inspect.",
+        "when": "!isMac"
       },
       {
         "view": "gemstoneVersions",
-        "contents": "GemStone system administration requires Windows Subsystem for Linux (WSL2).\n[Install WSL](https://learn.microsoft.com/en-us/windows/wsl/install)",
-        "when": "gemstone.isWindows && !gemstone.wslAvailable"
-      },
-      {
-        "view": "gemstoneVersions",
-        "contents": "Loading versions...\n[Refresh](command:gemstone.refreshVersions)",
-        "when": "!gemstone.isWindows || gemstone.wslAvailable"
+        "contents": "Loading versions...\n[Refresh](command:gemstone.refreshVersions)"
       },
       {
         "view": "gemstoneDatabases",
@@ -532,13 +532,30 @@
       },
       {
         "command": "gemstone.downloadWindowsClient",
-        "title": "Download Windows Client…",
+        "title": "Install Windows Client",
         "category": "GemStone Admin",
         "icon": "$(desktop-download)"
       },
       {
+        "command": "gemstone.openWindowsClientFolder",
+        "title": "Open Windows Client Folder",
+        "category": "GemStone Admin",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "gemstone.deleteWindowsClientExtracted",
+        "title": "Delete Windows Client",
+        "category": "GemStone Admin",
+        "icon": "$(trash)"
+      },
+      {
         "command": "gemstone.quickSetup",
         "title": "Quick Setup",
+        "category": "GemStone"
+      },
+      {
+        "command": "gemstone.upgradeWsl2",
+        "title": "Upgrade to WSL 2",
         "category": "GemStone"
       },
       {
@@ -645,13 +662,8 @@
           "group": "navigation"
         },
         {
-          "command": "gemstone.downloadWindowsClient",
-          "when": "view == gemstoneVersions && gemstone.isWindows",
-          "group": "navigation@1"
-        },
-        {
           "command": "gemstone.registerLocalVersion",
-          "when": "view == gemstoneVersions",
+          "when": "view == gemstoneVersions && (!gemstone.isWindows || gemstone.wslAvailable)",
           "group": "navigation@2"
         },
         {
@@ -730,17 +742,17 @@
         },
         {
           "command": "gemstone.downloadVersion",
-          "when": "view == gemstoneVersions && viewItem == gemstoneVersion",
+          "when": "view == gemstoneVersions && viewItem =~ /^gemstoneVersion(ClientExtracted)?$/ && (!gemstone.isWindows || gemstone.wslAvailable)",
           "group": "inline@1"
         },
         {
           "command": "gemstone.extractVersion",
-          "when": "view == gemstoneVersions && viewItem == gemstoneVersionDownloaded",
+          "when": "view == gemstoneVersions && viewItem =~ /ServerDownloaded/",
           "group": "inline@2"
         },
         {
           "command": "gemstone.openVersionFolder",
-          "when": "view == gemstoneVersions && viewItem =~ /gemstoneVersion.*Extracted/",
+          "when": "view == gemstoneVersions && viewItem =~ /ServerExtracted/",
           "group": "inline@3"
         },
         {
@@ -749,17 +761,26 @@
           "group": "inline@1"
         },
         {
-          "command": "gemstone.extractVersion",
-          "when": "view == gemstoneVersions && viewItem == gemstoneVersionDownloadedExtracted",
-          "group": "inline@2"
+          "command": "gemstone.downloadWindowsClient",
+          "when": "view == gemstoneVersions && gemstone.isWindows && viewItem =~ /^gemstoneVersion(ServerDownloaded)?(ServerExtracted)?$/",
+          "group": "inline@4"
+        },
+        {
+          "command": "gemstone.openWindowsClientFolder",
+          "when": "view == gemstoneVersions && gemstone.isWindows && viewItem =~ /ClientExtracted/",
+          "group": "inline@5"
         },
         {
           "command": "gemstone.deleteDownload",
-          "when": "view == gemstoneVersions && viewItem =~ /gemstoneVersion.*Downloaded/"
+          "when": "view == gemstoneVersions && viewItem =~ /ServerDownloaded/"
         },
         {
           "command": "gemstone.deleteExtracted",
-          "when": "view == gemstoneVersions && viewItem =~ /gemstoneVersion.*Extracted/ && viewItem != gemstoneVersionLocal"
+          "when": "view == gemstoneVersions && viewItem =~ /ServerExtracted/ && viewItem != gemstoneVersionLocal"
+        },
+        {
+          "command": "gemstone.deleteWindowsClientExtracted",
+          "when": "view == gemstoneVersions && gemstone.isWindows && viewItem =~ /ClientExtracted/"
         },
         {
           "command": "gemstone.unregisterLocalVersion",
@@ -949,10 +970,10 @@
     "bundle": "node esbuild.mjs",
     "watch": "tsc -b -w client/tsconfig.json server/tsconfig.json",
     "test": "npm run test:server && npm run test:client && npm run test:mcp",
-    "test:server": "cd server && NODE_OPTIONS=--experimental-require-module npx vitest run",
-    "test:client": "cd client && NODE_OPTIONS=--experimental-require-module npx vitest run",
-    "test:mcp": "cd mcp-server && NODE_OPTIONS=--experimental-require-module npx vitest run",
-    "test:gci": "cd client && NODE_OPTIONS=--experimental-require-module npx vitest run --config vitest.gci.config.ts",
+    "test:server": "cd server && npx vitest run",
+    "test:client": "cd client && npx vitest run",
+    "test:mcp": "cd mcp-server && npx vitest run",
+    "test:gci": "cd client && npx vitest run --config vitest.gci.config.ts",
     "package": "vsce package"
   },
   "devDependencies": {

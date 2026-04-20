@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+const itUnlessWin32 = it.skipIf(process.platform === 'win32');
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -6,6 +8,7 @@ import * as os from 'os';
 vi.mock('vscode', () => import('../__mocks__/vscode'));
 vi.mock('../sysadminChannel', () => ({ appendSysadmin: vi.fn(), showSysadmin: vi.fn() }));
 vi.mock('../wslBridge', () => ({
+  isWindows: () => false,
   needsWsl: () => false,
   getWslInfo: () => ({ available: false }),
   wslPathToWindows: (p: string) => p,
@@ -92,7 +95,7 @@ describe('SysadminStorage.isLocalVersion', () => {
     storage = new SysadminStorage();
   });
 
-  it('returns true for a symlinked version directory', () => {
+  itUnlessWin32('returns true for a symlinked version directory', () => {
     const productDir = path.join(tmpDir, 'product');
     fs.mkdirSync(productDir);
     const suffix = storage.getPlatformSuffix();
@@ -124,7 +127,7 @@ describe('VersionManager.deleteExtracted', () => {
     manager = new VersionManager(storage);
   });
 
-  it('only removes the symlink, not the target directory', async () => {
+  itUnlessWin32('only removes the symlink, not the target directory', async () => {
     const productDir = path.join(tmpDir, 'product');
     fs.mkdirSync(productDir);
     fs.writeFileSync(path.join(productDir, 'sentinel.txt'), 'do not delete');
@@ -211,7 +214,7 @@ describe('VersionItem (local version)', () => {
 
     const item = new VersionItem(version);
 
-    expect(item.contextValue).toBe('gemstoneVersionDownloadedExtracted');
+    expect(item.contextValue).toBe('gemstoneVersionServerDownloadedServerExtracted');
     expect((item.iconPath as any).id).toBe('check');
   });
 });
@@ -219,7 +222,7 @@ describe('VersionItem (local version)', () => {
 // ── VersionManager.fetchAvailableVersions (local inclusion) ──
 
 describe('VersionManager.fetchAvailableVersions', () => {
-  it('includes local symlinked versions in the list', async () => {
+  itUnlessWin32('includes local symlinked versions in the list', async () => {
     const storage = new SysadminStorage();
     const manager = new VersionManager(storage);
 
@@ -245,7 +248,7 @@ describe('VersionManager.fetchAvailableVersions', () => {
     expect(versions[0].buildDescription).toContain('private build');
   });
 
-  it('does not mark remote versions as extracted when a local symlink has the same version', async () => {
+  itUnlessWin32('does not mark remote versions as extracted when a local symlink has the same version', async () => {
     const storage = new SysadminStorage();
     const manager = new VersionManager(storage);
     const suffix = storage.getPlatformSuffix();
@@ -280,7 +283,7 @@ describe('VersionManager.fetchAvailableVersions', () => {
     expect(versions[1].local).toBeUndefined();
   });
 
-  it('sorts versions newest-first with local versions interleaved correctly', async () => {
+  itUnlessWin32('sorts versions newest-first with local versions interleaved correctly', async () => {
     const storage = new SysadminStorage();
     const manager = new VersionManager(storage);
     const suffix = storage.getPlatformSuffix();
@@ -330,7 +333,7 @@ describe('GCI library auto-detection', () => {
     expect(fs.existsSync(candidate)).toBe(true);
   });
 
-  it('finds GCI library in symlinked local version', () => {
+  itUnlessWin32('finds GCI library in symlinked local version', () => {
     const storage = new SysadminStorage();
     const suffix = storage.getPlatformSuffix();
 

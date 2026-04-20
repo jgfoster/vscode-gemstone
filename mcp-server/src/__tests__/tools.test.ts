@@ -612,7 +612,7 @@ describe('tools', () => {
 
   describe('status', () => {
     it('reports session information', async () => {
-      const statusOutput = 'User: DataCurator\nStone: gs64stone\nVersion: 3.7.4\nSession ID: 1\nTransaction: active\nDirty objects: 0\n';
+      const statusOutput = 'User: DataCurator\nStone: gs64stone\nSession ID: 1\nTransaction: active\nUncommitted changes: no\n';
       vi.mocked(session.executeFetchString).mockReturnValue(statusOutput);
       const tool = server.getTool('status')!;
       const result = await tool.handler({});
@@ -621,9 +621,32 @@ describe('tools', () => {
       expect(code).toContain('myUserProfile');
       expect(code).toContain('stoneName');
       expect(code).toContain('inTransaction');
-      expect(code).toContain('modifiedObjects');
+      expect(code).toContain('needsCommit');
       expect(result.content[0].text).toContain('DataCurator');
       expect(result.content[0].text).toContain('gs64stone');
+    });
+
+    // Regression: nextPutAll: sends do: to its argument. If any value passed
+    // is a SmallInteger (as System stoneVersionReport was observed returning),
+    // GemStone raises "SmallInteger does not understand #do:". Every value
+    // must be coerced to a CharacterCollection first.
+    it('coerces every streamed value to a CharacterCollection', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('status')!;
+      await tool.handler({});
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+
+      // Each System-call result must be wrapped in asString or printString
+      // so a non-String return (SmallInteger, Array, ...) doesn't blow up.
+      expect(code).toMatch(/myUserProfile userId (asString|printString)/);
+      expect(code).toMatch(/stoneName (asString|printString)/);
+      expect(code).toMatch(/session printString/);
+      expect(code).toContain('needsCommit');
+      // stoneVersionReport returned a SmallInteger in 3.7.x (SmallInteger DNU
+      // do:); modifiedObjects isn't defined on System class in that version
+      // (System class DNU #modifiedObjects). Neither should be re-introduced.
+      expect(code).not.toContain('stoneVersionReport');
+      expect(code).not.toContain('modifiedObjects');
     });
   });
 });
