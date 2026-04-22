@@ -1,4 +1,7 @@
 import { execSync, spawn, ChildProcess, exec } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
@@ -13,7 +16,34 @@ export interface WslInfo {
   wslVersion: number | undefined;
 }
 
+/**
+ * Network-reachability details for connecting to services running inside WSL
+ * (e.g. NetLDI) from Windows. These change across wsl restarts and across
+ * edits to %USERPROFILE%\.wslconfig, so they're cached separately from WslInfo
+ * and can be invalidated on their own.
+ */
+export interface WslNetworkInfo {
+  /** True when %USERPROFILE%\.wslconfig enables `networkingMode=mirrored`,
+   *  which makes `localhost` on Windows reach services bound inside WSL. */
+  mirrored: boolean;
+  /** First IPv4 address reported by `hostname -I` inside the default distro,
+   *  or undefined if the probe failed. Unstable across `wsl --shutdown`. */
+  ip: string | undefined;
+  /** Best host string to use in a GemStone login when reaching a service
+   *  inside WSL: `'localhost'` under mirrored mode, otherwise the WSL IP.
+   *  Undefined only when both checks failed. */
+  netldiHost: string | undefined;
+  /** Parsed `wsl --version` → core WSL package version (not distro version).
+   *  Mirrored networking requires core >= 2.0. Undefined on older WSL where
+   *  `wsl --version` does not exist. */
+  wslCoreVersion: string | undefined;
+  /** True when the installed WSL core is >= 2.0 — the minimum that supports
+   *  networkingMode=mirrored. */
+  supportsMirrored: boolean;
+}
+
 let cachedWslInfo: WslInfo | undefined;
+let cachedWslNetworkInfo: WslNetworkInfo | undefined;
 
 /** Returns true if the extension is running on Windows */
 export function isWindows(): boolean {
@@ -108,6 +138,196 @@ export function getWslInfo(): WslInfo {
 
 export function invalidateWslCache(): void {
   cachedWslInfo = undefined;
+}
+
+/** Reset the WSL network-info cache. Call after a `wsl --shutdown` or after
+ *  the user edits `.wslconfig`, since both invalidate mirrored/IP state. */
+export function invalidateWslNetworkCache(): void {
+  cachedWslNetworkInfo = undefined;
+}
+
+/**
+ * Read the last cached network info, if any. Synchronous so tree-item
+ * tooltips can consume it at render time. Returns undefined until the first
+ * successful call to refreshWslNetworkInfo().
+ */
+export function getWslNetworkInfoCached(): WslNetworkInfo | undefined {
+  return cachedWslNetworkInfo;
+}
+
+/**
+ * Parse `%USERPROFILE%\.wslconfig` for `networkingMode=mirrored` in the
+ * [wsl2] section. Mirrored networking is a Windows-side setting (not
+ * /etc/wsl.conf), so this file is the authoritative source. Returns false
+ * when the file doesn't exist, has no [wsl2] section, or sets a different
+ * mode. Parser tolerates whitespace, comments (`#`/`;`), and case.
+ */
+export function parseWslConfigForMirrored(content: string): boolean {
+  let inWsl2 = false;
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#') || line.startsWith(';')) continue;
+    const section = line.match(/^\[([^\]]+)\]$/);
+    if (section) {
+      inWsl2 = section[1].trim().toLowerCase() === 'wsl2';
+      continue;
+    }
+    if (!inWsl2) continue;
+    const kv = line.match(/^([A-Za-z0-9_.-]+)\s*=\s*(.+?)\s*$/);
+    if (kv && kv[1].toLowerCase() === 'networkingmode') {
+      return kv[2].trim().toLowerCase() === 'mirrored';
+    }
+  }
+  return false;
+}
+
+function readWslConfigMirrored(): boolean {
+  try {
+    const configPath = path.join(os.homedir(), '.wslconfig');
+    const content = fs.readFileSync(configPath, 'utf-8');
+    return parseWslConfigForMirrored(content);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Probe `hostname -I` inside the default WSL distro and return the first
+ * IPv4 address, or undefined if the probe fails. The address is unstable
+ * across `wsl --shutdown`, so callers should refresh (not trust) it.
+ */
+export async function getWslIpAddressAsync(): Promise<string | undefined> {
+  if (!isWindows()) return undefined;
+  const stdout = await new Promise<string | undefined>((resolve) => {
+    exec('wsl.exe -e hostname -I', { timeout: 10000, encoding: 'utf-8' }, (err, out) => {
+      if (err) resolve(undefined);
+      else resolve(String(out));
+    });
+  });
+  if (stdout === undefined) return undefined;
+  const tokens = stdout.replace(/\0/g, '').trim().split(/\s+/);
+  for (const t of tokens) {
+    if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(t)) return t;
+  }
+  return undefined;
+}
+
+/**
+ * Parse the output of `wsl --version`. Returns the core package version
+ * (e.g. `"2.0.9.0"`) or undefined when the header line is missing.
+ * `wsl --version` was added in WSL core ~0.64; older installs produce an
+ * error that this parser never sees — caller handles that case.
+ *
+ * wsl.exe writes in UTF-16LE on most Windows builds, so strip NUL bytes
+ * before matching. The header line varies by locale, but the version
+ * token always appears after the first colon on a line containing "WSL".
+ */
+export function parseWslCoreVersion(raw: string): string | undefined {
+  const cleaned = String(raw).replace(/\0/g, '');
+  for (const line of cleaned.split(/\r?\n/)) {
+    // Match "WSL version: 2.0.9.0" (English) and localized equivalents.
+    const match = line.match(/(\d+\.\d+(?:\.\d+){0,2})/);
+    if (match && /WSL/i.test(line)) return match[1];
+  }
+  return undefined;
+}
+
+/** Return true when `version` is >= 2.0 — the minimum for mirrored mode. */
+export function isMirroredCapable(version: string | undefined): boolean {
+  if (!version) return false;
+  const parts = version.split('.').map((n) => parseInt(n, 10));
+  if (parts.length === 0 || Number.isNaN(parts[0])) return false;
+  return parts[0] >= 2;
+}
+
+export async function getWslCoreVersionAsync(): Promise<string | undefined> {
+  if (!isWindows()) return undefined;
+  const stdout = await new Promise<string | undefined>((resolve) => {
+    exec('wsl.exe --version', { timeout: 10000, encoding: 'utf-8' }, (err, out) => {
+      if (err) resolve(undefined);
+      else resolve(String(out));
+    });
+  });
+  if (stdout === undefined) return undefined;
+  return parseWslCoreVersion(stdout);
+}
+
+/**
+ * Refresh and return the current WSL network info. Safe to call repeatedly;
+ * each call re-probes. On non-Windows returns a disabled result.
+ */
+export async function refreshWslNetworkInfo(): Promise<WslNetworkInfo> {
+  if (!isWindows()) {
+    cachedWslNetworkInfo = {
+      mirrored: false, ip: undefined, netldiHost: undefined,
+      wslCoreVersion: undefined, supportsMirrored: false,
+    };
+    return cachedWslNetworkInfo;
+  }
+  const mirrored = readWslConfigMirrored();
+  const [ip, wslCoreVersion] = await Promise.all([
+    mirrored ? Promise.resolve(undefined) : getWslIpAddressAsync(),
+    getWslCoreVersionAsync(),
+  ]);
+  const netldiHost = mirrored ? 'localhost' : ip;
+  cachedWslNetworkInfo = {
+    mirrored, ip, netldiHost,
+    wslCoreVersion, supportsMirrored: isMirroredCapable(wslCoreVersion),
+  };
+  return cachedWslNetworkInfo;
+}
+
+/**
+ * Pure `.wslconfig` rewriter that sets `networkingMode=mirrored` in the
+ * [wsl2] section while preserving other keys, sections, comments, and line
+ * endings. Used by the "Enable mirrored networking" action and covered
+ * thoroughly by unit tests. Returns the new file content.
+ *
+ * Rules:
+ *  - If the file is empty or has no [wsl2] section, append a new one.
+ *  - If [wsl2] exists and already has `networkingMode=`, replace its value.
+ *  - If [wsl2] exists without the key, insert the key as the first line of
+ *    the section (directly under the [wsl2] header).
+ */
+export function updateWslConfigMirrored(content: string): string {
+  const lines = content.split(/\r?\n/);
+  // Preserve CRLF when the input used it; default to LF otherwise.
+  const eol = content.includes('\r\n') ? '\r\n' : '\n';
+
+  let wsl2Start = -1;
+  let wsl2End = lines.length;
+  let existingIdx = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    const section = trimmed.match(/^\[([^\]]+)\]$/);
+    if (section) {
+      if (wsl2Start !== -1) { wsl2End = i; break; }
+      if (section[1].trim().toLowerCase() === 'wsl2') wsl2Start = i;
+      continue;
+    }
+    if (wsl2Start !== -1) {
+      if (trimmed.startsWith('#') || trimmed.startsWith(';') || trimmed === '') continue;
+      const kv = trimmed.match(/^([A-Za-z0-9_.-]+)\s*=\s*.+$/);
+      if (kv && kv[1].toLowerCase() === 'networkingmode') { existingIdx = i; break; }
+    }
+  }
+
+  if (existingIdx !== -1) {
+    lines[existingIdx] = 'networkingMode=mirrored';
+    return lines.join(eol);
+  }
+
+  if (wsl2Start !== -1) {
+    lines.splice(wsl2Start + 1, 0, 'networkingMode=mirrored');
+    return lines.join(eol);
+  }
+
+  // No [wsl2] section anywhere — append. Preserve trailing newline when
+  // the input ended with one (split produces a trailing '' entry).
+  const hadTrailingNewline = content.length > 0 && /\r?\n$/.test(content);
+  const prefix = content.length === 0 ? '' : hadTrailingNewline ? content : content + eol;
+  return prefix + '[wsl2]' + eol + 'networkingMode=mirrored' + eol;
 }
 
 /**

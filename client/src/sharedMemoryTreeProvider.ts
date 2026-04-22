@@ -1,8 +1,18 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { exec } from 'child_process';
-import { needsWsl, getWslInfo, invalidateWslCache, wslExecSync } from './wslBridge';
+import {
+  needsWsl,
+  getWslInfo,
+  invalidateWslCache,
+  wslExecSync,
+  refreshWslNetworkInfo,
+  invalidateWslNetworkCache,
+  updateWslConfigMirrored,
+  WslNetworkInfo,
+} from './wslBridge';
 import { toWslPath } from './wslFs';
 
 function shQuote(s: string): string {
@@ -14,7 +24,34 @@ type OsConfigNode =
   | { kind: 'sharedMemoryStatus'; configured: boolean; gbLabel: string }
   | { kind: 'removeIpcStatus'; configured: boolean }
   | { kind: 'wslStatus'; distro: string; wslVersion: number | undefined }
+  | { kind: 'wslNetworkingStatus'; info: WslNetworkInfo }
+  | { kind: 'wslServicesStatus'; windowsHas: boolean; wslHas: boolean }
   | { kind: 'action'; text: string; command: string };
+
+/** Does `/etc/services` inside the default WSL distro have a
+ *  `gs64ldi <port>/tcp` entry? Routed through wslExecSync so the check
+ *  inspects the Linux distro, not any Windows file of the same name. */
+function wslServicesHasGs64ldi(): boolean {
+  try {
+    wslExecSync('grep -qE "^[[:space:]]*gs64ldi[[:space:]]+[0-9]+/tcp([[:space:]]|$)" /etc/services');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Does the Windows services file (drivers\etc\services) have a
+ *  `gs64ldi <port>/tcp` entry? */
+function windowsServicesHasGs64ldi(): boolean {
+  try {
+    const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+    const servicesPath = path.join(systemRoot, 'System32', 'drivers', 'etc', 'services');
+    const content = fs.readFileSync(servicesPath, 'utf-8');
+    return /^[ \t]*gs64ldi[ \t]+\d+\/tcp\b/m.test(content);
+  } catch {
+    return false;
+  }
+}
 
 /** Read the current sysctl shared memory values. */
 export function getSharedMemory(): Promise<{ shmmax: number; shmall: number } | undefined> {
@@ -144,6 +181,59 @@ export class OsConfigTreeProvider implements vscode.TreeDataProvider<OsConfigNod
       return item;
     }
 
+    if (node.kind === 'wslNetworkingStatus') {
+      const { mirrored, supportsMirrored, wslCoreVersion, ip } = node.info;
+      const label = mirrored
+        ? 'WSL networking: mirrored (localhost works)'
+        : supportsMirrored
+          ? 'WSL networking: NAT — localhost cannot reach WSL'
+          : 'WSL networking: NAT — mirrored mode requires WSL 2.0+';
+      const item = new vscode.TreeItem(
+        label,
+        mirrored ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Expanded,
+      );
+      item.iconPath = new vscode.ThemeIcon(
+        mirrored ? 'check' : 'warning',
+        new vscode.ThemeColor(mirrored ? 'testing.iconPassed' : 'problemsWarningIcon.foreground'),
+      );
+      if (mirrored) {
+        item.tooltip =
+          `GemStone logins can use 'localhost'.` +
+          (wslCoreVersion ? `\nWSL core version: ${wslCoreVersion}` : '');
+      } else if (supportsMirrored) {
+        item.tooltip =
+          'Without mirrored networking, GemStone logins must use the WSL IP ' +
+          `(currently ${ip ?? 'unknown'}), which changes across WSL restarts.`;
+      } else {
+        item.tooltip =
+          'Upgrade WSL to 2.0+ (`wsl --update` in an elevated shell) to enable mirrored networking.' +
+          (wslCoreVersion ? `\nCurrent WSL core version: ${wslCoreVersion}` : '');
+      }
+      return item;
+    }
+
+    if (node.kind === 'wslServicesStatus') {
+      const configured = node.windowsHas && node.wslHas;
+      const missingLabel = !node.windowsHas && !node.wslHas
+        ? 'Windows and WSL'
+        : !node.windowsHas ? 'Windows' : 'WSL';
+      const item = new vscode.TreeItem(
+        configured
+          ? 'Services: gs64ldi 50377/tcp (configured)'
+          : `Services: gs64ldi not in ${missingLabel} /etc/services`,
+        configured ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Expanded,
+      );
+      item.iconPath = new vscode.ThemeIcon(
+        configured ? 'check' : 'warning',
+        new vscode.ThemeColor(configured ? 'testing.iconPassed' : 'problemsWarningIcon.foreground'),
+      );
+      item.tooltip = configured
+        ? 'GemStone logins can name the port as "gs64ldi" on both Windows and WSL.'
+        : 'Without a services entry, NetLDI binds to a random port and logins must use the numeric port. ' +
+          'Writing "gs64ldi 50377/tcp" makes the port stable and addressable by name.';
+      return item;
+    }
+
     if (node.kind === 'removeIpcStatus') {
       const item = new vscode.TreeItem(
         node.configured ? 'RemoveIPC=no (configured)' : 'RemoveIPC not configured',
@@ -170,6 +260,10 @@ export class OsConfigTreeProvider implements vscode.TreeDataProvider<OsConfigNod
       'gemstone.runSetSharedMemory',
       'gemstone.runSetSharedMemoryLinux',
       'gemstone.runSetRemoveIPC',
+      'gemstone.updateWslCore',
+      'gemstone.writeWslHostsEntry',
+      'gemstone.writeServicesWindows',
+      'gemstone.writeServicesWsl',
     ].includes(node.command);
     if (isTerminal) {
       item.iconPath = new vscode.ThemeIcon('terminal');
@@ -177,9 +271,20 @@ export class OsConfigTreeProvider implements vscode.TreeDataProvider<OsConfigNod
         item.tooltip = 'Open a terminal and run: wsl --set-version <distro> 2';
       } else if (node.command === 'gemstone.runSetRemoveIPC') {
         item.tooltip = 'Open a terminal and run the setup script with sudo.';
+      } else if (node.command === 'gemstone.updateWslCore') {
+        item.tooltip = 'Open a terminal and run: wsl --update (requires elevation).';
+      } else if (node.command === 'gemstone.writeWslHostsEntry') {
+        item.tooltip = 'Write "<wsl-ip> wsl-linux" to C:\\Windows\\System32\\drivers\\etc\\hosts. Re-run after WSL restart.';
+      } else if (node.command === 'gemstone.writeServicesWindows') {
+        item.tooltip = 'Write "gs64ldi 50377/tcp" to the Windows services file.';
+      } else if (node.command === 'gemstone.writeServicesWsl') {
+        item.tooltip = 'Write "gs64ldi 50377/tcp" to /etc/services inside WSL.';
       } else {
         item.tooltip = 'Open a terminal and run the setup script with sudo. Changes take effect immediately; no restart required.';
       }
+    } else if (node.command === 'gemstone.enableMirroredNetworking') {
+      item.iconPath = new vscode.ThemeIcon('edit');
+      item.tooltip = 'Add networkingMode=mirrored to %USERPROFILE%\\.wslconfig, then restart WSL.';
     } else {
       item.iconPath = new vscode.ThemeIcon('info');
       if (node.command === 'gemstone.removeIpcInfo') {
@@ -204,6 +309,45 @@ export class OsConfigTreeProvider implements vscode.TreeDataProvider<OsConfigNod
       return [
         { kind: 'action', text: 'Upgrade to WSL 2', command: 'gemstone.upgradeWsl2' },
       ];
+    }
+
+    if (node.kind === 'wslNetworkingStatus' && !node.info.mirrored) {
+      const actions: OsConfigNode[] = [];
+      if (node.info.supportsMirrored) {
+        actions.push({
+          kind: 'action', text: 'Enable mirrored networking',
+          command: 'gemstone.enableMirroredNetworking',
+        });
+      } else {
+        actions.push({
+          kind: 'action', text: 'Update WSL (wsl --update)',
+          command: 'gemstone.updateWslCore',
+        });
+      }
+      // Hosts-file workaround is useful for anyone stuck on NAT — gives
+      // them a stable name (`wsl-linux`) even across WSL restarts.
+      actions.push({
+        kind: 'action', text: 'Write hosts file entry (wsl-linux, requires admin)',
+        command: 'gemstone.writeWslHostsEntry',
+      });
+      return actions;
+    }
+
+    if (node.kind === 'wslServicesStatus' && !(node.windowsHas && node.wslHas)) {
+      const actions: OsConfigNode[] = [];
+      if (!node.windowsHas) {
+        actions.push({
+          kind: 'action', text: 'Write Windows services entry (requires admin)',
+          command: 'gemstone.writeServicesWindows',
+        });
+      }
+      if (!node.wslHas) {
+        actions.push({
+          kind: 'action', text: 'Write WSL /etc/services entry (requires sudo)',
+          command: 'gemstone.writeServicesWsl',
+        });
+      }
+      return actions;
     }
 
     if (node.kind === 'sharedMemoryStatus' && !node.configured) {
@@ -241,6 +385,20 @@ export class OsConfigTreeProvider implements vscode.TreeDataProvider<OsConfigNod
       // Only inspect the WSL distro once it's on WSL 2; earlier versions
       // need to upgrade first, so extra warnings would just be noise.
       showLinuxChecks = info.wslVersion === 2;
+      if (showLinuxChecks) {
+        // Surface mirrored-networking state so users see why `localhost`
+        // does (or does not) reach GemStone services inside WSL.
+        const netInfo = await refreshWslNetworkInfo();
+        nodes.push({ kind: 'wslNetworkingStatus', info: netInfo });
+        // A configured `gs64ldi` services entry lets NetLDI bind to the
+        // conventional port 50377 (instead of a random one) and lets
+        // logins name the port. We check both sides — Windows and WSL.
+        nodes.push({
+          kind: 'wslServicesStatus',
+          windowsHas: windowsServicesHasGs64ldi(),
+          wslHas: wslServicesHasGs64ldi(),
+        });
+      }
     }
 
     if (showLinuxChecks || process.platform === 'darwin') {
@@ -263,6 +421,26 @@ export class OsConfigTreeProvider implements vscode.TreeDataProvider<OsConfigNod
 
     this._cache = nodes;
     this._onDidChangeTreeData.fire(undefined);
+  }
+
+  /**
+   * Open a PowerShell terminal and invoke a setup script that self-elevates
+   * via UAC. The terminal stays open so the user can read output; we refresh
+   * the tree when it closes so the new configuration is reflected.
+   */
+  private runPowerShellSetup(name: string, scriptPath: string): void {
+    const terminal = vscode.window.createTerminal({ name, shellPath: 'powershell.exe' });
+    terminal.show();
+    // -NoProfile keeps the PS startup deterministic; -ExecutionPolicy Bypass
+    // lets the file run without adjusting the user's system-wide policy.
+    terminal.sendText(`& powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"`);
+    const disposable = vscode.window.onDidCloseTerminal((closed) => {
+      if (closed === terminal) {
+        disposable.dispose();
+        invalidateWslNetworkCache();
+        this.refresh();
+      }
+    });
   }
 
   /**
@@ -333,6 +511,83 @@ export class OsConfigTreeProvider implements vscode.TreeDataProvider<OsConfigNod
           'To apply: restart your computer, or run: sudo systemctl restart systemd-logind',
         );
       }),
+      vscode.commands.registerCommand('gemstone.enableMirroredNetworking', () => this.enableMirroredNetworking()),
+      vscode.commands.registerCommand('gemstone.writeWslHostsEntry', () => {
+        const scriptPath = path.join(this.extensionPath, 'resources', 'setWslHostsEntry.ps1');
+        this.runPowerShellSetup('GemStone: Windows Hosts Setup', scriptPath);
+      }),
+      vscode.commands.registerCommand('gemstone.writeServicesWindows', () => {
+        const scriptPath = path.join(this.extensionPath, 'resources', 'setServicesWindows.ps1');
+        this.runPowerShellSetup('GemStone: Windows Services Setup', scriptPath);
+      }),
+      vscode.commands.registerCommand('gemstone.writeServicesWsl', () => {
+        const scriptPath = path.join(this.extensionPath, 'resources', 'setServicesLinux.sh');
+        const terminal = this.createSetupTerminal('GemStone: WSL Services Setup', scriptPath);
+        const disposable = vscode.window.onDidCloseTerminal((closed) => {
+          if (closed === terminal) { disposable.dispose(); this.refresh(); }
+        });
+      }),
+      vscode.commands.registerCommand('gemstone.updateWslCore', () => {
+        const terminal = vscode.window.createTerminal('GemStone: WSL Update');
+        terminal.show();
+        // `wsl --update` needs an elevated shell on newer builds; the
+        // command self-elevates, so we just type it in a plain terminal.
+        terminal.sendText('wsl --update && exit');
+        const disposable = vscode.window.onDidCloseTerminal((closed) => {
+          if (closed === terminal) {
+            disposable.dispose();
+            invalidateWslCache();
+            invalidateWslNetworkCache();
+            this.refresh();
+          }
+        });
+      }),
     );
+  }
+
+  /**
+   * Write `networkingMode=mirrored` to %USERPROFILE%\.wslconfig, preserving
+   * existing keys/sections, then offer the user a terminal to run
+   * `wsl --shutdown` (the restart required for the new mode to take effect).
+   * The tree refreshes whether they restart or not.
+   */
+  private async enableMirroredNetworking(): Promise<void> {
+    const configPath = path.join(os.homedir(), '.wslconfig');
+    let current = '';
+    try { current = fs.readFileSync(configPath, 'utf-8'); } catch { /* file may not exist */ }
+    const updated = updateWslConfigMirrored(current);
+    if (updated === current) {
+      vscode.window.showInformationMessage(
+        '.wslconfig already sets networkingMode=mirrored. If localhost still doesn\'t reach WSL, run: wsl --shutdown',
+      );
+    } else {
+      try {
+        fs.writeFileSync(configPath, updated, 'utf-8');
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to write ${configPath}: ${String(err)}`);
+        return;
+      }
+    }
+    const choice = await vscode.window.showInformationMessage(
+      'Mirrored networking enabled in .wslconfig. WSL must restart for the change to take effect.',
+      'Restart WSL now',
+      'Later',
+    );
+    if (choice === 'Restart WSL now') {
+      const terminal = vscode.window.createTerminal('GemStone: WSL Shutdown');
+      terminal.show();
+      terminal.sendText('wsl --shutdown && exit');
+      const disposable = vscode.window.onDidCloseTerminal((closed) => {
+        if (closed === terminal) {
+          disposable.dispose();
+          invalidateWslCache();
+          invalidateWslNetworkCache();
+          this.refresh();
+        }
+      });
+    } else {
+      invalidateWslNetworkCache();
+      this.refresh();
+    }
   }
 }

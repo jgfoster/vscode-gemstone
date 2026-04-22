@@ -8,6 +8,12 @@ vi.mock('../wslBridge', () => ({
   getWslInfo: vi.fn(() => ({ available: false, defaultDistro: undefined, homeDir: undefined, arch: undefined, wslVersion: undefined })),
   invalidateWslCache: vi.fn(),
   wslExecSync: vi.fn(() => ''),
+  refreshWslNetworkInfo: vi.fn(async () => ({
+    mirrored: false, ip: undefined, netldiHost: undefined,
+    wslCoreVersion: undefined, supportsMirrored: false,
+  })),
+  invalidateWslNetworkCache: vi.fn(),
+  updateWslConfigMirrored: vi.fn((c: string) => c + '[wsl2]\nnetworkingMode=mirrored\n'),
 }));
 
 import { exec } from 'child_process';
@@ -538,16 +544,18 @@ describe('OsConfigTreeProvider', () => {
       vi.mocked(wslBridge.needsWsl).mockReturnValue(true);
     });
 
-    it('shows wslStatus + shared memory + removeIpc when version is 2', async () => {
+    it('shows wslStatus + wslNetworking + wslServices + shared memory + removeIpc when version is 2', async () => {
       vi.mocked(wslBridge.getWslInfo).mockReturnValue({
         available: true, defaultDistro: 'Ubuntu', homeDir: '/home/user', arch: 'x86_64', wslVersion: 2,
       });
       mockExec(LINUX_SYSCTL_4GB);
       const nodes = await getRootNodes(provider);
-      expect(nodes).toHaveLength(3);
+      expect(nodes).toHaveLength(5);
       expect(nodes[0]).toMatchObject({ kind: 'wslStatus', distro: 'Ubuntu', wslVersion: 2 });
-      expect(nodes[1].kind).toBe('sharedMemoryStatus');
-      expect(nodes[2].kind).toBe('removeIpcStatus');
+      expect(nodes[1].kind).toBe('wslNetworkingStatus');
+      expect(nodes[2].kind).toBe('wslServicesStatus');
+      expect(nodes[3].kind).toBe('sharedMemoryStatus');
+      expect(nodes[4].kind).toBe('removeIpcStatus');
     });
 
     it('shows only wslStatus when version is not 2 (avoids noise before upgrade)', async () => {
@@ -583,8 +591,11 @@ describe('OsConfigTreeProvider', () => {
       const nodes = await getRootNodes(provider);
       const removeIpc = nodes.find((n: any) => n.kind === 'removeIpcStatus') as any;
       expect(removeIpc.configured).toBe(true);
-      // fs was NOT consulted on the WSL path
-      expect(fs.readFileSync).not.toHaveBeenCalled();
+      // fs was NOT consulted for logind config on the WSL path (other
+      // unrelated reads — e.g. Windows services file — are allowed).
+      const logindReads = vi.mocked(fs.readFileSync).mock.calls
+        .filter((c: any[]) => /logind\.conf/.test(String(c[0])));
+      expect(logindReads).toHaveLength(0);
     });
 
     it('removeIpc on WSL: drop-in file overrides main logind.conf', async () => {
@@ -712,6 +723,323 @@ describe('OsConfigTreeProvider', () => {
       closeListener(mockTerminal);
       expect(wslBridge.invalidateWslCache).toHaveBeenCalled();
       expect(refreshSpy).toHaveBeenCalledOnce();
+    });
+  });
+
+  // ── wslNetworkingStatus ───────────────────────────────────
+
+  describe('wslNetworkingStatus', () => {
+    const mirroredInfo = {
+      mirrored: true, ip: undefined, netldiHost: 'localhost',
+      wslCoreVersion: '2.0.9.0', supportsMirrored: true,
+    };
+    const natCapableInfo = {
+      mirrored: false, ip: '172.29.240.2', netldiHost: '172.29.240.2',
+      wslCoreVersion: '2.0.9.0', supportsMirrored: true,
+    };
+    const natLegacyInfo = {
+      mirrored: false, ip: '10.0.0.5', netldiHost: '10.0.0.5',
+      wslCoreVersion: '1.2.5.0', supportsMirrored: false,
+    };
+
+    beforeEach(() => {
+      setPlatform('win32');
+      vi.mocked(wslBridge.needsWsl).mockReturnValue(true);
+      vi.mocked(wslBridge.getWslInfo).mockReturnValue({
+        available: true, defaultDistro: 'Ubuntu', homeDir: '/home/user', arch: 'x86_64', wslVersion: 2,
+      });
+      mockExec(LINUX_SYSCTL_4GB);
+    });
+
+    it('mirrored → check icon, None collapsible state, informative tooltip', () => {
+      const item = provider.getTreeItem({ kind: 'wslNetworkingStatus', info: mirroredInfo as any });
+      expect(String(item.label)).toContain('mirrored');
+      expect(String(item.label)).toContain('localhost');
+      expect((item.iconPath as any).id).toBe('check');
+      expect(item.collapsibleState).toBe(vscode.TreeItemCollapsibleState.None);
+      expect(String(item.tooltip)).toMatch(/localhost/);
+    });
+
+    it('NAT on WSL 2.0+ → warning icon, Expanded, tooltip mentions the IP', () => {
+      const item = provider.getTreeItem({ kind: 'wslNetworkingStatus', info: natCapableInfo as any });
+      expect(String(item.label)).toContain('NAT');
+      expect((item.iconPath as any).id).toBe('warning');
+      expect(item.collapsibleState).toBe(vscode.TreeItemCollapsibleState.Expanded);
+      expect(String(item.tooltip)).toContain('172.29.240.2');
+    });
+
+    it('NAT on legacy WSL → warning icon, tooltip mentions wsl --update', () => {
+      const item = provider.getTreeItem({ kind: 'wslNetworkingStatus', info: natLegacyInfo as any });
+      expect(String(item.label)).toContain('WSL 2.0+');
+      expect((item.iconPath as any).id).toBe('warning');
+      expect(String(item.tooltip)).toMatch(/wsl --update/);
+    });
+
+    it('NAT on WSL 2.0+ offers Enable-Mirrored (first) plus the hosts-file fallback', async () => {
+      const children = await provider.getChildren({
+        kind: 'wslNetworkingStatus', info: natCapableInfo as any,
+      });
+      expect(children.map((c: any) => c.command)).toEqual([
+        'gemstone.enableMirroredNetworking',
+        'gemstone.writeWslHostsEntry',
+      ]);
+    });
+
+    it('NAT on legacy WSL offers wsl --update (first) plus the hosts-file fallback', async () => {
+      const children = await provider.getChildren({
+        kind: 'wslNetworkingStatus', info: natLegacyInfo as any,
+      });
+      expect(children.map((c: any) => c.command)).toEqual([
+        'gemstone.updateWslCore',
+        'gemstone.writeWslHostsEntry',
+      ]);
+    });
+
+    it('mirrored state has no children', async () => {
+      const children = await provider.getChildren({
+        kind: 'wslNetworkingStatus', info: mirroredInfo as any,
+      });
+      expect(children).toHaveLength(0);
+    });
+
+    it('enableMirroredNetworking action node uses the edit icon', () => {
+      const item = provider.getTreeItem({
+        kind: 'action', text: 'Enable', command: 'gemstone.enableMirroredNetworking',
+      });
+      expect((item.iconPath as any).id).toBe('edit');
+      expect(String(item.tooltip)).toMatch(/\.wslconfig/);
+    });
+
+    it('updateWslCore action node uses the terminal icon', () => {
+      const item = provider.getTreeItem({
+        kind: 'action', text: 'Update', command: 'gemstone.updateWslCore',
+      });
+      expect((item.iconPath as any).id).toBe('terminal');
+      expect(String(item.tooltip)).toMatch(/wsl --update/);
+    });
+
+    it('_loadConfig pushes a wslNetworkingStatus node with the refreshed info', async () => {
+      vi.mocked(wslBridge.refreshWslNetworkInfo).mockResolvedValue(natCapableInfo as any);
+      const nodes = await getRootNodes(provider);
+      const netNode = nodes.find((n: any) => n.kind === 'wslNetworkingStatus') as any;
+      expect(netNode).toBeDefined();
+      expect(netNode.info).toEqual(natCapableInfo);
+    });
+
+    it('registers enableMirroredNetworking and updateWslCore commands', () => {
+      provider.registerCommands(makeContext());
+      const ids = vi.mocked(vscode.commands.registerCommand).mock.calls.map(([id]) => id);
+      expect(ids).toContain('gemstone.enableMirroredNetworking');
+      expect(ids).toContain('gemstone.updateWslCore');
+    });
+  });
+
+  // ── wslServicesStatus ─────────────────────────────────────
+
+  describe('wslServicesStatus', () => {
+    beforeEach(() => {
+      setPlatform('win32');
+      vi.mocked(wslBridge.needsWsl).mockReturnValue(true);
+      vi.mocked(wslBridge.getWslInfo).mockReturnValue({
+        available: true, defaultDistro: 'Ubuntu', homeDir: '/home/user', arch: 'x86_64', wslVersion: 2,
+      });
+      mockExec(LINUX_SYSCTL_4GB);
+    });
+
+    it('both sides configured → check icon, None state, informative tooltip', () => {
+      const item = provider.getTreeItem({
+        kind: 'wslServicesStatus', windowsHas: true, wslHas: true,
+      });
+      expect(String(item.label)).toMatch(/configured/);
+      expect(item.collapsibleState).toBe(vscode.TreeItemCollapsibleState.None);
+      expect((item.iconPath as any).id).toBe('check');
+    });
+
+    it('neither side configured → warning icon, Expanded state', () => {
+      const item = provider.getTreeItem({
+        kind: 'wslServicesStatus', windowsHas: false, wslHas: false,
+      });
+      expect(String(item.label)).toMatch(/Windows and WSL/);
+      expect((item.iconPath as any).id).toBe('warning');
+      expect(item.collapsibleState).toBe(vscode.TreeItemCollapsibleState.Expanded);
+    });
+
+    it('only WSL side missing → label specifies WSL', () => {
+      const item = provider.getTreeItem({
+        kind: 'wslServicesStatus', windowsHas: true, wslHas: false,
+      });
+      expect(String(item.label)).toMatch(/not in WSL/);
+    });
+
+    it('only Windows side missing → label specifies Windows', () => {
+      const item = provider.getTreeItem({
+        kind: 'wslServicesStatus', windowsHas: false, wslHas: true,
+      });
+      expect(String(item.label)).toMatch(/not in Windows/);
+    });
+
+    it('fully configured has no children', async () => {
+      const children = await provider.getChildren({
+        kind: 'wslServicesStatus', windowsHas: true, wslHas: true,
+      });
+      expect(children).toHaveLength(0);
+    });
+
+    it('both missing → two action children in the expected order', async () => {
+      const children = await provider.getChildren({
+        kind: 'wslServicesStatus', windowsHas: false, wslHas: false,
+      });
+      expect(children).toHaveLength(2);
+      expect(children[0]).toMatchObject({
+        kind: 'action', command: 'gemstone.writeServicesWindows',
+      });
+      expect(children[1]).toMatchObject({
+        kind: 'action', command: 'gemstone.writeServicesWsl',
+      });
+    });
+
+    it('only WSL missing → just the WSL action', async () => {
+      const children = await provider.getChildren({
+        kind: 'wslServicesStatus', windowsHas: true, wslHas: false,
+      });
+      expect(children).toHaveLength(1);
+      expect(children[0]).toMatchObject({ command: 'gemstone.writeServicesWsl' });
+    });
+
+    it('action items render with terminal icon and descriptive tooltip', () => {
+      const winItem = provider.getTreeItem({
+        kind: 'action', text: 'Win', command: 'gemstone.writeServicesWindows',
+      });
+      const wslItem = provider.getTreeItem({
+        kind: 'action', text: 'WSL', command: 'gemstone.writeServicesWsl',
+      });
+      expect((winItem.iconPath as any).id).toBe('terminal');
+      expect((wslItem.iconPath as any).id).toBe('terminal');
+      expect(String(winItem.tooltip)).toMatch(/gs64ldi/);
+      expect(String(wslItem.tooltip)).toMatch(/\/etc\/services/);
+    });
+
+    it('NAT networking shows a hosts-file action alongside enable-mirrored', async () => {
+      const children = await provider.getChildren({
+        kind: 'wslNetworkingStatus',
+        info: {
+          mirrored: false, ip: '172.29.240.2', netldiHost: '172.29.240.2',
+          wslCoreVersion: '2.0.9.0', supportsMirrored: true,
+        } as any,
+      });
+      expect(children.map((c: any) => c.command)).toEqual([
+        'gemstone.enableMirroredNetworking',
+        'gemstone.writeWslHostsEntry',
+      ]);
+    });
+
+    it('legacy WSL in NAT offers hosts-file action alongside wsl --update', async () => {
+      const children = await provider.getChildren({
+        kind: 'wslNetworkingStatus',
+        info: {
+          mirrored: false, ip: '10.0.0.5', netldiHost: '10.0.0.5',
+          wslCoreVersion: '1.2.5.0', supportsMirrored: false,
+        } as any,
+      });
+      expect(children.map((c: any) => c.command)).toEqual([
+        'gemstone.updateWslCore',
+        'gemstone.writeWslHostsEntry',
+      ]);
+    });
+
+    it('registers writeWslHostsEntry / writeServicesWindows / writeServicesWsl commands', () => {
+      provider.registerCommands(makeContext());
+      const ids = vi.mocked(vscode.commands.registerCommand).mock.calls.map(([id]) => id);
+      expect(ids).toContain('gemstone.writeWslHostsEntry');
+      expect(ids).toContain('gemstone.writeServicesWindows');
+      expect(ids).toContain('gemstone.writeServicesWsl');
+    });
+
+    it('writeWslHostsEntry opens a PowerShell terminal with the script path', () => {
+      provider.registerCommands({ extensionPath: 'C:\\ext', subscriptions: { push: vi.fn() } } as any);
+      const mockTerminal = { show: vi.fn(), sendText: vi.fn() };
+      vi.mocked(vscode.window.createTerminal).mockReturnValue(mockTerminal as any);
+
+      getCommand('gemstone.writeWslHostsEntry')?.();
+
+      const args = vi.mocked(vscode.window.createTerminal).mock.calls[0][0] as any;
+      expect(args.shellPath).toBe('powershell.exe');
+      expect(mockTerminal.sendText).toHaveBeenCalledWith(
+        expect.stringContaining('setWslHostsEntry.ps1'),
+      );
+    });
+
+    it('writeServicesWsl opens a WSL shell and runs the bash script via sudo', () => {
+      provider.registerCommands({ extensionPath: 'C:\\ext', subscriptions: { push: vi.fn() } } as any);
+      const mockTerminal = { show: vi.fn(), sendText: vi.fn() };
+      vi.mocked(vscode.window.createTerminal).mockReturnValue(mockTerminal as any);
+
+      getCommand('gemstone.writeServicesWsl')?.();
+
+      const args = vi.mocked(vscode.window.createTerminal).mock.calls[0][0] as any;
+      expect(args.shellPath).toBe('wsl.exe');
+      expect(mockTerminal.sendText).toHaveBeenCalledWith(
+        expect.stringContaining('/mnt/c/ext/resources/setServicesLinux.sh'),
+      );
+    });
+  });
+
+  // ── enableMirroredNetworking command behavior ─────────────
+
+  describe('enableMirroredNetworking command', () => {
+    beforeEach(() => {
+      setPlatform('win32');
+      vi.mocked(wslBridge.needsWsl).mockReturnValue(true);
+    });
+
+    it('writes the merged .wslconfig and prompts for a restart', async () => {
+      vi.mocked(fs.readFileSync).mockReturnValue('[wsl2]\nmemory=8GB\n' as any);
+      vi.mocked(fs.writeFileSync).mockImplementation(() => undefined);
+      vi.mocked(wslBridge.updateWslConfigMirrored).mockImplementation(
+        () => '[wsl2]\nnetworkingMode=mirrored\nmemory=8GB\n',
+      );
+      vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(undefined as any);
+
+      provider.registerCommands(makeContext());
+      await getCommand('gemstone.enableMirroredNetworking')?.();
+
+      expect(wslBridge.updateWslConfigMirrored).toHaveBeenCalledWith('[wsl2]\nmemory=8GB\n');
+      expect(fs.writeFileSync).toHaveBeenCalledOnce();
+      expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+        expect.stringMatching(/restart/i),
+        'Restart WSL now', 'Later',
+      );
+    });
+
+    it('on "Restart WSL now" spawns a terminal with wsl --shutdown', async () => {
+      vi.mocked(fs.readFileSync).mockImplementation(() => { throw new Error('ENOENT'); });
+      vi.mocked(fs.writeFileSync).mockImplementation(() => undefined);
+      vi.mocked(wslBridge.updateWslConfigMirrored).mockImplementation(
+        () => '[wsl2]\nnetworkingMode=mirrored\n',
+      );
+      vi.mocked(vscode.window.showInformationMessage).mockResolvedValue('Restart WSL now' as any);
+      const mockTerminal = { show: vi.fn(), sendText: vi.fn() };
+      vi.mocked(vscode.window.createTerminal).mockReturnValue(mockTerminal as any);
+
+      provider.registerCommands(makeContext());
+      await getCommand('gemstone.enableMirroredNetworking')?.();
+
+      expect(mockTerminal.sendText).toHaveBeenCalledWith(expect.stringContaining('wsl --shutdown'));
+    });
+
+    it('does nothing destructive when .wslconfig already had mirrored (no write, still prompts)', async () => {
+      const already = '[wsl2]\nnetworkingMode=mirrored\n';
+      vi.mocked(fs.readFileSync).mockReturnValue(already as any);
+      vi.mocked(wslBridge.updateWslConfigMirrored).mockReturnValue(already);
+      vi.mocked(fs.writeFileSync).mockImplementation(() => undefined);
+      vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(undefined as any);
+
+      provider.registerCommands(makeContext());
+      await getCommand('gemstone.enableMirroredNetworking')?.();
+
+      expect(fs.writeFileSync).not.toHaveBeenCalled();
+      // Still surfaces an info message so the user learns the state.
+      expect(vscode.window.showInformationMessage).toHaveBeenCalled();
     });
   });
 });

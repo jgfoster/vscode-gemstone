@@ -43,10 +43,17 @@ import { DatabaseTreeProvider, DatabaseNode } from './databaseTreeProvider';
 import { ProcessManager } from './processManager';
 import { McpServerManager } from './mcpServerManager';
 import { McpSocketServer, writeClaudeCodeMcpConfig } from './mcpSocketServer';
-import { ProcessTreeProvider } from './processTreeProvider';
+import { ProcessTreeProvider, ProcessItem } from './processTreeProvider';
 import { OsConfigTreeProvider } from './sharedMemoryTreeProvider';
 import { runQuickSetup } from './quickSetup';
-import { isWindows, getWslInfo, getWslInfoAsync, invalidateWslCache } from './wslBridge';
+import {
+  isWindows,
+  getWslInfo,
+  getWslInfoAsync,
+  invalidateWslCache,
+  getWslNetworkInfoCached,
+  refreshWslNetworkInfo,
+} from './wslBridge';
 import { wslExistsSync, wslSymlinkSync } from './wslFs';
 
 let client: LanguageClient;
@@ -1594,6 +1601,23 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand('gemstone.refreshProcesses', () => {
       processProvider.refresh();
+    }),
+
+    vscode.commands.registerCommand('gemstone.copyNetldiHost', async (item: ProcessItem) => {
+      // Only NetLDI items surface this command (package.json menu filter),
+      // but guard anyway since commands can be invoked programmatically.
+      if (!item || item.process.type !== 'netldi') return;
+      const net = getWslNetworkInfoCached() ?? await refreshWslNetworkInfo();
+      const host = net.netldiHost;
+      if (!host) {
+        vscode.window.showWarningMessage(
+          'Could not determine a host for WSL — try running NetLDI and refreshing, or check WSL is reachable.',
+        );
+        return;
+      }
+      await vscode.env.clipboard.writeText(host);
+      const portSuffix = item.process.port ? ` (port ${item.process.port})` : '';
+      vscode.window.showInformationMessage(`Copied ${host}${portSuffix} to clipboard.`);
     }),
 
     vscode.commands.registerCommand('gemstone.replaceExtent', async (node: DatabaseNode) => {

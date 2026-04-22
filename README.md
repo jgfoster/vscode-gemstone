@@ -34,7 +34,7 @@ To install, manage, and run a GemStone server locally:
 
 1. Install the extension from the VS Code Marketplace.
 2. Open the **GemStone** sidebar (gem icon in the activity bar).
-3. On macOS, check the **Shared Memory** section and run the setup script if needed.
+3. Check the **OS Configuration** section: on macOS/Linux run the shared-memory setup if it warns; on Windows+WSL Jasper also surfaces WSL networking and services-file configuration here.
 4. Use the **Versions** section to download and extract a GemStone release.
 5. Use the **Databases** section to create a new database.
 6. Start the stone and NetLDI from the database tree.
@@ -63,13 +63,31 @@ The Versions, Databases, and Processes sections are hidden when WSL is not avail
 
 With WSL installed and a Linux distribution configured, Jasper can manage GemStone servers running inside WSL while the VS Code extension runs natively on Windows. The GemStone server distribution is downloaded and extracted inside WSL, while the Windows client distribution provides the native DLL for VS Code to communicate with the server.
 
+#### Reaching WSL from Windows
+
+The Windows extension connects to GemStone services (NetLDI) that run inside WSL, so a GemStone login needs a host and a port that Windows can route to. There are three paths, presented in the **OS Configuration** view under **WSL networking**:
+
+1. **Mirrored networking (recommended, Windows 11 22H2 + WSL core 2.0+)** — `localhost` on Windows reaches services bound inside WSL with no further setup. Jasper detects the state and, when NAT is active, offers a one-click **Enable mirrored networking** action that writes `networkingMode=mirrored` to `%USERPROFILE%\.wslconfig` and prompts to restart WSL.
+2. **Stable name via hosts file (Windows 10 fallback)** — Jasper can write `<wsl-ip> wsl-linux` to `C:\Windows\System32\drivers\etc\hosts`. Logins then use `wsl-linux` instead of a raw IP. Because WSL2 assigns a new IP after `wsl --shutdown` or reboot, the action is idempotent and meant to be re-run after any WSL restart. The script self-elevates via UAC.
+3. **Copy the IP** — running NetLDI items expose a **Copy Host** context action. Under mirrored networking this copies `localhost`; otherwise it copies the current WSL IP (shown in the item's tooltip). Paste into the login's Host field.
+
+#### NetLDI port naming (`gs64ldi`)
+
+Jasper also detects whether `gs64ldi 50377/tcp` is present in `/etc/services` on both sides. With the entry in place, `startnetldi` binds to the conventional port 50377 (instead of picking a random one) and logins can name the port as `gs64ldi`. The **Services** row under OS Configuration offers separate write actions for the Windows and WSL sides — the Windows write needs admin (UAC), the WSL write needs `sudo`.
+
 ## Infrastructure Management
 
 Manage your GemStone installation directly from VS Code (macOS, Linux, or Windows with WSL).
 
-### Shared Memory (macOS)
+### OS Configuration
 
-GemStone requires shared memory on macOS. The **Shared Memory** view checks your current `sysctl` settings and shows whether they are configured. If not, click **Run setup script** to apply the settings immediately and install a `LaunchDaemon` plist that persists them across reboots.
+The **OS Configuration** view surfaces every host-level setting GemStone needs, with one-click actions where possible:
+
+- **Shared memory** — checks `sysctl` on macOS, Linux, and WSL, and warns if `shmmax`/`shmall` are below 1 GB. The setup script applies the change immediately and persists it (a `LaunchDaemon` plist on macOS, `/etc/sysctl.d/60-gemstone.conf` on Linux/WSL).
+- **RemoveIPC (Linux/WSL)** — verifies that `/etc/systemd/logind.conf` sets `RemoveIPC=no`, so logging out of the session that started the stone doesn't destroy its shared memory segment.
+- **WSL networking (Windows only)** — mirrored vs. NAT detection with an action to enable mirrored mode (see _Reaching WSL from Windows_ above).
+- **Services (Windows only)** — detects the `gs64ldi 50377/tcp` entry on both sides and offers write actions.
+- **WSL distro version (Windows only)** — warns if the default distro is on WSL 1 and provides an **Upgrade to WSL 2** action.
 
 ### Version Management
 

@@ -4,6 +4,17 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+## [1.3.4] - 2026-04-22
+
+### Added
+
+- **WSL networking detection and configuration (Windows only)** — OS Configuration now surfaces a **WSL networking** row showing whether WSL is running in `networkingMode=mirrored` (where `localhost` on Windows reaches services inside WSL) or NAT mode. Detection reads `%USERPROFILE%\.wslconfig`, and `wsl --version` determines whether the installed WSL core is ≥ 2.0 (the minimum that supports mirrored mode).
+- **Enable mirrored networking action** — when WSL core is ≥ 2.0 but NAT is active, a one-click action writes `networkingMode=mirrored` into `%USERPROFILE%\.wslconfig` (preserving existing sections, keys, comments, and line endings) and prompts to run `wsl --shutdown` so the change takes effect.
+- **Update WSL core action** — when WSL core is < 2.0, a one-click action opens a terminal and runs `wsl --update`, then refreshes the OS Configuration state on terminal close.
+- **Hosts-file fallback for Windows 10 / NAT** — under NAT networking, Jasper can write `<wsl-ip> wsl-linux` to `C:\Windows\System32\drivers\etc\hosts` so logins can use `wsl-linux` instead of a raw IP. The PowerShell script self-elevates via UAC and is idempotent — re-run it after each `wsl --shutdown` or Windows restart.
+- **Services-file configuration** — detects whether `gs64ldi 50377/tcp` is present in `/etc/services` on Windows and inside WSL, and offers separate write actions for each side (PowerShell + UAC for Windows, `sudo` for WSL). With the entry in place, `startnetldi` binds to the conventional port 50377 and logins can name the port as `gs64ldi`.
+- **NetLDI host tooltip and Copy Host action** — running NetLDI items on Windows+WSL now show a `Host:` line in their tooltip (`localhost` under mirrored networking, the current WSL IP otherwise) and expose a **Copy Host** inline/context action that writes the host to the clipboard for pasting into a login's Host field.
+
 ## [1.3.3] - 2026-04-19
 
 ### Fixed
