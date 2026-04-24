@@ -27,6 +27,8 @@ export interface TopazRegion {
   annotationStartLine?: number;
   /** For Tonel methods: line of the closing ] bracket */
   closingBracketLine?: number;
+  /** For Tonel methods: column in the signature line where the selector starts */
+  selectorColumnOffset?: number;
 }
 
 /** Known Topaz commands that do NOT start Smalltalk blocks */

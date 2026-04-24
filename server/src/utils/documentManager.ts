@@ -58,7 +58,7 @@ export class DocumentManager {
       const regionTokens = lexer.tokenize();
 
       // Offset token positions to document-level coordinates
-      const offsetTokens = regionTokens.map((t) => offsetToken(t, region.startLine));
+      const offsetTokens = regionTokens.map((t) => offsetToken(t, region.startLine, region.selectorColumnOffset ?? 0));
       allTokens.push(...offsetTokens);
 
       if (region.kind === 'smalltalk-method') {
@@ -138,10 +138,10 @@ export class DocumentManager {
   }
 }
 
-function offsetToken(token: Token, lineOffset: number): Token {
+function offsetToken(token: Token, lineOffset: number, selectorColumnOffset: number = 0): Token {
   return {
     ...token,
-    range: offsetRange(token.range, lineOffset),
+    range: offsetRange(token.range, lineOffset, selectorColumnOffset),
   };
 }
 
@@ -152,10 +152,10 @@ function offsetError(error: ParseError, lineOffset: number): ParseError {
   };
 }
 
-function offsetRange(range: SourceRange, lineOffset: number): SourceRange {
+function offsetRange(range: SourceRange, lineOffset: number, selectorColumnOffset: number = 0): SourceRange {
   return createRange(
-    createPosition(range.start.offset, range.start.line + lineOffset, range.start.column),
-    createPosition(range.end.offset, range.end.line + lineOffset, range.end.column),
+    createPosition(range.start.offset, range.start.line + lineOffset, range.start.column + (range.start.line === 0 ? selectorColumnOffset : 0)),
+    createPosition(range.end.offset, range.end.line + lineOffset, range.end.column + (range.end.line === 0 ? selectorColumnOffset : 0)),
   );
 }
 

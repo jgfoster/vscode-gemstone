@@ -352,7 +352,7 @@ connection.languages.semanticTokens.on((params) => {
 
     const scopeRoot = analyzer.analyze(pr.ast);
     const regionTokens = collectSemanticTokens(
-      pr.ast, pr.tokens, lineOffset, scopeRoot,
+      pr.ast, pr.tokens, lineOffset, scopeRoot, pr.region.selectorColumnOffset ?? 0,
     );
     allTokens.push(...regionTokens);
   }
