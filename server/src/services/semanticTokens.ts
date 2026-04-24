@@ -48,6 +48,7 @@ export function collectSemanticTokens(
   tokens: Token[],
   lineOffset: number,
   scopeRoot: ScopeNode,
+  selectorColumnOffset: number = 0,
 ): RawSemanticToken[] {
   const result: RawSemanticToken[] = [];
   const analyzer = new ScopeAnalyzer();
@@ -60,7 +61,7 @@ export function collectSemanticTokens(
     if (length <= 0) return;
     result.push({
       line: range.start.line + lineOffset,
-      startChar: range.start.column,
+      startChar: range.start.line === 0 ? range.start.column + selectorColumnOffset : range.start.column,
       length,
       tokenType,
       modifiers,
@@ -81,8 +82,8 @@ export function collectSemanticTokens(
   // Convert an AST-local range to document-level for token lookup
   function toDocRange(range: SourceRange): SourceRange {
     return {
-      start: { ...range.start, line: range.start.line + lineOffset },
-      end: { ...range.end, line: range.end.line + lineOffset },
+      start: { ...range.start, line: range.start.line + lineOffset, column: range.start.line === 0 ? range.start.column + selectorColumnOffset : range.start.column },
+      end: { ...range.end, line: range.end.line + lineOffset, column: range.end.line === 0 ? range.end.column + selectorColumnOffset : range.end.column },
     };
   }
 
@@ -98,7 +99,7 @@ export function collectSemanticTokens(
     if (pattern.range.start.line === selectorEnd.line) {
       result.push({
         line: pattern.range.start.line + lineOffset,
-        startChar: pattern.range.start.column,
+        startChar: pattern.range.start.line === 0 ? pattern.range.start.column + selectorColumnOffset : pattern.range.start.column,
         length: pattern.selector.length,
         tokenType: 7,
         modifiers: MOD_DECLARATION,

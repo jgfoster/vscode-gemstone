@@ -142,7 +142,7 @@ export function parseTonelDocument(text: string): TopazRegion[] {
     }
 
     const signatureLine = i;
-    const { className: sigClassName, isClassSide, selectorPattern } = sigMatch;
+    const { className: sigClassName, isClassSide, selectorPattern, selectorColumnOffset } = sigMatch;
     const className = sigClassName || headerClassName;
 
     // Find the matching ] via bracket counting
@@ -164,6 +164,7 @@ export function parseTonelDocument(text: string): TopazRegion[] {
       command: isClassSide ? 'classmethod' : 'method',
       annotationStartLine,
       closingBracketLine: closingLine,
+      selectorColumnOffset,
     });
 
     i = closingLine + 1;
@@ -181,15 +182,23 @@ function parseMethodSignature(line: string): {
   className: string;
   isClassSide: boolean;
   selectorPattern: string;
+  selectorColumnOffset: number;
 } | null {
   // Match: ClassName [class] >> selectorPattern [
   const match = line.match(/^(\w+)(\s+class)?\s*>>\s*(.+?)\s*\[\s*$/);
   if (!match) return null;
 
+  const selectorPattern = match[3].trim();
+  // Calculate the column where selectorPattern begins in the original line.
+  // This is needed so that semantic tokens on the selector line get correct document columns.
+  const prefixLen = match[1].length + (match[2] ?? '').length;
+  const selectorColumnOffset = line.indexOf(selectorPattern, prefixLen);
+
   return {
     className: match[1],
     isClassSide: !!match[2],
-    selectorPattern: match[3].trim(),
+    selectorPattern,
+    selectorColumnOffset: selectorColumnOffset >= 0 ? selectorColumnOffset : 0,
   };
 }
 
