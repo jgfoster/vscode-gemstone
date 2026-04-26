@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
-import * as vscode from 'vscode';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { ActiveSession } from './sessionManager';
@@ -21,18 +20,32 @@ export interface McpSocketServerOptions {
   workspaceKey?: string;
 }
 
+function workspaceHash(workspaceKey: string): string {
+  return crypto.createHash('sha1').update(workspaceKey).digest('hex').slice(0, 10);
+}
+
 /**
  * Derive the socket / named-pipe path for a given workspace. Stable across
- * restarts so Claude Code (which writes the path into `.claude/settings.local.json`)
- * keeps working without re-configuration.
+ * restarts so registered MCP entries (written into `~/.claude.json` by
+ * `claude mcp add` and into `claude_desktop_config.json` by this module)
+ * keep working without re-configuration.
  */
 export function socketPathFor(workspaceKey: string): string {
-  const hash = crypto.createHash('sha1').update(workspaceKey).digest('hex').slice(0, 10);
+  const hash = workspaceHash(workspaceKey);
   if (process.platform === 'win32') {
     // Named pipe
     return `\\\\.\\pipe\\jasper-mcp-${hash}`;
   }
   return path.join(os.tmpdir(), `jasper-mcp-${hash}.sock`);
+}
+
+/**
+ * Name under which the MCP server is registered with Claude Desktop. Desktop
+ * has a single global config file, so we namespace by workspace to let
+ * multiple open VS Code windows coexist without clobbering each other.
+ */
+export function mcpServerNameFor(workspaceKey: string): string {
+  return `gemstone-${workspaceHash(workspaceKey)}`;
 }
 
 /**
@@ -111,44 +124,98 @@ export class McpSocketServer {
   }
 }
 
+/** Absolute path to the stdio proxy script shipped in the extension. */
+export function proxyScriptPath(extensionPath: string): string {
+  return path.join(extensionPath, 'mcp-server', 'out', 'index.js');
+}
+
 /**
- * Write the Claude Code MCP config into the workspace's
- * `.claude/settings.local.json`, pointing at the proxy script with the
- * given socket path. Preserves other entries in the file.
+ * Platform-specific path for Claude Desktop's MCP config. Desktop has a
+ * single global config file (no per-project or CLI-based registration path
+ * like Claude Code), so a VS Code extension has to write it directly.
  */
-export function writeClaudeCodeMcpConfig(
-  workspaceRoot: string,
+export function claudeDesktopConfigPath(): string {
+  const home = os.homedir();
+  if (process.platform === 'darwin') {
+    return path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
+  }
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA ?? path.join(home, 'AppData', 'Roaming');
+    return path.join(appData, 'Claude', 'claude_desktop_config.json');
+  }
+  return path.join(home, '.config', 'Claude', 'claude_desktop_config.json');
+}
+
+interface ClaudeDesktopSettings {
+  mcpServers?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+function readDesktopSettings(configPath: string): ClaudeDesktopSettings {
+  if (!fs.existsSync(configPath)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  } catch {
+    // Corrupt or unreadable — treat as empty so we don't destroy user content
+    // beyond the mcpServers entry we own. The subsequent write will recreate
+    // the file with our entry plus whatever survived parsing (i.e. nothing).
+    return {};
+  }
+}
+
+function writeDesktopSettings(configPath: string, settings: ClaudeDesktopSettings): void {
+  const dir = path.dirname(configPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.writeFileSync(configPath, JSON.stringify(settings, null, 2) + '\n');
+}
+
+/**
+ * Merge a per-workspace `gemstone-<hash>` entry into Claude Desktop's global
+ * config, pointing at the proxy script with the given socket path. Preserves
+ * other entries (including gemstone-<hash> entries from other workspaces).
+ * Returns the config path that was written (or would have been written).
+ */
+export function writeClaudeDesktopMcpConfig(
+  workspaceKey: string,
   extensionPath: string,
   socketPath: string,
 ): string {
-  const claudeDir = path.join(workspaceRoot, '.claude');
-  const settingsPath = path.join(claudeDir, 'settings.local.json');
+  const configPath = claudeDesktopConfigPath();
+  const settings = readDesktopSettings(configPath);
 
-  if (!fs.existsSync(claudeDir)) {
-    fs.mkdirSync(claudeDir, { recursive: true });
-  }
-
-  let settings: Record<string, unknown> = {};
-  if (fs.existsSync(settingsPath)) {
-    try {
-      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-    } catch { /* ignore; start fresh */ }
-  }
-
-  const proxyScript = path.join(extensionPath, 'mcp-server', 'out', 'index.js');
   const desired = {
     command: 'node',
-    args: [proxyScript, '--proxy-socket', socketPath],
+    args: [proxyScriptPath(extensionPath), '--proxy-socket', socketPath],
   };
 
+  const name = mcpServerNameFor(workspaceKey);
   const mcpServers = (settings.mcpServers ?? {}) as Record<string, unknown>;
-  // Only rewrite if the entry is missing or has changed — avoids unnecessary
-  // churn when the user has the file open.
-  const current = mcpServers['gemstone'];
+  const current = mcpServers[name];
   if (JSON.stringify(current) !== JSON.stringify(desired)) {
-    mcpServers['gemstone'] = desired;
+    mcpServers[name] = desired;
     settings.mcpServers = mcpServers;
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    writeDesktopSettings(configPath, settings);
   }
-  return settingsPath;
+  return configPath;
+}
+
+/**
+ * Remove this workspace's `gemstone-<hash>` entry from Claude Desktop's
+ * config. Called on extension deactivation so Desktop doesn't keep trying to
+ * launch a proxy against a dead socket. No-ops if the file or entry is
+ * absent.
+ */
+export function removeClaudeDesktopMcpConfig(workspaceKey: string): void {
+  const configPath = claudeDesktopConfigPath();
+  if (!fs.existsSync(configPath)) return;
+  const settings = readDesktopSettings(configPath);
+  const mcpServers = settings.mcpServers as Record<string, unknown> | undefined;
+  if (!mcpServers) return;
+  const name = mcpServerNameFor(workspaceKey);
+  if (!(name in mcpServers)) return;
+  delete mcpServers[name];
+  settings.mcpServers = mcpServers;
+  writeDesktopSettings(configPath, settings);
 }

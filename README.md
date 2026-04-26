@@ -232,6 +232,41 @@ Export classes from a GemStone session to local `.gs` files in Topaz format. Exp
 
 The `gemstone.userManagedDictionaries` setting lists dictionary names that the extension will never overwrite during export.
 
+## Claude / MCP Integration
+
+Jasper exposes its GemStone tools to MCP-aware AI clients (Claude Code, Claude Desktop, MCP Inspector). All tools run against the user's **currently active session** — there are no separate credentials, no per-database subprocesses, and no off-host exposure.
+
+Two transports are served in parallel:
+
+| Transport | Endpoint | Used by |
+|-----------|----------|---------|
+| stdio (proxy) | local socket / named pipe | Claude Code (via `claude mcp add`) |
+| HTTPS/SSE | `https://127.0.0.1:27101/sse` | Claude Desktop "Add custom connector", MCP Inspector, any URL-based MCP client |
+
+### Claude Code
+
+Registered automatically on extension activation by invoking `claude mcp add gemstone -- node <proxy> --proxy-socket <path>` in the workspace folder. The CLI writes the entry into `~/.claude.json`'s per-project scope. If the `claude` CLI isn't on PATH the registration is skipped silently.
+
+### Claude Desktop
+
+Jasper writes a per-workspace `gemstone-<hash>` entry into Claude Desktop's global `claude_desktop_config.json` on activation and removes it on deactivation. Disable with `gemstone.mcp.registerWithClaudeDesktop: false` in your settings.
+
+To use the HTTPS/SSE surface from Claude Desktop's "Add custom connector" dialog you must first trust the self-signed certificate Jasper generates on first run:
+
+1. Run **`GemStone: Install MCP TLS Certificate`** from the Command Palette.
+2. Choose **Run in Terminal** (macOS will prompt for an admin password) or copy the command and run it yourself.
+3. Run **`GemStone: Copy MCP Server URL`** and paste it into the connector dialog.
+
+The cert is valid for `127.0.0.1` and `localhost` only, lives in the extension's global storage directory, and is shared across workspaces — you only have to trust it once.
+
+### MCP Inspector
+
+Run **`GemStone: Open MCP Inspector`** from the Command Palette. The terminal it spawns picks up `NODE_EXTRA_CA_CERTS` pointing at Jasper's cert so Node's TLS stack accepts the connection (OS keychain trust does not apply to Node).
+
+### Multiple VS Code windows
+
+The HTTPS port is global, so the first window to activate wins. Subsequent windows log an `EADDRINUSE` note to **GemStone Admin** and skip the HTTPS surface (Claude Code's stdio surface still works in every window). To run two windows simultaneously, override `gemstone.mcp.httpPort` in each workspace's `.vscode/settings.json`.
+
 ## Language Support
 
 The extension provides language support for three GemStone file formats:
@@ -279,6 +314,8 @@ Fine-tune the Smalltalk formatter under `gemstoneSmalltalk.formatter.*`:
 | `gemstone.exportPath` | `""` | Root path for class file export (supports `{workspaceRoot}`) |
 | `gemstone.userManagedDictionaries` | `[]` | Dictionary names excluded from export |
 | `gemstone.maxEnvironment` | 0 | Method environments to display in browser |
+| `gemstone.mcp.httpPort` | 27101 | Port on 127.0.0.1 where Jasper serves the MCP HTTPS/SSE surface |
+| `gemstone.mcp.registerWithClaudeDesktop` | true | Auto-register the gemstone MCP server in Claude Desktop's global config |
 
 > **Tip:** VS Code's Quick Open file search (Cmd+P / Ctrl+P) and the title bar search respect `.gitignore` by default, so exported `.gs` files in gitignored directories won't appear in search results. To include them, set `"search.useIgnoreFiles": false` in your VS Code settings. If there are some ignored things you want to continue to exclude, you can tell VS Code to exclude certain paths with the `files.exclude` setting.
 

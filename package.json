@@ -2,7 +2,7 @@
   "name": "gemstone-ide",
   "displayName": "Jasper: A GemStone Smalltalk IDE",
   "description": "GemStone/S IDE for Visual Studio Code",
-  "version": "1.3.4",
+  "version": "1.4.0",
   "publisher": "gemtalksystems",
   "license": "MIT",
   "author": "James Foster",
@@ -123,6 +123,18 @@
             "type": "string",
             "default": "~/Documents/GemStone",
             "description": "Root directory for GemStone installations and databases. Supports ~ for home directory."
+          },
+          "gemstone.mcp.registerWithClaudeDesktop": {
+            "type": "boolean",
+            "default": true,
+            "description": "Automatically register the gemstone MCP server with Claude Desktop. When enabled, Jasper writes a per-workspace gemstone-<hash> entry into Claude Desktop's global config on activation and removes it on deactivation. (Claude Code registration happens separately via `claude mcp add` and is not controlled by this setting.)"
+          },
+          "gemstone.mcp.httpPort": {
+            "type": "integer",
+            "default": 27101,
+            "minimum": 1024,
+            "maximum": 65535,
+            "description": "Port on 127.0.0.1 where Jasper serves the MCP HTTPS/SSE surface. The URL to paste into connector UIs (e.g. Claude Desktop's 'Add custom connector') is https://127.0.0.1:<port>/sse. Jasper generates a self-signed TLS certificate on first run and stores it in the extension's global storage directory; trust it once via the 'GemStone: Install MCP TLS Certificate' command. First-come-first-served across VS Code windows — override this per-workspace in .vscode/settings.json to run multiple windows simultaneously."
           },
           "gemstone.logins": {
             "type": "array",
@@ -328,6 +340,16 @@
       }
     ],
     "commands": [
+      {
+        "command": "gemstone.copyMcpUrl",
+        "title": "Copy MCP Server URL",
+        "category": "GemStone"
+      },
+      {
+        "command": "gemstone.installMcpTlsCertificate",
+        "title": "Install MCP TLS Certificate",
+        "category": "GemStone"
+      },
       {
         "command": "gemstone.addLogin",
         "title": "Add Login",
@@ -662,21 +684,9 @@
         "icon": "$(replace-all)"
       },
       {
-        "command": "gemstone.startMcpServer",
-        "title": "Start MCP Server",
-        "category": "GemStone Admin",
-        "icon": "$(debug-start)"
-      },
-      {
-        "command": "gemstone.stopMcpServer",
-        "title": "Stop MCP Server",
-        "category": "GemStone Admin",
-        "icon": "$(debug-stop)"
-      },
-      {
         "command": "gemstone.openMcpInspector",
         "title": "Open MCP Inspector",
-        "category": "GemStone Admin",
+        "category": "GemStone",
         "icon": "$(open-preview)"
       }
     ],
@@ -846,21 +856,6 @@
           "command": "gemstone.stopNetldi",
           "when": "view == gemstoneDatabases && viewItem == gemstoneDbNetldiRunning",
           "group": "inline@1"
-        },
-        {
-          "command": "gemstone.startMcpServer",
-          "when": "view == gemstoneDatabases && viewItem == gemstoneDbMcpStopped",
-          "group": "inline@1"
-        },
-        {
-          "command": "gemstone.openMcpInspector",
-          "when": "view == gemstoneDatabases && viewItem == gemstoneDbMcpRunning",
-          "group": "inline@1"
-        },
-        {
-          "command": "gemstone.stopMcpServer",
-          "when": "view == gemstoneDatabases && viewItem == gemstoneDbMcpRunning",
-          "group": "inline@2"
         },
         {
           "command": "gemstone.openDbInFinder",

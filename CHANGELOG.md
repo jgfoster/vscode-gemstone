@@ -4,6 +4,29 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-04-26
+
+### Added
+
+- **MCP HTTPS/SSE surface for URL-based connectors** — Jasper now serves the gemstone MCP server at `https://127.0.0.1:27101/sse` (port configurable via `gemstone.mcp.httpPort`) for clients whose connector UI takes a URL rather than a command to spawn (e.g. Claude Desktop's "Add custom connector" dialog). Uses the same `getSelectedSession()` routing as the stdio surface, so all 27 tools run against the user's currently active session. Binds 127.0.0.1 only — never exposed off-host.
+- **Self-signed TLS certificate** — Generated on first activation and stored in the extension's global storage directory (shared across workspaces). Valid for `127.0.0.1` and `localhost`, 10-year validity, written with `0600` permissions. Required because Claude Desktop rejects plain-http URLs.
+- **`GemStone: Install MCP TLS Certificate`** command — Palette action that surfaces the platform-specific trust-store install command (`security add-trusted-cert` on macOS, `certutil -user -addstore Root` on Windows, NSS db `certutil -A` on Linux) and offers to run it in a terminal, copy it to the clipboard, or copy the cert path.
+- **`GemStone: Copy MCP Server URL`** command — One-click copy of the HTTPS URL for pasting into a connector dialog.
+- **Claude Desktop auto-registration** — On activation, Jasper writes a per-workspace `gemstone-<hash>` entry into Claude Desktop's global `claude_desktop_config.json` and removes it on deactivation. Gated by `gemstone.mcp.registerWithClaudeDesktop` (default `true`).
+- **Claude Code registration via `claude mcp add`** — Replaces the previous `.claude/settings.local.json` write with a `claude mcp add` invocation that targets `~/.claude.json`'s per-project scope (the location Claude Code actually reads). No-op when the `claude` CLI isn't on PATH.
+
+### Changed
+
+- **`Open MCP Inspector` is now a command-palette action** that points at the live HTTPS/SSE surface, replacing the per-database "MCP Server" tree row that previously spawned an isolated subprocess per stone with its own credentials. The Inspector terminal receives `NODE_EXTRA_CA_CERTS` so Node's TLS stack trusts Jasper's self-signed cert (the OS keychain trust does not extend to Node).
+
+### Removed
+
+- **Per-database "MCP Server" tree row** and the `gemstone.startMcpServer` / `gemstone.stopMcpServer` commands and their menu contributions. Superseded by the always-on HTTPS/SSE surface (net –846 lines).
+
+### Fixed
+
+- **Tonel method signature semantic tokens landing on the wrong column** — the selector column offset was not being threaded through `collectSemanticTokens`, causing semantic highlighting to land on the wrong column for the first line of Tonel method signatures. Thanks to @ericwinger (#52).
+
 ## [1.3.4] - 2026-04-22
 
 ### Added

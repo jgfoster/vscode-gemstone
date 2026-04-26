@@ -33,19 +33,6 @@ function makeProcessManager(stoneRunning = false, netldiRunning = false) {
   };
 }
 
-function makeMcpServerManager(
-  running = false,
-  port?: number,
-  gsUser?: string,
-) {
-  return {
-    isRunning: vi.fn(() => running),
-    getServerInfo: vi.fn(() =>
-      running ? { port, login: { gs_user: gsUser }, stoneName: 'gs64stone' } : undefined,
-    ),
-  };
-}
-
 describe('DatabaseTreeProvider', () => {
   describe('getChildren', () => {
     it('returns database nodes at the root', () => {
@@ -60,61 +47,18 @@ describe('DatabaseTreeProvider', () => {
       expect(children[0].kind).toBe('database');
     });
 
-    it('includes mcpServer node under a database', () => {
+    it('includes stone, netldi, logs, and config nodes under a database (no mcpServer)', () => {
       const db = makeDatabase();
       const provider = new DatabaseTreeProvider(
         makeStorage([db]) as never,
         makeProcessManager() as never,
-        makeMcpServerManager() as never,
       );
 
       const dbNode: DatabaseNode = { kind: 'database', db };
       const children = provider.getChildren(dbNode);
       const kinds = children.map(c => c.kind);
 
-      expect(kinds).toContain('stone');
-      expect(kinds).toContain('netldi');
-      expect(kinds).toContain('mcpServer');
-      expect(kinds).toContain('logs');
-      expect(kinds).toContain('config');
-    });
-
-    it('shows mcpServer as running with port and user', () => {
-      const db = makeDatabase();
-      const provider = new DatabaseTreeProvider(
-        makeStorage([db]) as never,
-        makeProcessManager() as never,
-        makeMcpServerManager(true, 38741, 'DataCurator') as never,
-      );
-
-      const dbNode: DatabaseNode = { kind: 'database', db };
-      const children = provider.getChildren(dbNode);
-      const mcpNode = children.find(c => c.kind === 'mcpServer');
-
-      expect(mcpNode).toBeDefined();
-      expect(mcpNode!.kind).toBe('mcpServer');
-      if (mcpNode!.kind === 'mcpServer') {
-        expect(mcpNode!.running).toBe(true);
-        expect(mcpNode!.port).toBe(38741);
-        expect(mcpNode!.gsUser).toBe('DataCurator');
-      }
-    });
-
-    it('shows mcpServer as stopped when no manager', () => {
-      const db = makeDatabase();
-      const provider = new DatabaseTreeProvider(
-        makeStorage([db]) as never,
-        makeProcessManager() as never,
-      );
-
-      const dbNode: DatabaseNode = { kind: 'database', db };
-      const children = provider.getChildren(dbNode);
-      const mcpNode = children.find(c => c.kind === 'mcpServer');
-
-      expect(mcpNode).toBeDefined();
-      if (mcpNode!.kind === 'mcpServer') {
-        expect(mcpNode!.running).toBe(false);
-      }
+      expect(kinds).toEqual(['stone', 'netldi', 'logs', 'config']);
     });
   });
 
@@ -126,30 +70,7 @@ describe('DatabaseTreeProvider', () => {
       provider = new DatabaseTreeProvider(
         makeStorage([db]) as never,
         makeProcessManager() as never,
-        makeMcpServerManager(true, 38741, 'DataCurator') as never,
       );
-    });
-
-    it('renders running MCP server with user and port', () => {
-      const node: DatabaseNode = {
-        kind: 'mcpServer', db, running: true, port: 38741, gsUser: 'DataCurator',
-      };
-      const item = provider.getTreeItem(node);
-
-      expect(item.label).toBe('MCP Server: DataCurator @ 38741');
-      expect(item.description).toBe('Running');
-      expect(item.contextValue).toBe('gemstoneDbMcpRunning');
-    });
-
-    it('renders stopped MCP server', () => {
-      const node: DatabaseNode = {
-        kind: 'mcpServer', db, running: false,
-      };
-      const item = provider.getTreeItem(node);
-
-      expect(item.label).toBe('MCP Server');
-      expect(item.description).toBe('Stopped');
-      expect(item.contextValue).toBe('gemstoneDbMcpStopped');
     });
 
     it('renders database node', () => {

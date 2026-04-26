@@ -41,8 +41,12 @@ import { VersionTreeProvider, VersionItem } from './versionTreeProvider';
 import { DatabaseManager } from './databaseManager';
 import { DatabaseTreeProvider, DatabaseNode } from './databaseTreeProvider';
 import { ProcessManager } from './processManager';
-import { McpServerManager } from './mcpServerManager';
-import { McpSocketServer, writeClaudeCodeMcpConfig } from './mcpSocketServer';
+import { openMcpInspector } from './openMcpInspector';
+import { McpSocketServer, proxyScriptPath, removeClaudeDesktopMcpConfig, writeClaudeDesktopMcpConfig } from './mcpSocketServer';
+import { DEFAULT_MCP_HTTP_PORT, McpHttpServer } from './mcpHttpServer';
+import { ensureSelfSignedCert, trustCertCommand } from './tlsCert';
+import { ClaudeCliRegistrar } from './claudeCodeMcpRegistration';
+import { ClaudeCodeMcpLifecycle } from './claudeCodeMcpLifecycle';
 import { ProcessTreeProvider, ProcessItem } from './processTreeProvider';
 import { OsConfigTreeProvider } from './sharedMemoryTreeProvider';
 import { runQuickSetup } from './quickSetup';
@@ -61,49 +65,12 @@ let sessionManager: SessionManager;
 let exportManager: ExportManager;
 let fileInManager: FileInManager;
 
-/**
- * Pick a login matching the given database's stone name. Prompts for password
- * if missing. Returns undefined if the user cancels or no matching login exists.
- */
-async function pickMcpLogin(
-  db: { config: { stoneName: string } },
-  storage: LoginStorage,
-) {
-  const allLogins = storage.getLogins();
-  const matching = allLogins.filter(l => l.stone === db.config.stoneName);
-  let login;
-  if (matching.length === 0) {
-    vscode.window.showErrorMessage(
-      `No logins found for stone "${db.config.stoneName}". Create a login first.`,
-    );
-    return undefined;
-  } else if (matching.length === 1) {
-    login = matching[0];
-  } else {
-    const items = matching.map(l => ({
-      label: loginLabel(l),
-      description: `${l.gs_user}@${l.gem_host}`,
-      login: l,
-    }));
-    const picked = await vscode.window.showQuickPick(items, {
-      placeHolder: 'Select login',
-      title: `Login for ${db.config.stoneName}`,
-    });
-    if (!picked) return undefined;
-    login = picked.login;
-  }
-  if (!login.gs_password) {
-    const password = await vscode.window.showInputBox({
-      prompt: `GemStone password for ${login.gs_user}@${login.gem_host}`,
-      password: true,
-    });
-    if (password === undefined) return undefined;
-    login = { ...login, gs_password: password };
-  }
-  return login;
-}
-
 export function activate(context: vscode.ExtensionContext) {
+  // Populated by the async cert-generation step below; read by the
+  // `gemstone.openMcpInspector` command so Node trusts our self-signed cert
+  // (macOS keychain trust doesn't extend to Node's TLS stack).
+  let certPathForTrust: string | undefined;
+
   // ── LSP Client ───────────────────────────────────────────
   const serverModule = context.asAbsolutePath(
     path.join('server', 'out', 'server.js')
@@ -1164,49 +1131,146 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   const processManager = new ProcessManager(sysadminStorage);
-  const mcpServerManager = new McpServerManager(context.extensionPath);
-  const inspectorTerminals = new Map<string, vscode.Terminal>();
+  const inspectorTerminal: { terminal: vscode.Terminal | undefined } = { terminal: undefined };
   context.subscriptions.push(
-    { dispose: () => mcpServerManager.dispose() },
-    mcpServerManager.onDidChange(() => {
-      databaseProvider.refresh();
-    }),
     vscode.window.onDidCloseTerminal((closed) => {
-      for (const [stoneName, terminal] of inspectorTerminals) {
-        if (terminal === closed) {
-          inspectorTerminals.delete(stoneName);
-          break;
-        }
+      if (inspectorTerminal.terminal === closed) {
+        inspectorTerminal.terminal = undefined;
       }
     }),
   );
 
-  // ── MCP Socket Server (proxy → Jasper's current session) ─────────────────
-  // Opens a local socket on activation. The stdio MCP proxy (spawned by
-  // Claude Code) connects here; tools run inside the extension host against
-  // whatever session the user has currently selected. If no workspace folder
-  // is open we skip this — `.claude/settings.local.json` is workspace-scoped.
+  // ── Claude Code & Claude Desktop MCP integration ─────────────────────────
+  // Open the socket and register the MCP server at activation. The server
+  // stays registered for the extension's lifetime; tool calls made without an
+  // active GemStone session surface a clean error message (see mcpTools.ts),
+  // rather than the server disappearing from the client's view.
+  //
+  // Claude Code: registered via `claude mcp add` (project-local scope of
+  //              `~/.claude.json`), handled by ClaudeCodeMcpLifecycle.
+  // Claude Desktop: has no CLI and no project scope; we write its global
+  //              `claude_desktop_config.json` directly, keyed per-workspace
+  //              as `gemstone-<hash>` so multiple windows can coexist.
   const workspaceRoots = vscode.workspace.workspaceFolders;
   if (workspaceRoots && workspaceRoots.length > 0) {
-    const socketServer = new McpSocketServer({
-      getSession: () => sessionManager.getSelectedSession(),
-      workspaceKey: workspaceRoots[0].uri.fsPath,
+    const workspaceRoot = workspaceRoots[0].uri.fsPath;
+    let desktopSocketPath: string | undefined;
+    const registerDesktop = vscode.workspace.getConfiguration('gemstone')
+      .get<boolean>('mcp.registerWithClaudeDesktop', true);
+    const lifecycle = new ClaudeCodeMcpLifecycle({
+      serverName: 'gemstone',
+      proxyCommand: 'node',
+      proxyArgs: [proxyScriptPath(context.extensionPath)],
+      startSocket: async () => {
+        const server = new McpSocketServer({
+          getSession: () => sessionManager.getSelectedSession(),
+          workspaceKey: workspaceRoot,
+        });
+        await server.start();
+        if (registerDesktop) {
+          try {
+            const desktopPath = writeClaudeDesktopMcpConfig(
+              workspaceRoot,
+              context.extensionPath,
+              server.socketPath,
+            );
+            desktopSocketPath = server.socketPath;
+            appendSysadmin(`Claude Desktop MCP config: ${desktopPath}`);
+          } catch (err) {
+            appendSysadmin(`Failed to write Claude Desktop MCP config: ${(err as Error).message}`);
+          }
+        }
+        return server;
+      },
+      registrar: new ClaudeCliRegistrar(workspaceRoot),
     });
-    socketServer.start().then(() => {
-      try {
-        const settingsPath = writeClaudeCodeMcpConfig(
-          workspaceRoots[0].uri.fsPath,
-          context.extensionPath,
-          socketServer.socketPath,
-        );
-        appendSysadmin(`Claude Code MCP config: ${settingsPath}`);
-      } catch (err) {
-        appendSysadmin(`Failed to write Claude Code MCP config: ${(err as Error).message}`);
+    lifecycle.start().catch((err) => {
+      appendSysadmin(`Claude Code MCP lifecycle error: ${(err as Error).message}`);
+    });
+
+    // HTTPS/SSE surface for clients whose connector UI takes a URL (e.g.
+    // Claude Desktop's "Add custom connector" dialog, which rejects http URLs).
+    // First-come-first-served across VS Code windows — override the port
+    // per-workspace in .vscode/settings.json to run more than one
+    // simultaneously.
+    const httpPort = vscode.workspace.getConfiguration('gemstone')
+      .get<number>('mcp.httpPort', DEFAULT_MCP_HTTP_PORT);
+    let httpServer: McpHttpServer | undefined;
+    let httpStarted = false;
+    (async () => {
+      const tls = await ensureSelfSignedCert(context.globalStorageUri.fsPath);
+      certPathForTrust = tls.certPath;
+      if (tls.generated) {
+        appendSysadmin(`Generated self-signed MCP TLS cert at ${tls.certPath}`);
+        appendSysadmin(`Trust it once with: ${trustCertCommand(tls.certPath)}`);
+        appendSysadmin(`Or run the "GemStone: Install MCP TLS Certificate" command.`);
       }
-    }).catch((err) => {
-      appendSysadmin(`MCP socket server failed to start: ${(err as Error).message}`);
+      httpServer = new McpHttpServer({
+        getSession: () => sessionManager.getSelectedSession(),
+        port: httpPort,
+        tls: { cert: tls.cert, key: tls.key },
+      });
+      try {
+        await httpServer.start();
+        httpStarted = true;
+        appendSysadmin(`MCP HTTPS listening at ${httpServer.url}`);
+      } catch (err) {
+        const e = err as NodeJS.ErrnoException;
+        if (e.code === 'EADDRINUSE') {
+          appendSysadmin(`MCP HTTPS port ${httpPort} in use; skipping (another Jasper window may own it). Override gemstone.mcp.httpPort per-workspace to run two windows simultaneously.`);
+        } else {
+          appendSysadmin(`MCP HTTPS server failed to start: ${e.message}`);
+        }
+      }
+    })().catch((err) => {
+      appendSysadmin(`MCP HTTPS setup failed: ${(err as Error).message}`);
     });
-    context.subscriptions.push({ dispose: () => { void socketServer.dispose(); } });
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand('gemstone.copyMcpUrl', async () => {
+        if (!httpStarted || !httpServer) {
+          vscode.window.showWarningMessage(`Jasper MCP HTTPS surface is not running on port ${httpPort}. Check the GemStone Admin output channel for the reason.`);
+          return;
+        }
+        await vscode.env.clipboard.writeText(httpServer.url);
+        vscode.window.showInformationMessage(`Copied MCP URL: ${httpServer.url}`);
+      }),
+      vscode.commands.registerCommand('gemstone.installMcpTlsCertificate', async () => {
+        if (!certPathForTrust) {
+          vscode.window.showWarningMessage('MCP TLS certificate has not been generated yet. Wait for extension activation to complete and try again.');
+          return;
+        }
+        const cmd = trustCertCommand(certPathForTrust);
+        const choice = await vscode.window.showInformationMessage(
+          `Install the MCP TLS certificate into your system trust store so Claude clients accept https://127.0.0.1:${httpPort}/sse?\n\nCommand to run: ${cmd}`,
+          { modal: true },
+          'Run in Terminal',
+          'Copy Command',
+          'Show Cert Path',
+        );
+        if (choice === 'Run in Terminal') {
+          const terminal = vscode.window.createTerminal({ name: 'Install MCP TLS Cert' });
+          terminal.show();
+          terminal.sendText(cmd);
+        } else if (choice === 'Copy Command') {
+          await vscode.env.clipboard.writeText(cmd);
+          vscode.window.showInformationMessage('Command copied to clipboard.');
+        } else if (choice === 'Show Cert Path') {
+          await vscode.env.clipboard.writeText(certPathForTrust);
+          vscode.window.showInformationMessage(`Cert path copied: ${certPathForTrust}`);
+        }
+      }),
+    );
+
+    context.subscriptions.push({
+      dispose: () => {
+        void lifecycle.dispose();
+        if (httpServer) void httpServer.dispose();
+        if (desktopSocketPath !== undefined) {
+          try { removeClaudeDesktopMcpConfig(workspaceRoot); } catch { /* ignore */ }
+        }
+      },
+    });
   }
   const versionManager = new VersionManager(sysadminStorage);
   const databaseManager = new DatabaseManager(sysadminStorage, processManager);
@@ -1231,7 +1295,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // Databases
-  const databaseProvider = new DatabaseTreeProvider(sysadminStorage, processManager, mcpServerManager);
+  const databaseProvider = new DatabaseTreeProvider(sysadminStorage, processManager);
   context.subscriptions.push(
     vscode.window.createTreeView('gemstoneDatabases', {
       treeDataProvider: databaseProvider,
@@ -1465,10 +1529,6 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand('gemstone.stopStone', async (node: DatabaseNode) => {
       if (node?.kind !== 'stone') return;
-      if (mcpServerManager.isRunning(node.db.config.stoneName)) {
-        await mcpServerManager.stopServer(node.db.config.stoneName);
-        appendSysadmin('MCP Server stopped (stone shutting down)');
-      }
       try {
         await processManager.stopStone(node.db);
         vscode.window.showInformationMessage(`Stone "${node.db.config.stoneName}" stopped.`);
@@ -1503,58 +1563,13 @@ export function activate(context: vscode.ExtensionContext) {
       refreshAdminViews();
     }),
 
-    vscode.commands.registerCommand('gemstone.startMcpServer', async (node: DatabaseNode) => {
-      if (node?.kind !== 'mcpServer') return;
-      const login = await pickMcpLogin(node.db, storage);
-      if (!login) return;
-      try {
-        const info = await mcpServerManager.startServer(node.db, login, sysadminStorage, storage);
-        vscode.window.showInformationMessage(
-          `MCP Server started for "${node.db.config.stoneName}" on port ${info.port}.`,
-        );
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        vscode.window.showErrorMessage(`MCP Server failed to start: ${msg}`);
-      }
-      refreshAdminViews();
-    }),
-
-    vscode.commands.registerCommand('gemstone.stopMcpServer', async (node: DatabaseNode) => {
-      if (node?.kind !== 'mcpServer') return;
-      // Dispose the Inspector terminal before stopping the server
-      const inspectorTerminal = inspectorTerminals.get(node.db.config.stoneName);
-      if (inspectorTerminal) {
-        inspectorTerminal.dispose();
-        inspectorTerminals.delete(node.db.config.stoneName);
-      }
-      try {
-        await mcpServerManager.stopServer(node.db.config.stoneName);
-        vscode.window.showInformationMessage('MCP Server stopped.');
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        vscode.window.showErrorMessage(`MCP Server failed to stop: ${msg}`);
-      }
-      refreshAdminViews();
-    }),
-
-    vscode.commands.registerCommand('gemstone.openMcpInspector', (node: DatabaseNode) => {
-      if (node?.kind !== 'mcpServer' || !node.running || !node.port) return;
-      // Dispose any existing Inspector terminal for this stone
-      const existing = inspectorTerminals.get(node.db.config.stoneName);
-      if (existing) {
-        existing.dispose();
-      }
-      const serverUrl = `http://localhost:${node.port}/sse`;
-      const terminal = vscode.window.createTerminal({
-        name: `MCP Inspector: ${node.db.config.stoneName}`,
-      });
-      inspectorTerminals.set(node.db.config.stoneName, terminal);
-      terminal.show();
-      // Windows PowerShell blocks `npx` (resolves to npx.ps1) under the default
-      // ExecutionPolicy; `npx.cmd` goes through CreateProcess and works anyway.
-      const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-      terminal.sendText(
-        `${npx} @modelcontextprotocol/inspector --transport sse --server-url ${serverUrl}`,
+    vscode.commands.registerCommand('gemstone.openMcpInspector', () => {
+      const port = vscode.workspace.getConfiguration('gemstone')
+        .get<number>('mcp.httpPort', DEFAULT_MCP_HTTP_PORT);
+      openMcpInspector(
+        `https://127.0.0.1:${port}/sse`,
+        inspectorTerminal,
+        { extraCaCertPath: certPathForTrust },
       );
     }),
 

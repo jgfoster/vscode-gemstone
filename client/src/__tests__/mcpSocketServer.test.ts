@@ -5,8 +5,26 @@ vi.mock('fs');
 vi.mock('../sysadminChannel', () => ({ appendSysadmin: vi.fn(), showSysadmin: vi.fn() }));
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
-import { socketPathFor, writeClaudeCodeMcpConfig } from '../mcpSocketServer';
+import {
+  claudeDesktopConfigPath,
+  mcpServerNameFor,
+  proxyScriptPath,
+  removeClaudeDesktopMcpConfig,
+  socketPathFor,
+  writeClaudeDesktopMcpConfig,
+} from '../mcpSocketServer';
+
+function withPlatform(platform: string, fn: () => void) {
+  const orig = process.platform;
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  try {
+    fn();
+  } finally {
+    Object.defineProperty(process, 'platform', { value: orig, configurable: true });
+  }
+}
 
 describe('socketPathFor', () => {
   it('returns a stable path for the same workspace key', () => {
@@ -22,27 +40,81 @@ describe('socketPathFor', () => {
   });
 
   it('uses a named pipe format on Windows', () => {
-    const orig = process.platform;
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-    try {
+    withPlatform('win32', () => {
       expect(socketPathFor('x')).toMatch(/^\\\\\.\\pipe\\jasper-mcp-/);
-    } finally {
-      Object.defineProperty(process, 'platform', { value: orig, configurable: true });
-    }
+    });
   });
 
   it('uses a filesystem path on non-Windows', () => {
-    const orig = process.platform;
-    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
-    try {
+    withPlatform('darwin', () => {
       expect(socketPathFor('x')).toMatch(/jasper-mcp-[a-f0-9]+\.sock$/);
-    } finally {
-      Object.defineProperty(process, 'platform', { value: orig, configurable: true });
-    }
+    });
   });
 });
 
-describe('writeClaudeCodeMcpConfig', () => {
+describe('proxyScriptPath', () => {
+  it('resolves to mcp-server/out/index.js inside the extension', () => {
+    expect(proxyScriptPath('/ext')).toMatch(/mcp-server[\\/]+out[\\/]+index\.js$/);
+  });
+});
+
+describe('mcpServerNameFor', () => {
+  it('is stable for the same workspace key', () => {
+    expect(mcpServerNameFor('/a')).toBe(mcpServerNameFor('/a'));
+  });
+
+  it('differs between workspaces', () => {
+    expect(mcpServerNameFor('/a')).not.toBe(mcpServerNameFor('/b'));
+  });
+
+  it('uses the gemstone-<hash> format', () => {
+    expect(mcpServerNameFor('/ws')).toMatch(/^gemstone-[a-f0-9]{10}$/);
+  });
+
+  it('shares the same hash as the socket path for the workspace', () => {
+    withPlatform('darwin', () => {
+      const name = mcpServerNameFor('/ws');
+      const sock = socketPathFor('/ws');
+      const hash = name.replace(/^gemstone-/, '');
+      expect(sock).toContain(hash);
+    });
+  });
+});
+
+describe('claudeDesktopConfigPath', () => {
+  it('resolves the macOS Application Support path', () => {
+    withPlatform('darwin', () => {
+      expect(claudeDesktopConfigPath()).toBe(
+        path.join(os.homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'),
+      );
+    });
+  });
+
+  it('resolves the Windows %APPDATA% path', () => {
+    const origAppData = process.env.APPDATA;
+    process.env.APPDATA = 'C:\\Users\\me\\AppData\\Roaming';
+    try {
+      withPlatform('win32', () => {
+        expect(claudeDesktopConfigPath()).toBe(
+          path.join('C:\\Users\\me\\AppData\\Roaming', 'Claude', 'claude_desktop_config.json'),
+        );
+      });
+    } finally {
+      if (origAppData === undefined) delete process.env.APPDATA;
+      else process.env.APPDATA = origAppData;
+    }
+  });
+
+  it('falls back to ~/.config on Linux', () => {
+    withPlatform('linux', () => {
+      expect(claudeDesktopConfigPath()).toBe(
+        path.join(os.homedir(), '.config', 'Claude', 'claude_desktop_config.json'),
+      );
+    });
+  });
+});
+
+describe('writeClaudeDesktopMcpConfig', () => {
   beforeEach(() => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue('{}');
@@ -50,75 +122,168 @@ describe('writeClaudeCodeMcpConfig', () => {
     vi.mocked(fs.mkdirSync).mockClear();
   });
 
-  it('writes a stdio command with --proxy-socket pointing at the given socket', () => {
-    writeClaudeCodeMcpConfig('/workspace', '/ext', '/tmp/socket.sock');
+  it('writes a per-workspace gemstone-<hash> entry pointing at the proxy socket', () => {
+    writeClaudeDesktopMcpConfig('/ws', '/ext', '/tmp/socket.sock');
 
     const writeCall = vi.mocked(fs.writeFileSync).mock.calls[0];
     expect(writeCall).toBeDefined();
     const written = JSON.parse(writeCall![1] as string);
-    expect(written.mcpServers.gemstone.command).toBe('node');
-    expect(written.mcpServers.gemstone.args).toContain('--proxy-socket');
-    expect(written.mcpServers.gemstone.args).toContain('/tmp/socket.sock');
-    // Must NOT include env or password fields — proxy mode needs no credentials.
-    expect(written.mcpServers.gemstone.env).toBeUndefined();
+    const name = mcpServerNameFor('/ws');
+    expect(written.mcpServers[name].command).toBe('node');
+    expect(written.mcpServers[name].args).toContain('--proxy-socket');
+    expect(written.mcpServers[name].args).toContain('/tmp/socket.sock');
+    expect(written.mcpServers[name].env).toBeUndefined();
   });
 
-  it('preserves other mcpServers entries', () => {
+  it('returns the platform-specific Desktop config path', () => {
+    withPlatform('darwin', () => {
+      const returned = writeClaudeDesktopMcpConfig('/ws', '/ext', '/tmp/socket.sock');
+      expect(returned).toBe(claudeDesktopConfigPath());
+    });
+  });
+
+  it('preserves other mcpServers entries (including other workspaces)', () => {
+    const otherName = mcpServerNameFor('/other-ws');
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
-      mcpServers: { other: { command: 'x' } },
+      mcpServers: {
+        [otherName]: { command: 'node', args: ['elsewhere'] },
+        filesystem: { command: 'mcp-fs' },
+      },
     }));
 
-    writeClaudeCodeMcpConfig('/workspace', '/ext', '/tmp/socket.sock');
+    writeClaudeDesktopMcpConfig('/ws', '/ext', '/tmp/socket.sock');
 
     const writeCall = vi.mocked(fs.writeFileSync).mock.calls[0];
     const written = JSON.parse(writeCall![1] as string);
-    expect(written.mcpServers.other).toEqual({ command: 'x' });
-    expect(written.mcpServers.gemstone).toBeDefined();
+    expect(written.mcpServers[otherName]).toEqual({ command: 'node', args: ['elsewhere'] });
+    expect(written.mcpServers.filesystem).toEqual({ command: 'mcp-fs' });
+    expect(written.mcpServers[mcpServerNameFor('/ws')]).toBeDefined();
   });
 
-  it('does not rewrite the file when the entry is already correct', () => {
-    // Use path.join to match the platform-specific path the source builds
-    const proxyScript = path.join('/ext', 'mcp-server', 'out', 'index.js');
+  it('preserves top-level siblings of mcpServers', () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+      globalShortcut: 'Ctrl+Space',
+      mcpServers: {},
+    }));
+
+    writeClaudeDesktopMcpConfig('/ws', '/ext', '/tmp/socket.sock');
+
+    const writeCall = vi.mocked(fs.writeFileSync).mock.calls[0];
+    const written = JSON.parse(writeCall![1] as string);
+    expect(written.globalShortcut).toBe('Ctrl+Space');
+  });
+
+  it('does not rewrite when the entry is already correct', () => {
+    const name = mcpServerNameFor('/ws');
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
       mcpServers: {
-        gemstone: {
+        [name]: {
           command: 'node',
-          args: [proxyScript, '--proxy-socket', '/tmp/socket.sock'],
+          args: [proxyScriptPath('/ext'), '--proxy-socket', '/tmp/socket.sock'],
         },
       },
     }));
 
-    writeClaudeCodeMcpConfig('/workspace', '/ext', '/tmp/socket.sock');
+    writeClaudeDesktopMcpConfig('/ws', '/ext', '/tmp/socket.sock');
 
     expect(fs.writeFileSync).not.toHaveBeenCalled();
   });
 
   it('rewrites when the socket path has changed', () => {
-    const proxyScript = path.join('/ext', 'mcp-server', 'out', 'index.js');
+    const name = mcpServerNameFor('/ws');
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
       mcpServers: {
-        gemstone: {
+        [name]: {
           command: 'node',
-          args: [proxyScript, '--proxy-socket', '/tmp/OLD.sock'],
+          args: [proxyScriptPath('/ext'), '--proxy-socket', '/tmp/OLD.sock'],
         },
       },
     }));
 
-    writeClaudeCodeMcpConfig('/workspace', '/ext', '/tmp/NEW.sock');
+    writeClaudeDesktopMcpConfig('/ws', '/ext', '/tmp/NEW.sock');
 
     const writeCall = vi.mocked(fs.writeFileSync).mock.calls[0];
     expect(writeCall).toBeDefined();
     const written = JSON.parse(writeCall![1] as string);
-    expect(written.mcpServers.gemstone.args).toContain('/tmp/NEW.sock');
+    expect(written.mcpServers[name].args).toContain('/tmp/NEW.sock');
   });
 
-  it('creates the .claude directory if missing', () => {
-    vi.mocked(fs.existsSync).mockImplementation((p) => !String(p).endsWith('.claude'));
-    writeClaudeCodeMcpConfig('/workspace', '/ext', '/tmp/socket.sock');
+  it('creates the Claude config directory if missing', () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      // File doesn't exist, and neither does its parent dir — force mkdir.
+      const s = String(p);
+      return !s.endsWith('claude_desktop_config.json') && !s.endsWith('Claude');
+    });
+
+    writeClaudeDesktopMcpConfig('/ws', '/ext', '/tmp/socket.sock');
 
     expect(fs.mkdirSync).toHaveBeenCalledWith(
-      expect.stringMatching(/\.claude$/),
+      expect.stringMatching(/Claude$/),
       { recursive: true },
     );
+  });
+
+  it('recovers from an unreadable config by starting fresh (without throwing)', () => {
+    vi.mocked(fs.readFileSync).mockReturnValue('not-valid-json');
+
+    expect(() => writeClaudeDesktopMcpConfig('/ws', '/ext', '/tmp/socket.sock')).not.toThrow();
+
+    const writeCall = vi.mocked(fs.writeFileSync).mock.calls[0];
+    const written = JSON.parse(writeCall![1] as string);
+    expect(written.mcpServers[mcpServerNameFor('/ws')]).toBeDefined();
+  });
+});
+
+describe('removeClaudeDesktopMcpConfig', () => {
+  beforeEach(() => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.writeFileSync).mockClear();
+  });
+
+  it('removes only this workspace entry and preserves siblings', () => {
+    const name = mcpServerNameFor('/ws');
+    const otherName = mcpServerNameFor('/other-ws');
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+      mcpServers: {
+        [name]: { command: 'node', args: ['x'] },
+        [otherName]: { command: 'node', args: ['y'] },
+        filesystem: { command: 'mcp-fs' },
+      },
+    }));
+
+    removeClaudeDesktopMcpConfig('/ws');
+
+    const writeCall = vi.mocked(fs.writeFileSync).mock.calls[0];
+    expect(writeCall).toBeDefined();
+    const written = JSON.parse(writeCall![1] as string);
+    expect(written.mcpServers[name]).toBeUndefined();
+    expect(written.mcpServers[otherName]).toEqual({ command: 'node', args: ['y'] });
+    expect(written.mcpServers.filesystem).toEqual({ command: 'mcp-fs' });
+  });
+
+  it('is a no-op when the config file does not exist', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    removeClaudeDesktopMcpConfig('/ws');
+
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op when mcpServers is absent', () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({}));
+
+    removeClaudeDesktopMcpConfig('/ws');
+
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op when this workspace has no entry', () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+      mcpServers: { [mcpServerNameFor('/different')]: { command: 'node' } },
+    }));
+
+    removeClaudeDesktopMcpConfig('/ws');
+
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
   });
 });
