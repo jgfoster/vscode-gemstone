@@ -4,6 +4,27 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-04-27
+
+### Added
+
+- **MCP `refresh` tool** — explicitly refresh the session's view of committed state (aborts only when no uncommitted changes are pending). Closes the silent-stale gap where the GCI pinned a session's read view to its transaction snapshot, so commits landed by another process (e.g. `install.sh`) were invisible until the session aborted or committed.
+- **MCP `list_failing_tests` tool** — runs SUnit tests and returns only the failed/errored entries. Optional `classNames` filter for targeted subsets (otherwise discovers every TestCase subclass in the symbolList). Iteration runs in Smalltalk so an N-class invocation is one GCI round-trip.
+- **MCP `list_test_classes` tool** — discovery primitive for filtering before `list_failing_tests`.
+- **MCP `describe_test_failure` tool** — re-runs a single test with its own `AbstractException` handler (bypasses `TestCase>>run`, which would swallow the exception) and returns structured details: `exceptionClass`, GemStone `errorNumber`, clean `messageText`, `description`, plus `mnuReceiver` / `mnuSelector` for `MessageNotUnderstood`. Includes a multi-line `stackReport` when stack capture is supported (gem-level `GemExceptionSignalCapturesStack` is toggled around the run and restored via `ensure:`).
+- **MCP `eval_python` and `compile_python` tools** — compile/transpile/execute Python source via Grail (GemStone-Python). Register unconditionally; gracefully report "Grail not detected" via runtime `objectNamed:` lookup when Grail isn't loaded. Grail-side compile and runtime errors are reported inline as `Error: <class> — <messageText>`.
+
+### Changed
+
+- **`status`, `run_test_class`, `run_test_method`, `list_failing_tests`, `describe_test_failure` auto-refresh-if-clean** before reading. Discards the stale-pinned view when (and only when) no uncommitted work is pending. `status` reports the new view state on a `View:` line.
+- **`execute_code` accepts multi-statement bodies** — wrapped as `[<code>] value printString` so `| x | x := 42. x + 1` parses. Previously errored with "expected start of a statement" because the wrapper only accepted a single expression.
+- **`find_implementors` / `find_senders` / `find_references_to` empty-result message hints at env 1** — projects whose user code lives in `environmentId: 1` (notably GemStone-Python) were getting a bare "No implementors found" that was easy to misread as "doesn't exist."
+- **MCP tool validator errors name the offending parameter** — replaces zod's bare `"Invalid input: expected boolean, received undefined"` with `"Missing required parameter 'isMeta' (expected boolean)."` and `"Parameter 'isMeta' must be boolean, but received string."`. Implemented as a per-schema error map (a global one breaks the SDK's discriminated-union JSON-RPC parsing).
+
+### Fixed
+
+- **`runTestClass` / `runFailingTests` were sending `each testCase class name` to objects that don't respond to `#testCase`** — the items in `result failures` and `result errors` are TestCase instances themselves with only a `testSelector` ivar, not wrapper objects. On a real failure the queries would silently DNU; tests mocked the output so it wasn't caught. Now uses `each class name` / `each selector`, matching the `passed` branch.
+
 ## [1.4.0] - 2026-04-26
 
 ### Added
