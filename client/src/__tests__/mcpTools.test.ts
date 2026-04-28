@@ -279,6 +279,17 @@ describe('registerMcpTools', () => {
       expect(result.content[0].text).toContain('environmentId: 1');
     });
 
+    // Symmetric with find_implementors / find_references_to — same helper, same
+    // expected hint. Without this assertion a refactor could silently regress
+    // senders-only.
+    it('find_senders hints at env 1 when env 0 search is empty', async () => {
+      vi.mocked(queries.sendersOf).mockReturnValue([]);
+      const result = await server.getTool('find_senders')!.handler({ selector: 'unused' });
+
+      expect(result.content[0].text).toContain('environmentId 0');
+      expect(result.content[0].text).toContain('environmentId: 1');
+    });
+
     it('list_all_classes emits dictIndex\\tdictName\\tclassName rows', async () => {
       vi.mocked(queries.getAllClassNames).mockReturnValue([
         { dictIndex: 1, dictName: 'Globals', className: 'Array' },
@@ -448,6 +459,15 @@ describe('registerMcpTools', () => {
         .handler({ classNames: ['ArrayTest', 'StringTest'] });
 
       expect(sunit.runFailingTests).toHaveBeenCalledWith(session, ['ArrayTest', 'StringTest']);
+    });
+
+    it('list_failing_tests auto-refreshes the session view before the suite runs', async () => {
+      vi.mocked(sunit.runFailingTests).mockReturnValue([]);
+      await server.getTool('list_failing_tests')!.handler({});
+
+      const refreshCall = vi.mocked(queries.executeFetchString).mock.calls[0][2];
+      expect(refreshCall).toContain('System needsCommit ifFalse:');
+      expect(refreshCall).toContain('System abortTransaction');
     });
 
     it('list_test_classes returns dictName\\tclassName rows', async () => {

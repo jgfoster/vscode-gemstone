@@ -158,4 +158,18 @@ describe('runFailingTests', () => {
   it('returns [] when nothing failed', () => {
     expect(runFailingTests(vi.fn<QueryExecutor>(() => ''))).toEqual([]);
   });
+
+  // Per-message printString cap: 1024 chars in the batched runner so a worst
+  // case of ~250 failing tests still fits under the 256KB MAX_RESULT. The
+  // single-method runner uses 4096 because there's only one entry; bumping
+  // the batched cap to match would silently truncate batched output under
+  // load. Lock the constant in.
+  it('caps each printString at 1024 chars to stay under MAX_RESULT', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    runFailingTests(exec);
+    const code = exec.mock.calls[0][1];
+    // Two occurrences expected: one for failures, one for errors.
+    const matches = code.match(/printString size min: 1024/g) || [];
+    expect(matches.length).toBe(2);
+  });
 });

@@ -214,6 +214,18 @@ describe('tools', () => {
       expect(code).toContain("sendersOf: #'printString'");
       expect(result.content[0].text).toContain('String');
     });
+
+    // Symmetric with find_implementors / find_references_to — uses the same
+    // noResultsMessage helper, so a refactor that breaks one would silently
+    // break this without a guard.
+    it('returns env-1 hint when env 0 search is empty', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('find_senders')!;
+      const result = await tool.handler({ selector: 'nonexistent' });
+
+      expect(result.content[0].text).toContain('environmentId 0');
+      expect(result.content[0].text).toContain('environmentId: 1');
+    });
   });
 
   describe('get_class_hierarchy', () => {
