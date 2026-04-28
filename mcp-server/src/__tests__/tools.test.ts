@@ -48,6 +48,7 @@ describe('tools', () => {
       'delete_class',
       'delete_method',
       'describe_class',
+      'describe_test_failure',
       'execute_code',
       'export_class_source',
       'find_implementors',
@@ -676,6 +677,105 @@ describe('tools', () => {
       const refreshCall = vi.mocked(session.executeFetchString).mock.calls[0][0];
       expect(refreshCall).toContain('System needsCommit ifFalse:');
       expect(refreshCall).toContain('System abortTransaction');
+    });
+  });
+
+  describe('describe_test_failure', () => {
+    // For TestFailure (assertion failure) — should produce structured output
+    // that names the exception class and the assertion's clean messageText
+    // (which is "Assertion failed", separate from the printString blob the
+    // old runTestMethod tool returned).
+    it('formats TestFailure output with exceptionClass + messageText', async () => {
+      vi.mocked(session.executeFetchString)
+        .mockReturnValueOnce('ok') // refreshIfClean
+        .mockReturnValueOnce(
+          'status: failed\n' +
+          'exceptionClass: TestFailure\n' +
+          'errorNumber: 2751\n' +
+          'messageText: Assertion failed\n' +
+          'description: TestFailure: Assertion failed\n',
+        );
+      const tool = server.getTool('describe_test_failure')!;
+      const result = await tool.handler({ className: 'ArrayTest', selector: 'testBad' });
+
+      expect(result.content[0].text).toContain('status: failed');
+      expect(result.content[0].text).toContain('exceptionClass: TestFailure');
+      expect(result.content[0].text).toContain('errorNumber: 2751');
+      expect(result.content[0].text).toContain('messageText: Assertion failed');
+    });
+
+    // For MessageNotUnderstood — must surface mnuReceiver and mnuSelector,
+    // the highest-signal fields for diagnosing "missing method" errors.
+    it('includes mnuReceiver and mnuSelector on MessageNotUnderstood', async () => {
+      vi.mocked(session.executeFetchString)
+        .mockReturnValueOnce('ok')
+        .mockReturnValueOnce(
+          'status: error\n' +
+          'exceptionClass: MessageNotUnderstood\n' +
+          'errorNumber: 2010\n' +
+          'messageText: a Object class does not understand #foo\n' +
+          'description: a Object class does not understand #foo\n' +
+          'mnuReceiver: Object\n' +
+          'mnuSelector: foo\n',
+        );
+      const tool = server.getTool('describe_test_failure')!;
+      const result = await tool.handler({ className: 'ArrayTest', selector: 'testErrors' });
+
+      expect(result.content[0].text).toContain('exceptionClass: MessageNotUnderstood');
+      expect(result.content[0].text).toContain('mnuReceiver: Object');
+      expect(result.content[0].text).toContain('mnuSelector: foo');
+    });
+
+    it('returns "PASSED" when the test re-run actually passed', async () => {
+      vi.mocked(session.executeFetchString)
+        .mockReturnValueOnce('ok')
+        .mockReturnValueOnce('status: passed\n');
+      const tool = server.getTool('describe_test_failure')!;
+      const result = await tool.handler({ className: 'ArrayTest', selector: 'testGood' });
+
+      expect(result.content[0].text).toBe('PASSED');
+    });
+
+    // Stale-transaction guard — same as the other test runners. A view
+    // pinned to old committed state would let an agent debug a failure
+    // that's already been fixed in the running stone.
+    it('issues an auto-refresh-if-clean before re-running the test', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('status: passed\n');
+      const tool = server.getTool('describe_test_failure')!;
+      await tool.handler({ className: 'ArrayTest', selector: 'testAny' });
+
+      const refreshCall = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(refreshCall).toContain('System needsCommit ifFalse:');
+      expect(refreshCall).toContain('System abortTransaction');
+    });
+
+    // The Smalltalk side has to use AbstractException (not Exception) —
+    // GemStone's exception hierarchy makes Exception a subclass, and
+    // MessageNotUnderstood escapes past Exception in some contexts. Lock
+    // this in so a future "simplification" doesn't regress to Exception
+    // and silently swallow MNUs.
+    it('catches AbstractException, not Exception (so MNUs do not escape)', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('status: passed\n');
+      const tool = server.getTool('describe_test_failure')!;
+      await tool.handler({ className: 'ArrayTest', selector: 'testAny' });
+
+      const queryCall = vi.mocked(session.executeFetchString).mock.calls.at(-1)![0];
+      expect(queryCall).toContain('on: AbstractException');
+      expect(queryCall).not.toMatch(/on: Exception\b/);
+    });
+
+    // SUnit's framework swallows the exception — we have to bypass it.
+    // The query must run setUp/perform/tearDown manually rather than
+    // calling tc>>run.
+    it('bypasses TestCase>>run by invoking setUp / perform / tearDown directly', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('status: passed\n');
+      const tool = server.getTool('describe_test_failure')!;
+      await tool.handler({ className: 'ArrayTest', selector: 'testAny' });
+
+      const queryCall = vi.mocked(session.executeFetchString).mock.calls.at(-1)![0];
+      expect(queryCall).toContain('tc setUp');
+      expect(queryCall).toContain('tc perform:');
+      expect(queryCall).toContain('tc tearDown');
     });
   });
 

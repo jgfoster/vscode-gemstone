@@ -43,6 +43,9 @@ vi.mock('../browserQueries', () => ({
 vi.mock('../sunitQueries', () => ({
   runTestMethod: vi.fn(() => ({ className: '', selector: '', status: 'passed', message: '', durationMs: 0 })),
   runTestClass: vi.fn(() => []),
+  runFailingTests: vi.fn(() => []),
+  discoverTestClasses: vi.fn(() => [] as Array<{ dictName: string; className: string }>),
+  describeTestFailure: vi.fn(() => ({ status: 'passed' })),
   SunitQueryError: class SunitQueryError extends Error {
     gciErrorNumber: number;
     constructor(msg: string, num = 0) { super(msg); this.gciErrorNumber = num; }
@@ -154,6 +157,7 @@ describe('McpSocketServer integration', () => {
         'delete_class',
         'delete_method',
         'describe_class',
+        'describe_test_failure',
         'execute_code',
         'export_class_source',
         'find_implementors',

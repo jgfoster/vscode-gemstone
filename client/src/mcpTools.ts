@@ -4,6 +4,7 @@ import { ActiveSession } from './sessionManager';
 import * as queries from './browserQueries';
 import * as sunit from './sunitQueries';
 import type { TestRunResult } from './queries/runTestMethod';
+import type { TestFailureDetails } from './queries/describeTestFailure';
 import { withMcpErrorMap } from './mcpZodErrorMap';
 
 // Refresh the session's view of committed state if it's safe to do so.
@@ -204,6 +205,23 @@ export function registerMcpTools(
     },
     async (args) => wrap<typeof args>((session, a) => {
       return queries.describeClass(session, a.className, a.dictionaryName);
+    })(args),
+  );
+
+  server.tool(
+    'describe_test_failure',
+    'Re-run a single SUnit test method and return structured details about why it failed: ' +
+    'exception class, GemStone error number, messageText, description, and (for ' +
+    'MessageNotUnderstood) the receiver and missing selector. Use this after run_test_method ' +
+    'or list_failing_tests reports a failure. Re-runs in isolation with its own ' +
+    'AbstractException handler — bypasses TestCase>>run, which would swallow the exception.',
+    {
+      className: z.string().describe('TestCase subclass name'),
+      selector: z.string().describe('Test method selector, e.g. "testAdd"'),
+    },
+    async (args) => wrap<typeof args>((session, a) => {
+      const details = sunit.describeTestFailure(session, a.className, a.selector);
+      return formatTestFailureDetails(details);
     })(args),
   );
 
@@ -564,6 +582,22 @@ function formatTestResult(r: TestRunResult): string {
   const prefix = r.status === 'passed' ? 'PASSED' : r.status === 'failed' ? 'FAILED' : 'ERROR';
   const msg = r.message ? `: ${r.message}` : '';
   return `${prefix}${msg} (${r.durationMs}ms)`;
+}
+
+// Render TestFailureDetails as line-oriented text. Agents read this directly,
+// so the format is "<key>: <value>\n" — easy to scan, easy to grep, no
+// structure beyond the keys the Smalltalk side already provides.
+function formatTestFailureDetails(d: TestFailureDetails): string {
+  if (d.status === 'passed') return 'PASSED';
+  const lines: string[] = [];
+  lines.push(`status: ${d.status}`);
+  if (d.exceptionClass) lines.push(`exceptionClass: ${d.exceptionClass}`);
+  if (d.errorNumber !== undefined) lines.push(`errorNumber: ${d.errorNumber}`);
+  if (d.messageText !== undefined) lines.push(`messageText: ${d.messageText}`);
+  if (d.description !== undefined) lines.push(`description: ${d.description}`);
+  if (d.mnuReceiver !== undefined) lines.push(`mnuReceiver: ${d.mnuReceiver}`);
+  if (d.mnuSelector !== undefined) lines.push(`mnuSelector: ${d.mnuSelector}`);
+  return lines.join('\n');
 }
 
 function formatTestResults(results: TestRunResult[]): string {

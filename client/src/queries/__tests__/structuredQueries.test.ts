@@ -8,6 +8,7 @@ import { getClassHierarchy } from '../getClassHierarchy';
 import { getMethodList } from '../getMethodList';
 import { getStepPointSelectorRanges } from '../getStepPointSelectorRanges';
 import { runFailingTests } from '../runFailingTests';
+import { describeTestFailure } from '../describeTestFailure';
 
 describe('getDictionaryEntries', () => {
   it('parses class (1) and global (0) rows', () => {
@@ -171,5 +172,87 @@ describe('runFailingTests', () => {
     // Two occurrences expected: one for failures, one for errors.
     const matches = code.match(/printString size min: 1024/g) || [];
     expect(matches.length).toBe(2);
+  });
+});
+
+describe('describeTestFailure', () => {
+  // The parser is line-prefixed key/value — unknown keys must be silently
+  // ignored so a future Smalltalk-side addition (extra fields, GS-version
+  // specific extras) doesn't crash callers.
+  it('parses TestFailure-shaped output into structured details', () => {
+    const raw = 'status: failed\n' +
+      'exceptionClass: TestFailure\n' +
+      'errorNumber: 2751\n' +
+      'messageText: Assertion failed\n' +
+      'description: TestFailure: Assertion failed\n';
+    const result = describeTestFailure(vi.fn<QueryExecutor>(() => raw), 'ArrayTest', 'testBad');
+    expect(result).toEqual({
+      status: 'failed',
+      exceptionClass: 'TestFailure',
+      errorNumber: 2751,
+      messageText: 'Assertion failed',
+      description: 'TestFailure: Assertion failed',
+    });
+  });
+
+  it('parses MessageNotUnderstood output, including mnuReceiver and mnuSelector', () => {
+    const raw = 'status: error\n' +
+      'exceptionClass: MessageNotUnderstood\n' +
+      'errorNumber: 2010\n' +
+      'messageText: a Object class does not understand #foo\n' +
+      'description: a Object class does not understand #foo\n' +
+      'mnuReceiver: Object\n' +
+      'mnuSelector: foo\n';
+    const result = describeTestFailure(vi.fn<QueryExecutor>(() => raw), 'ArrayTest', 'testErrors');
+    expect(result.status).toBe('error');
+    expect(result.exceptionClass).toBe('MessageNotUnderstood');
+    expect(result.mnuReceiver).toBe('Object');
+    expect(result.mnuSelector).toBe('foo');
+  });
+
+  it('parses passed status with no other fields', () => {
+    const result = describeTestFailure(vi.fn<QueryExecutor>(() => 'status: passed\n'), 'X', 'y');
+    expect(result.status).toBe('passed');
+    expect(result.exceptionClass).toBeUndefined();
+    expect(result.messageText).toBeUndefined();
+  });
+
+  // Unknown keys must not throw — required so we can extend the snippet
+  // server-side without coordinating client updates.
+  it('ignores unknown keys', () => {
+    const raw = 'status: failed\nfutureField: whatever\nexceptionClass: TestFailure\n';
+    const result = describeTestFailure(vi.fn<QueryExecutor>(() => raw), 'X', 'y');
+    expect(result.status).toBe('failed');
+    expect(result.exceptionClass).toBe('TestFailure');
+  });
+
+  // The Smalltalk side has to use AbstractException — the GS hierarchy
+  // means MessageNotUnderstood escapes past Exception in some session
+  // contexts. Lock this in so a future "simplification" doesn't regress.
+  it('uses AbstractException for the live exception capture', () => {
+    const exec = vi.fn<QueryExecutor>(() => 'status: passed\n');
+    describeTestFailure(exec, 'ArrayTest', 'testGood');
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain('on: AbstractException');
+    expect(code).not.toMatch(/on: Exception\b/);
+  });
+
+  // Bypass SUnit's swallow-the-exception runner.
+  it('runs setUp / perform / tearDown manually rather than going through TestCase>>run', () => {
+    const exec = vi.fn<QueryExecutor>(() => 'status: passed\n');
+    describeTestFailure(exec, 'ArrayTest', 'testGood');
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain('tc setUp');
+    expect(code).toContain('tc perform:');
+    expect(code).toContain('tc tearDown');
+    expect(code).not.toMatch(/tc run\b/);
+  });
+
+  it('escapes single quotes in className and selector', () => {
+    const exec = vi.fn<QueryExecutor>(() => 'status: passed\n');
+    describeTestFailure(exec, "Foo'Bar", "test'X");
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain("Foo''Bar");
+    expect(code).toContain("test''X");
   });
 });

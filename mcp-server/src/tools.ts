@@ -11,6 +11,7 @@ import { runTestMethod, TestRunResult } from '../../client/src/queries/runTestMe
 import { runTestClass } from '../../client/src/queries/runTestClass';
 import { runFailingTests } from '../../client/src/queries/runFailingTests';
 import { discoverTestClasses } from '../../client/src/queries/discoverTestClasses';
+import { describeTestFailure, TestFailureDetails } from '../../client/src/queries/describeTestFailure';
 import { getDictionaryNames } from '../../client/src/queries/getDictionaryNames';
 import { getClassNames } from '../../client/src/queries/getClassNames';
 import { getDictionaryEntries } from '../../client/src/queries/getDictionaryEntries';
@@ -46,6 +47,22 @@ function formatTestResults(results: TestRunResult[]): string {
       return `${prefix}: ${r.className} >> ${r.selector}${msg}`;
     })
     .join('\n');
+}
+
+// Render TestFailureDetails as line-oriented text. Agents read this directly,
+// so the format is "<key>: <value>\n" — easy to scan, easy to grep, no
+// structure beyond the keys the Smalltalk side already provides.
+function formatTestFailureDetails(d: TestFailureDetails): string {
+  if (d.status === 'passed') return 'PASSED';
+  const lines: string[] = [];
+  lines.push(`status: ${d.status}`);
+  if (d.exceptionClass) lines.push(`exceptionClass: ${d.exceptionClass}`);
+  if (d.errorNumber !== undefined) lines.push(`errorNumber: ${d.errorNumber}`);
+  if (d.messageText !== undefined) lines.push(`messageText: ${d.messageText}`);
+  if (d.description !== undefined) lines.push(`description: ${d.description}`);
+  if (d.mnuReceiver !== undefined) lines.push(`mnuReceiver: ${d.mnuReceiver}`);
+  if (d.mnuSelector !== undefined) lines.push(`mnuSelector: ${d.mnuSelector}`);
+  return lines.join('\n');
 }
 
 function formatMethodResults(results: MethodSearchResult[], fallback: string): string {
@@ -267,6 +284,31 @@ export function registerTools(rawServer: McpServer, session: McpSession): void {
       try {
         const text = describeClass(exec, className, dictionaryName);
         return { content: [{ type: 'text' as const, text }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'describe_test_failure',
+    'Re-run a single SUnit test method and return structured details about why it failed: ' +
+    'exception class, GemStone error number, messageText, description, and (for ' +
+    'MessageNotUnderstood) the receiver and missing selector. Use this after run_test_method ' +
+    'or list_failing_tests reports a failure. Re-runs in isolation with its own ' +
+    'AbstractException handler — bypasses TestCase>>run, which would swallow the exception.',
+    {
+      className: z.string().describe('TestCase subclass name'),
+      selector: z.string().describe('Test method selector, e.g. "testAdd"'),
+    },
+    async ({ className, selector }) => {
+      try {
+        refreshIfClean(session);
+        const details = describeTestFailure(exec, className, selector);
+        return { content: [{ type: 'text' as const, text: formatTestFailureDetails(details) }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],

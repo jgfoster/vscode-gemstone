@@ -36,6 +36,7 @@ vi.mock('../sunitQueries', () => ({
   runTestClass: vi.fn(() => []),
   runFailingTests: vi.fn(() => []),
   discoverTestClasses: vi.fn(() => [] as Array<{ dictName: string; className: string }>),
+  describeTestFailure: vi.fn(() => ({ status: 'passed' })),
   SunitQueryError: class SunitQueryError extends Error {
     gciErrorNumber: number;
     constructor(msg: string, num = 0) { super(msg); this.gciErrorNumber = num; }
@@ -108,6 +109,7 @@ describe('registerMcpTools', () => {
       'delete_class',
       'delete_method',
       'describe_class',
+      'describe_test_failure',
       'execute_code',
       'export_class_source',
       'find_implementors',
@@ -485,6 +487,48 @@ describe('registerMcpTools', () => {
       const result = await server.getTool('list_test_classes')!.handler({});
 
       expect(result.content[0].text).toBe('No TestCase subclasses found.');
+    });
+
+    it('describe_test_failure formats TestFailure output with exceptionClass + messageText', async () => {
+      vi.mocked(sunit.describeTestFailure).mockReturnValue({
+        status: 'failed',
+        exceptionClass: 'TestFailure',
+        errorNumber: 2751,
+        messageText: 'Assertion failed',
+        description: 'TestFailure: Assertion failed',
+      });
+      const result = await server.getTool('describe_test_failure')!
+        .handler({ className: 'ArrayTest', selector: 'testBad' });
+
+      expect(sunit.describeTestFailure).toHaveBeenCalledWith(session, 'ArrayTest', 'testBad');
+      expect(result.content[0].text).toContain('exceptionClass: TestFailure');
+      expect(result.content[0].text).toContain('messageText: Assertion failed');
+      expect(result.content[0].text).toContain('errorNumber: 2751');
+    });
+
+    it('describe_test_failure surfaces mnuReceiver and mnuSelector for MessageNotUnderstood', async () => {
+      vi.mocked(sunit.describeTestFailure).mockReturnValue({
+        status: 'error',
+        exceptionClass: 'MessageNotUnderstood',
+        errorNumber: 2010,
+        messageText: 'a Object class does not understand #foo',
+        description: 'a Object class does not understand #foo',
+        mnuReceiver: 'Object',
+        mnuSelector: 'foo',
+      });
+      const result = await server.getTool('describe_test_failure')!
+        .handler({ className: 'ArrayTest', selector: 'testErrors' });
+
+      expect(result.content[0].text).toContain('mnuReceiver: Object');
+      expect(result.content[0].text).toContain('mnuSelector: foo');
+    });
+
+    it('describe_test_failure returns "PASSED" when the re-run actually passed', async () => {
+      vi.mocked(sunit.describeTestFailure).mockReturnValue({ status: 'passed' });
+      const result = await server.getTool('describe_test_failure')!
+        .handler({ className: 'ArrayTest', selector: 'testGood' });
+
+      expect(result.content[0].text).toBe('PASSED');
     });
 
     it('refresh runs needsCommit/abortTransaction and returns the result', async () => {
