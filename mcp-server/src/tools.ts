@@ -8,6 +8,8 @@ import { abortTransaction } from '../../client/src/queries/abortTransaction';
 import { commitTransaction } from '../../client/src/queries/commitTransaction';
 import { runTestMethod, TestRunResult } from '../../client/src/queries/runTestMethod';
 import { runTestClass } from '../../client/src/queries/runTestClass';
+import { runFailingTests } from '../../client/src/queries/runFailingTests';
+import { discoverTestClasses } from '../../client/src/queries/discoverTestClasses';
 import { getDictionaryNames } from '../../client/src/queries/getDictionaryNames';
 import { getClassNames } from '../../client/src/queries/getClassNames';
 import { getDictionaryEntries } from '../../client/src/queries/getDictionaryEntries';
@@ -535,6 +537,43 @@ export function registerTools(server: McpServer, session: McpSession): void {
   );
 
   server.tool(
+    'list_failing_tests',
+    'Run SUnit tests and return only the failed/errored results — the agent ' +
+    'equivalent of "run the suite and grep for failures." With no classNames, ' +
+    'discovers and runs every TestCase subclass in the symbolList. With ' +
+    'classNames, runs only those classes (names that don\'t resolve are ' +
+    'skipped silently). Auto-refreshes the session view first when no ' +
+    'uncommitted changes are pending. Returns "All tests passed." if every ' +
+    'test passed; otherwise tab-separated lines: status, className, selector, message.',
+    {
+      classNames: z.array(z.string()).optional().describe(
+        'TestCase subclass names to run. Omit to run every TestCase in the symbolList.',
+      ),
+    },
+    async ({ classNames }) => {
+      try {
+        refreshIfClean(session);
+        const results = runFailingTests(exec, classNames);
+        if (results.length === 0) {
+          return { content: [{ type: 'text' as const, text: 'All tests passed.' }] };
+        }
+        const text = results
+          .map(r => {
+            const status = r.status === 'failed' ? 'FAILED' : 'ERROR';
+            return `${status}\t${r.className}\t${r.selector}\t${r.message}`;
+          })
+          .join('\n');
+        return { content: [{ type: 'text' as const, text }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
     'list_methods',
     'List all methods of a class, grouped by category. Returns tab-separated lines: side (instance|class), category, selector.',
     { className: z.string().describe('Class name') },
@@ -546,6 +585,31 @@ export function registerTools(server: McpServer, session: McpSession): void {
         }
         const text = methods
           .map(m => `${m.isMeta ? 'class' : 'instance'}\t${m.category}\t${m.selector}`)
+          .join('\n');
+        return { content: [{ type: 'text' as const, text }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'list_test_classes',
+    'Discover every TestCase subclass in the user\'s symbolList. Returns ' +
+    'tab-separated lines: dictName, className. Useful for then passing a ' +
+    'filtered subset to list_failing_tests.',
+    {},
+    async () => {
+      try {
+        const classes = discoverTestClasses(exec);
+        if (classes.length === 0) {
+          return { content: [{ type: 'text' as const, text: 'No TestCase subclasses found.' }] };
+        }
+        const text = classes
+          .map(c => `${c.dictName}\t${c.className}`)
           .join('\n');
         return { content: [{ type: 'text' as const, text }] };
       } catch (err) {

@@ -7,6 +7,7 @@ import { getClassEnvironments } from '../getClassEnvironments';
 import { getClassHierarchy } from '../getClassHierarchy';
 import { getMethodList } from '../getMethodList';
 import { getStepPointSelectorRanges } from '../getStepPointSelectorRanges';
+import { runFailingTests } from '../runFailingTests';
 
 describe('getDictionaryEntries', () => {
   it('parses class (1) and global (0) rows', () => {
@@ -107,5 +108,54 @@ describe('getStepPointSelectorRanges', () => {
       { stepPoint: 1, selectorOffset: 0, selectorLength: 3, selectorText: 'foo' },
       { stepPoint: 2, selectorOffset: 5, selectorLength: 4, selectorText: 'bar:' },
     ]);
+  });
+});
+
+describe('runFailingTests', () => {
+  it('parses class\\tselector\\tstatus\\tmessage rows into TestRunResult[]', () => {
+    const raw = 'MyTest\ttestBad\tfailed\texpected 1 got 2\nOther\ttestBoom\terror\tdivision by zero\n';
+    const results = runFailingTests(vi.fn<QueryExecutor>(() => raw));
+    expect(results).toEqual([
+      { className: 'MyTest', selector: 'testBad', status: 'failed', message: 'expected 1 got 2', durationMs: 0 },
+      { className: 'Other', selector: 'testBoom', status: 'error', message: 'division by zero', durationMs: 0 },
+    ]);
+  });
+
+  // No classNames → discover-all path. The Smalltalk snippet must walk the
+  // user's symbolList for TestCase subclasses (excluding TestCase itself);
+  // the explicit-list-only `objectNamed:` and `reject:` constructs must NOT
+  // appear, otherwise the path got swapped.
+  it('uses the discover-all path when no classNames are given', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    runFailingTests(exec);
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain('symbolList');
+    expect(code).toContain('isSubclassOf: TestCase');
+    expect(code).toContain('IdentitySet');
+    expect(code).not.toContain('objectNamed:');
+    expect(code).not.toContain('reject: [:c | c isNil]');
+  });
+
+  // With names → explicit-list path. Each name is resolved separately so a
+  // single typo doesn't blow up the whole run; missing names get filtered
+  // out before the suite executes.
+  it('uses the explicit-list path when classNames are given, building the list at runtime', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    runFailingTests(exec, ['ArrayTest', 'StringTest']);
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain("objectNamed: #'ArrayTest'");
+    expect(code).toContain("objectNamed: #'StringTest'");
+    expect(code).toContain('reject: [:c | c isNil]');
+  });
+
+  it('escapes single quotes in classNames', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    runFailingTests(exec, ["it's"]);
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain("#'it''s'");
+  });
+
+  it('returns [] when nothing failed', () => {
+    expect(runFailingTests(vi.fn<QueryExecutor>(() => ''))).toEqual([]);
   });
 });

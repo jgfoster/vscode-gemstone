@@ -60,7 +60,9 @@ describe('tools', () => {
       'list_classes',
       'list_dictionaries',
       'list_dictionary_entries',
+      'list_failing_tests',
       'list_methods',
+      'list_test_classes',
       'refresh',
       'remove_dictionary',
       'run_test_class',
@@ -662,6 +664,70 @@ describe('tools', () => {
       const refreshCall = vi.mocked(session.executeFetchString).mock.calls[0][0];
       expect(refreshCall).toContain('System needsCommit ifFalse:');
       expect(refreshCall).toContain('System abortTransaction');
+    });
+  });
+
+  describe('list_failing_tests', () => {
+    // The agent equivalent of `./run_tests.sh | grep failures`. Single
+    // round-trip: iteration runs in Smalltalk so an N-class invocation is
+    // one GCI call, not N. Auto-refresh-if-clean ensures results reflect
+    // committed state.
+    it('returns "All tests passed." when nothing failed', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('list_failing_tests')!;
+      const result = await tool.handler({});
+
+      expect(result.content[0].text).toBe('All tests passed.');
+    });
+
+    it('formats failures as STATUS\\tclass\\tselector\\tmessage', async () => {
+      vi.mocked(session.executeFetchString)
+        .mockReturnValueOnce('ok') // refreshIfClean response
+        .mockReturnValueOnce('MyTest\ttestBad\tfailed\texpected 1 got 2\nOther\ttestBoom\terror\tdivision by zero\n');
+      const tool = server.getTool('list_failing_tests')!;
+      const result = await tool.handler({});
+
+      expect(result.content[0].text).toContain('FAILED\tMyTest\ttestBad\texpected 1 got 2');
+      expect(result.content[0].text).toContain('ERROR\tOther\ttestBoom\tdivision by zero');
+    });
+
+    it('passes explicit classNames to the underlying query', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('list_failing_tests')!;
+      await tool.handler({ classNames: ['ArrayTest', 'StringTest'] });
+
+      // The query call (non-refresh one) must reference each requested name.
+      const queryCall = vi.mocked(session.executeFetchString).mock.calls.at(-1)![0];
+      expect(queryCall).toContain("objectNamed: #'ArrayTest'");
+      expect(queryCall).toContain("objectNamed: #'StringTest'");
+    });
+
+    it('issues an auto-refresh-if-clean before the suite runs', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('list_failing_tests')!;
+      await tool.handler({});
+
+      const refreshCall = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(refreshCall).toContain('System needsCommit ifFalse:');
+      expect(refreshCall).toContain('System abortTransaction');
+    });
+  });
+
+  describe('list_test_classes', () => {
+    it('returns dictName\\tclassName rows', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('UserGlobals\tArrayTest\nUserGlobals\tStringTest\n');
+      const tool = server.getTool('list_test_classes')!;
+      const result = await tool.handler({});
+
+      expect(result.content[0].text).toBe('UserGlobals\tArrayTest\nUserGlobals\tStringTest');
+    });
+
+    it('returns a friendly message when no TestCase subclasses are found', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('list_test_classes')!;
+      const result = await tool.handler({});
+
+      expect(result.content[0].text).toBe('No TestCase subclasses found.');
     });
   });
 

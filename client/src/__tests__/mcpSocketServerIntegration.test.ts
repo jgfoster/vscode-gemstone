@@ -141,7 +141,7 @@ describe('McpSocketServer integration', () => {
     await server.dispose();
   });
 
-  it('lists the 27 registered tools over the socket', async () => {
+  it('lists the registered tools over the socket', async () => {
     const { client, socket } = await connectClient(server.socketPath);
     try {
       const { tools } = await client.listTools();
@@ -166,7 +166,10 @@ describe('McpSocketServer integration', () => {
         'list_classes',
         'list_dictionaries',
         'list_dictionary_entries',
+        'list_failing_tests',
         'list_methods',
+        'list_test_classes',
+        'refresh',
         'remove_dictionary',
         'run_test_class',
         'run_test_method',

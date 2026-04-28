@@ -5,44 +5,31 @@
 External feedback (see `Grail/docs/MCP_Server_Feedback.md`) from a Claude Code session that
 exercised the `gemstone` MCP server retroactively after a CLI workflow. Items grouped by impact.
 
-### Paper cuts (mislead the agent)
+### Shipped
 
-- **`execute_code` rejects multi-statement input.** `| x | x := 42. x + 1` errors with
-  "expected start of a statement" because the body is wrapped as `(${code}) printString`.
-  Wrap as a block (`[${code}] value printString`) so multi-statement / temp-var bodies parse,
-  or document the requirement loudly in the tool description.
-- **`find_implementors` / `find_senders` default to `environmentId: 0`.** Agents searching
-  Python-heavy projects (env 1) get "No implementors found" when the method exists. Either
-  surface an env hint in the empty-result message ("no implementors in env 0 — try env 1")
-  or default differently per project.
+- `execute_code` block-wraps input — multi-statement bodies and temp declarations parse.
+- `find_implementors` / `find_senders` / `find_references_to` hint at env 1 when env 0 search is empty.
+- `status`, `run_test_class`, `run_test_method`, `list_failing_tests` auto-refresh-if-clean
+  before reading. New `refresh` tool exposes the same primitive explicitly.
+- `list_failing_tests` (with optional `classNames`) runs the suite and returns only failures —
+  iteration happens in Smalltalk so it's a single GCI round-trip.
+- `list_test_classes` enumerates TestCase subclasses for filtering before `list_failing_tests`.
+
+### Still open
+
 - **Validator errors are not actionable.** Missing `isMeta` returns a bare zod
   "expected boolean, received undefined." `run_test_method` rejects `methodName` without
-  suggesting `selector`. The MCP error wrapper should name the missing/misnamed parameter.
-
-### Correctness (silent staleness)
-
-- **Stale-transaction silently lies.** `status` and read tools reflected the session's
-  pre-commit view (`1497 run`) after an external `install.sh` had committed (`1517 run`).
-  Options: auto-`abort` before read-only calls when `System needsCommit` is false; surface
-  `lastCommit` in `status`; or add an explicit `refresh` tool. Today the MCP can lie to the
-  agent without any signal.
-
-### New capabilities (rank order by ROI for an iteration loop)
-
-1. **`run_test_class` with auto-abort / refresh** — implicit transaction refresh before running.
-2. **`eval_python` / `compile_python`** — given a Python source string, return the generated
-   Smalltalk or the eval result. Closes the `/tmp/diag*.gs` gap for the GemStone-Python codegen
-   path (Grail-style projects).
-3. **`list_failing_tests`** — full-suite run that returns only failures, structured
-   (selector + error message + line), instead of having to grep `topaz` output.
-4. **`run_test_class` accepting a prefix or pattern** — e.g. `Bytes*TestCase` to verify
-   several related TestCase subclasses at once.
-5. **`compile_method_from_file`** — point at a `.gs` file + selector and recompile just that
-   method in the running stone. Avoids a full `install.sh` round-trip.
-6. **`save_to_file`** — write a method just compiled live via `compile_method` back to the
-   matching `.gs` file. Pairs with #5 to make MCP edits durable.
-7. **`describe_test_failure`** — structured assertion message + exception class + line +
-   stack frame for a failing test.
+  suggesting `selector`. The MCP error wrapper should name the missing/misnamed parameter
+  (likely via a custom zod error map registered globally).
+- **`eval_python` / `compile_python`.** Given a Python source string, return the generated
+  Smalltalk or the eval result. Closes the `/tmp/diag*.gs` gap for the GemStone-Python codegen
+  path (Grail-style projects). *Out of scope for general Jasper unless Grail's surface lands here.*
+- **`compile_method_from_file` + `save_to_file`.** Point at a `.gs` file + selector and recompile
+  just that method, then write live changes back to disk. *Blocked by the proxy model — the MCP
+  server doesn't have file-system access; the host extension would have to mediate.*
+- **`describe_test_failure`.** Structured assertion message + exception class + line + stack frame
+  for a failing test. Needs richer extraction in `runTestMethod` / `runFailingTests`
+  (currently returns `printString`, not structured frames).
 
 ## Ideas
 - **Code Snippets** — Templates for common patterns: do:, collect:, ifTrue:ifFalse:, class definition boilerplate.
