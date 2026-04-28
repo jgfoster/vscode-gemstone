@@ -43,9 +43,20 @@ exercised the `gemstone` MCP server retroactively after a CLI workflow. Items gr
 
 ### Still open
 
-- **`compile_method_from_file` + `save_to_file`.** Point at a `.gs` file + selector and recompile
-  just that method, then write live changes back to disk. *Blocked by the proxy model — the MCP
-  server doesn't have file-system access; the host extension would have to mediate.*
+(none)
+
+### Rejected (with rationale)
+
+- **`compile_method_from_file` + `save_to_file`.** The original feedback came from a Grail
+  session running outside an editor, with a hot loop of `edit .gs file → install.sh
+  (recompiles 114 classes, ~30s) → test`. The proposed tools were shortcuts around that
+  install.sh roundtrip. Jasper's workflow is different: [fileInManager.ts](client/src/fileInManager.ts)
+  already auto-files-in `.gs` saves to the running stone, so the agent's existing `Edit` tool
+  + VS Code save covers the same need. Adding `save_to_file` would actively introduce a
+  second write path competing with the editor's save handler — a stale-disk-vs-stale-stone
+  race the existing pipeline already avoids. `compile_method_from_file` would offer
+  parser-aware "extract just method X" extraction over what `Read` + `compile_method`
+  already does, but the gap is small and not worth the new surface area for Jasper users.
 
 ## Ideas
 - **Code Snippets** — Templates for common patterns: do:, collect:, ifTrue:ifFalse:, class definition boilerplate.
