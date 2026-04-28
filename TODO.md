@@ -14,13 +14,14 @@ exercised the `gemstone` MCP server retroactively after a CLI workflow. Items gr
 - `list_failing_tests` (with optional `classNames`) runs the suite and returns only failures —
   iteration happens in Smalltalk so it's a single GCI round-trip.
 - `list_test_classes` enumerates TestCase subclasses for filtering before `list_failing_tests`.
+- Actionable validator errors. Per-schema zod error map (not global — global breaks the SDK's
+  protocol parsing) rewrites missing-parameter and wrong-type messages to name the offending
+  field, e.g. `"Missing required parameter 'isMeta' (expected boolean)."`. A typo like
+  `methodName` for `selector` surfaces as a missing-required error on `selector`, which is
+  enough for an agent to recover.
 
 ### Still open
 
-- **Validator errors are not actionable.** Missing `isMeta` returns a bare zod
-  "expected boolean, received undefined." `run_test_method` rejects `methodName` without
-  suggesting `selector`. The MCP error wrapper should name the missing/misnamed parameter
-  (likely via a custom zod error map registered globally).
 - **`eval_python` / `compile_python`.** Given a Python source string, return the generated
   Smalltalk or the eval result. Closes the `/tmp/diag*.gs` gap for the GemStone-Python codegen
   path (Grail-style projects). *Out of scope for general Jasper unless Grail's surface lands here.*

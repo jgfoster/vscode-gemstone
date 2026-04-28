@@ -4,6 +4,7 @@ import { ActiveSession } from './sessionManager';
 import * as queries from './browserQueries';
 import * as sunit from './sunitQueries';
 import type { TestRunResult } from './queries/runTestMethod';
+import { withMcpErrorMap } from './mcpZodErrorMap';
 
 // Refresh the session's view of committed state if it's safe to do so.
 // GemStone's GCI pins read-only operations to the session's transaction
@@ -47,9 +48,15 @@ function noResultsMessage(label: string, environmentId: number): string {
  * tell the user to log in.
  */
 export function registerMcpTools(
-  server: McpServer,
+  rawServer: McpServer,
   getSession: () => ActiveSession | undefined,
 ): void {
+
+  // Wrap the MCP server so each tool's input shape gets the actionable-error
+  // zod error map attached at registration time. Per-schema attachment (not
+  // global z.config) — see mcpZodErrorMap.ts for why a global map breaks the
+  // SDK's protocol parsing.
+  const server = withMcpErrorMap(rawServer) as unknown as McpServer;
 
   function requireSession(): ActiveSession | { errorText: string } {
     const session = getSession();

@@ -263,4 +263,28 @@ describe('McpSocketServer integration', () => {
       socket.destroy();
     }
   });
+
+  // Verifies the actionable-error zod error map flows end-to-end: the SDK
+  // serializes zod issues into the JSON-RPC error response verbatim, so the
+  // installed custom map's text must reach the client untouched. Without
+  // this guard, a future SDK upgrade that started templating its own messages
+  // would silently regress the "Missing required parameter 'X'" phrasing
+  // back to the bare zod default.
+  it('routes a missing-parameter validation failure through the custom error map', async () => {
+    const { client, socket } = await connectClient(server.socketPath);
+    try {
+      const result = await client.callTool({
+        name: 'get_method_source',
+        arguments: { className: 'Array', selector: 'size' }, // isMeta omitted
+      });
+
+      const text = (result.content as Array<{ type: string; text: string }>)[0].text;
+      expect(text).toContain("Missing required parameter 'isMeta'");
+      expect(text).toContain('expected boolean');
+    } finally {
+      await client.close();
+      socket.destroy();
+    }
+  });
+
 });

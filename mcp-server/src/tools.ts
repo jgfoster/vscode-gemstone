@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { McpSession } from './mcpSession';
+import { withMcpErrorMap } from '../../client/src/mcpZodErrorMap';
 
 import { QueryExecutor } from '../../client/src/queries/types';
 import { getMethodSource } from '../../client/src/queries/getMethodSource';
@@ -84,7 +85,13 @@ function refreshIfClean(session: McpSession): void {
   }
 }
 
-export function registerTools(server: McpServer, session: McpSession): void {
+export function registerTools(rawServer: McpServer, session: McpSession): void {
+
+  // Wrap the MCP server so each tool's input shape gets the actionable-error
+  // zod error map attached at registration time. Per-schema attachment (not
+  // global z.config) — see mcpZodErrorMap.ts for why a global map breaks the
+  // SDK's protocol parsing.
+  const server = withMcpErrorMap(rawServer) as unknown as McpServer;
 
   // Bind this session into the QueryExecutor shape shared queries expect.
   // Label is used only for client-side logging, ignored here.
