@@ -9,6 +9,7 @@ import { getMethodList } from '../getMethodList';
 import { getStepPointSelectorRanges } from '../getStepPointSelectorRanges';
 import { runFailingTests } from '../runFailingTests';
 import { describeTestFailure } from '../describeTestFailure';
+import { evalPython, compilePython } from '../python';
 
 describe('getDictionaryEntries', () => {
   it('parses class (1) and global (0) rows', () => {
@@ -322,5 +323,72 @@ describe('describeTestFailure', () => {
     describeTestFailure(exec, 'X', 'y');
     const code = exec.mock.calls[0][1];
     expect(code).toContain('size min: 16384');
+  });
+});
+
+describe('python (Grail) queries', () => {
+  // Detection: a missing ModuleAst class is the signal that Grail isn't
+  // installed. Direct reference like `ModuleAst evaluateSource: ...` would
+  // be a *compile-time* failure of our query source — there'd be no
+  // runtime exception to catch. Resolving via objectNamed: makes the
+  // dispatcher's absence a runtime nil check we can branch on.
+  it('uses objectNamed: ModuleAst rather than a direct class reference', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    evalPython(exec, 'x = 1');
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain("objectNamed: #'ModuleAst'");
+    expect(code).toContain('dispatcher isNil');
+  });
+
+  it('emits a graceful "Grail not detected" hint as the nil-branch result', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    evalPython(exec, 'x = 1');
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain('Grail (GemStone-Python) not detected');
+    expect(code).toContain('class ModuleAst not found');
+  });
+
+  // The dispatcher is reused across both tools — they should produce
+  // identical detection scaffolding, only differing in the Grail
+  // expression that runs in the ifFalse branch.
+  it('eval_python uses ModuleAst evaluateSource: (returns the printed result)', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    evalPython(exec, 'print(1+2)');
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain('dispatcher evaluateSource: src');
+    expect(code).toContain('printString');
+  });
+
+  it('compile_python uses (ModuleAst parseSource: src) smalltalkSource', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    compilePython(exec, 'x = 1');
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain('dispatcher parseSource: src');
+    expect(code).toContain('smalltalkSource');
+  });
+
+  // Python source frequently contains single-quoted string literals — the
+  // standard Smalltalk doubling rule must apply or the query won't parse.
+  it('escapes single quotes in Python source', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    evalPython(exec, "x = 'hello'");
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain("''hello''");
+  });
+
+  // Errors from Grail's compile/runtime path (SyntaxError, NameError, etc.)
+  // are caught and reported inline as "Error: <class> — <messageText>" so
+  // the agent gets a usable diagnostic, not a dropped tool call.
+  it('wraps the Grail call in on: AbstractException do:', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    evalPython(exec, 'x = 1');
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain('on: AbstractException');
+    expect(code).toContain("'Error: ' , e class name");
+  });
+
+  it('returns the executor result verbatim — no parsing on the JS side', () => {
+    const result = evalPython(vi.fn<QueryExecutor>(() => '3'), '1 + 2');
+    expect(result).toBe('3');
   });
 });

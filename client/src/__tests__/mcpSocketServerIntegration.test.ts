@@ -51,6 +51,10 @@ vi.mock('../sunitQueries', () => ({
     constructor(msg: string, num = 0) { super(msg); this.gciErrorNumber = num; }
   },
 }));
+vi.mock('../pythonQueries', () => ({
+  evalPython: vi.fn(() => ''),
+  compilePython: vi.fn(() => ''),
+}));
 
 import * as net from 'net';
 import * as crypto from 'crypto';
@@ -154,10 +158,12 @@ describe('McpSocketServer integration', () => {
         'commit',
         'compile_class_definition',
         'compile_method',
+        'compile_python',
         'delete_class',
         'delete_method',
         'describe_class',
         'describe_test_failure',
+        'eval_python',
         'execute_code',
         'export_class_source',
         'find_implementors',

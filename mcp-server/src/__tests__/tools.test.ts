@@ -45,10 +45,12 @@ describe('tools', () => {
       'commit',
       'compile_class_definition',
       'compile_method',
+      'compile_python',
       'delete_class',
       'delete_method',
       'describe_class',
       'describe_test_failure',
+      'eval_python',
       'execute_code',
       'export_class_source',
       'find_implementors',
@@ -677,6 +679,43 @@ describe('tools', () => {
       const refreshCall = vi.mocked(session.executeFetchString).mock.calls[0][0];
       expect(refreshCall).toContain('System needsCommit ifFalse:');
       expect(refreshCall).toContain('System abortTransaction');
+    });
+  });
+
+  describe('eval_python', () => {
+    it('runs the Grail eval pipeline via objectNamed: ModuleAst', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('3');
+      const result = await server.getTool('eval_python')!.handler({ source: '1 + 2' });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain("objectNamed: #'ModuleAst'");
+      expect(code).toContain('evaluateSource: src');
+      expect(result.content[0].text).toBe('3');
+    });
+
+    // When Grail isn't loaded the snippet's nil-branch produces the hint as
+    // its result. The tool should pass it through verbatim — no special
+    // error handling at the JS layer, just the agent-readable text.
+    it('passes the "Grail not detected" hint through as the result text', async () => {
+      const hint = 'Grail (GemStone-Python) not detected: class ModuleAst not found in symbolList. ' +
+        'Install Grail or activate it in this session before using the python tools.';
+      vi.mocked(session.executeFetchString).mockReturnValue(hint);
+      const result = await server.getTool('eval_python')!.handler({ source: 'x = 1' });
+
+      expect(result.content[0].text).toContain('Grail (GemStone-Python) not detected');
+      expect(result.isError).toBeUndefined();
+    });
+  });
+
+  describe('compile_python', () => {
+    it('runs the Grail transpile pipeline (parseSource + smalltalkSource)', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue("x := 1");
+      const result = await server.getTool('compile_python')!.handler({ source: 'x = 1' });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain('parseSource: src');
+      expect(code).toContain('smalltalkSource');
+      expect(result.content[0].text).toBe('x := 1');
     });
   });
 

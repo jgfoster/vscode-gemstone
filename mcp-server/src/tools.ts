@@ -12,6 +12,7 @@ import { runTestClass } from '../../client/src/queries/runTestClass';
 import { runFailingTests } from '../../client/src/queries/runFailingTests';
 import { discoverTestClasses } from '../../client/src/queries/discoverTestClasses';
 import { describeTestFailure, TestFailureDetails } from '../../client/src/queries/describeTestFailure';
+import { evalPython, compilePython } from '../../client/src/queries/python';
 import { getDictionaryNames } from '../../client/src/queries/getDictionaryNames';
 import { getClassNames } from '../../client/src/queries/getClassNames';
 import { getDictionaryEntries } from '../../client/src/queries/getDictionaryEntries';
@@ -227,6 +228,29 @@ export function registerTools(rawServer: McpServer, session: McpSession): void {
   );
 
   server.tool(
+    'compile_python',
+    'Transpile Python source to Smalltalk via Grail (GemStone-Python) and return the ' +
+    'generated Smalltalk source verbatim. Useful for inspecting codegen output without ' +
+    'running the code, and as an end-to-end check on the codegen pipeline. ' +
+    'Returns a "Grail not detected" hint if Grail (class ModuleAst) is not loaded ' +
+    'in the current session.',
+    {
+      source: z.string().describe('Python source string to transpile'),
+    },
+    async ({ source }) => {
+      try {
+        const text = compilePython(exec, source);
+        return { content: [{ type: 'text' as const, text }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
     'delete_class',
     'DESTRUCTIVE: remove a class from a specific dictionary. Requires dictionaryName because ' +
     'deletion must target a specific dictionary (names can be shadowed across dicts). ' +
@@ -315,6 +339,30 @@ export function registerTools(rawServer: McpServer, session: McpSession): void {
         refreshIfClean(session);
         const details = describeTestFailure(exec, className, selector);
         return { content: [{ type: 'text' as const, text: formatTestFailureDetails(details) }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'eval_python',
+    'Compile and execute Python source via Grail (GemStone-Python) and return the result ' +
+    'as a printString. Closes the diagnostic-snippet gap for Python-heavy projects: ' +
+    'one tool call instead of writing a /tmp/diag*.gs script that drives the codegen ' +
+    'pipeline manually. Returns a "Grail not detected" hint if Grail (class ModuleAst) ' +
+    'is not loaded in the current session. Grail-side compile and runtime errors are ' +
+    'reported inline as "Error: <class> — <messageText>".',
+    {
+      source: z.string().describe('Python source string to evaluate'),
+    },
+    async ({ source }) => {
+      try {
+        const text = evalPython(exec, source);
+        return { content: [{ type: 'text' as const, text }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],

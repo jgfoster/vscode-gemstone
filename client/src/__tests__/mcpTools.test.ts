@@ -42,9 +42,14 @@ vi.mock('../sunitQueries', () => ({
     constructor(msg: string, num = 0) { super(msg); this.gciErrorNumber = num; }
   },
 }));
+vi.mock('../pythonQueries', () => ({
+  evalPython: vi.fn(() => ''),
+  compilePython: vi.fn(() => ''),
+}));
 
 import * as queries from '../browserQueries';
 import * as sunit from '../sunitQueries';
+import * as python from '../pythonQueries';
 import { registerMcpTools } from '../mcpTools';
 import { ActiveSession } from '../sessionManager';
 
@@ -106,10 +111,12 @@ describe('registerMcpTools', () => {
       'commit',
       'compile_class_definition',
       'compile_method',
+      'compile_python',
       'delete_class',
       'delete_method',
       'describe_class',
       'describe_test_failure',
+      'eval_python',
       'execute_code',
       'export_class_source',
       'find_implementors',
@@ -487,6 +494,33 @@ describe('registerMcpTools', () => {
       const result = await server.getTool('list_test_classes')!.handler({});
 
       expect(result.content[0].text).toBe('No TestCase subclasses found.');
+    });
+
+    it('eval_python delegates to python.evalPython with the source string', async () => {
+      vi.mocked(python.evalPython).mockReturnValue('3');
+      const result = await server.getTool('eval_python')!.handler({ source: '1 + 2' });
+
+      expect(python.evalPython).toHaveBeenCalledWith(session, '1 + 2');
+      expect(result.content[0].text).toBe('3');
+    });
+
+    // Tool registers unconditionally; the "Grail not loaded" message comes
+    // back from the Smalltalk side as ordinary result text.
+    it('eval_python passes the "Grail not detected" hint through verbatim', async () => {
+      vi.mocked(python.evalPython).mockReturnValue(
+        'Grail (GemStone-Python) not detected: class ModuleAst not found in symbolList. ...');
+      const result = await server.getTool('eval_python')!.handler({ source: 'x = 1' });
+
+      expect(result.content[0].text).toContain('Grail (GemStone-Python) not detected');
+      expect(result.isError).toBeUndefined();
+    });
+
+    it('compile_python delegates to python.compilePython with the source string', async () => {
+      vi.mocked(python.compilePython).mockReturnValue('x := 1');
+      const result = await server.getTool('compile_python')!.handler({ source: 'x = 1' });
+
+      expect(python.compilePython).toHaveBeenCalledWith(session, 'x = 1');
+      expect(result.content[0].text).toBe('x := 1');
     });
 
     it('describe_test_failure formats TestFailure output with exceptionClass + messageText', async () => {

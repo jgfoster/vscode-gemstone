@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ActiveSession } from './sessionManager';
 import * as queries from './browserQueries';
 import * as sunit from './sunitQueries';
+import * as python from './pythonQueries';
 import type { TestRunResult } from './queries/runTestMethod';
 import type { TestFailureDetails } from './queries/describeTestFailure';
 import { withMcpErrorMap } from './mcpZodErrorMap';
@@ -160,6 +161,21 @@ export function registerMcpTools(
   );
 
   server.tool(
+    'compile_python',
+    'Transpile Python source to Smalltalk via Grail (GemStone-Python) and return the ' +
+    'generated Smalltalk source verbatim. Useful for inspecting codegen output without ' +
+    'running the code, and as an end-to-end check on the codegen pipeline. ' +
+    'Returns a "Grail not detected" hint if Grail (class ModuleAst) is not loaded ' +
+    'in the current session.',
+    {
+      source: z.string().describe('Python source string to transpile'),
+    },
+    async (args) => wrap<typeof args>((session, a) => {
+      return python.compilePython(session, a.source);
+    })(args),
+  );
+
+  server.tool(
     'delete_class',
     'DESTRUCTIVE: remove a class from a specific dictionary. Requires dictionaryName because ' +
     'deletion must target a specific dictionary (names can be shadowed across dicts). ' +
@@ -222,6 +238,22 @@ export function registerMcpTools(
     async (args) => wrap<typeof args>((session, a) => {
       const details = sunit.describeTestFailure(session, a.className, a.selector);
       return formatTestFailureDetails(details);
+    })(args),
+  );
+
+  server.tool(
+    'eval_python',
+    'Compile and execute Python source via Grail (GemStone-Python) and return the result ' +
+    'as a printString. Closes the diagnostic-snippet gap for Python-heavy projects: ' +
+    'one tool call instead of writing a /tmp/diag*.gs script that drives the codegen ' +
+    'pipeline manually. Returns a "Grail not detected" hint if Grail (class ModuleAst) ' +
+    'is not loaded in the current session. Grail-side compile and runtime errors are ' +
+    'reported inline as "Error: <class> — <messageText>".',
+    {
+      source: z.string().describe('Python source string to evaluate'),
+    },
+    async (args) => wrap<typeof args>((session, a) => {
+      return python.evalPython(session, a.source);
     })(args),
   );
 

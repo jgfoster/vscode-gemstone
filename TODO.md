@@ -31,12 +31,18 @@ exercised the `gemstone` MCP server retroactively after a CLI workflow. Items gr
   are TestCase instances themselves with only `testSelector` ivar). On a real failure the
   queries would silently DNU; tests mock the output so it wasn't caught. Now uses the direct
   `each class name` / `each selector`, matching the `passed` branch.
+- `eval_python` / `compile_python` — register unconditionally on both surfaces, gracefully
+  detect Grail (GemStone-Python) by `objectNamed:` lookup of `ModuleAst`. With Grail loaded:
+  `eval_python` returns `(ModuleAst evaluateSource: src) printString`, `compile_python`
+  returns `(ModuleAst parseSource: src) smalltalkSource`. Without Grail: returns a
+  human-readable hint pointing at the missing class. Grail-side compile / runtime errors
+  are caught and reported inline as `Error: <class> — <messageText>`. Direct class
+  references (`ModuleAst evaluateSource: ...`) wouldn't work — that's a compile-time symbol
+  in our query source, not a runtime send, so a missing `ModuleAst` would fail the parse
+  before any handler could run. Dynamic resolution makes Grail's absence a runtime branch.
 
 ### Still open
 
-- **`eval_python` / `compile_python`.** Given a Python source string, return the generated
-  Smalltalk or the eval result. Closes the `/tmp/diag*.gs` gap for the GemStone-Python codegen
-  path (Grail-style projects). *Out of scope for general Jasper unless Grail's surface lands here.*
 - **`compile_method_from_file` + `save_to_file`.** Point at a `.gs` file + selector and recompile
   just that method, then write live changes back to disk. *Blocked by the proxy model — the MCP
   server doesn't have file-system access; the host extension would have to mediate.*
