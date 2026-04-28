@@ -61,6 +61,7 @@ describe('tools', () => {
       'list_dictionaries',
       'list_dictionary_entries',
       'list_methods',
+      'refresh',
       'remove_dictionary',
       'run_test_class',
       'run_test_method',
@@ -82,6 +83,21 @@ describe('tools', () => {
       expect(code).toContain('printString');
       expect(result.content[0].text).toBe('7');
       expect(result.isError).toBeUndefined();
+    });
+
+    // Regression: the original wrapper was `(<code>) printString`, which only
+    // accepts a single expression. A multi-statement body with temp
+    // declarations like `| x | x := 42. x + 1` would error with
+    // "expected start of a statement". Wrapping as a block (`[<code>] value`)
+    // accepts both single expressions and statement sequences.
+    it('block-wraps the code so multi-statement and temp-var bodies parse', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('43');
+      const tool = server.getTool('execute_code')!;
+      const result = await tool.handler({ code: '| x | x := 42. x + 1' });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toBe('[| x | x := 42. x + 1] value printString');
+      expect(result.content[0].text).toBe('43');
     });
 
     it('returns error on GCI failure', async () => {
@@ -164,12 +180,25 @@ describe('tools', () => {
       expect(result.content[0].text).toContain('Array');
     });
 
-    it('returns fallback message when no implementors found', async () => {
+    // When the search hits the default env (0) and finds nothing, the message
+    // should nudge the agent toward env 1 — projects like GemStone-Python keep
+    // most user code there, and the original "No implementors found." message
+    // was easy to misread as "the selector really doesn't exist anywhere."
+    it('returns env-1 hint when env 0 search is empty', async () => {
       vi.mocked(session.executeFetchString).mockReturnValue('');
       const tool = server.getTool('find_implementors')!;
       const result = await tool.handler({ selector: 'nonexistent' });
 
-      expect(result.content[0].text).toBe('No implementors found.');
+      expect(result.content[0].text).toContain('environmentId 0');
+      expect(result.content[0].text).toContain('environmentId: 1');
+    });
+
+    it('returns plain empty message when an explicit non-zero env is empty', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('find_implementors')!;
+      const result = await tool.handler({ selector: 'nonexistent', environmentId: 1 });
+
+      expect(result.content[0].text).toBe('No implementors found in environmentId 1.');
     });
   });
 
@@ -352,12 +381,13 @@ describe('tools', () => {
       expect(result.content[0].text).toContain('Foo\tinstance\tuse\tclient');
     });
 
-    it('returns fallback when no references found', async () => {
+    it('returns env-1 hint when env 0 search is empty', async () => {
       vi.mocked(session.executeFetchString).mockReturnValue('');
       const tool = server.getTool('find_references_to')!;
       const result = await tool.handler({ objectName: 'Unused' });
 
-      expect(result.content[0].text).toBe('No references found.');
+      expect(result.content[0].text).toContain('environmentId 0');
+      expect(result.content[0].text).toContain('environmentId: 1');
     });
   });
 
@@ -568,7 +598,8 @@ describe('tools', () => {
       const tool = server.getTool('run_test_method')!;
       const result = await tool.handler({ className: 'ArrayTest', selector: 'testSize' });
 
-      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      // The actual run_test_method query should follow the auto-refresh call.
+      const code = vi.mocked(session.executeFetchString).mock.calls.at(-1)![0];
       expect(code).toContain('ArrayTest');
       expect(code).toContain("selector: #'testSize'");
       expect(result.content[0].text).toContain('PASSED');
@@ -583,6 +614,20 @@ describe('tools', () => {
       expect(result.content[0].text).toContain('FAILED');
       expect(result.content[0].text).toContain('expected 3 got 4');
     });
+
+    // Stale-transaction guard: the GCI pins read views to the session's
+    // transaction snapshot, so a commit landed by another process (e.g.
+    // install.sh) is invisible until this session aborts. Auto-refresh-if-clean
+    // closes the gap silently when there's no uncommitted work to lose.
+    it('issues an auto-refresh-if-clean before running the test', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('passed\t\t1');
+      const tool = server.getTool('run_test_method')!;
+      await tool.handler({ className: 'ArrayTest', selector: 'testSize' });
+
+      const refreshCall = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(refreshCall).toContain('System needsCommit ifFalse:');
+      expect(refreshCall).toContain('System abortTransaction');
+    });
   });
 
   describe('run_test_class', () => {
@@ -592,7 +637,7 @@ describe('tools', () => {
       const tool = server.getTool('run_test_class')!;
       const result = await tool.handler({ className: 'ArrayTest' });
 
-      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      const code = vi.mocked(session.executeFetchString).mock.calls.at(-1)![0];
       expect(code).toContain('ArrayTest');
       expect(code).toContain('suite');
       expect(result.content[0].text).toContain('testSize');
@@ -608,11 +653,43 @@ describe('tools', () => {
       expect(result.content[0].text).toContain('FAILED');
       expect(result.content[0].text).toContain('expected 1 got 2');
     });
+
+    it('issues an auto-refresh-if-clean before running the suite', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('run_test_class')!;
+      await tool.handler({ className: 'ArrayTest' });
+
+      const refreshCall = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(refreshCall).toContain('System needsCommit ifFalse:');
+      expect(refreshCall).toContain('System abortTransaction');
+    });
+  });
+
+  describe('refresh', () => {
+    it('refreshes the session view when no uncommitted changes are pending', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('refreshed');
+      const tool = server.getTool('refresh')!;
+      const result = await tool.handler({});
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain('System needsCommit');
+      expect(code).toContain('System abortTransaction');
+      expect(result.content[0].text).toBe('refreshed');
+    });
+
+    it('skips when there are uncommitted changes, reporting back', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('skipped: uncommitted changes present');
+      const tool = server.getTool('refresh')!;
+      const result = await tool.handler({});
+
+      expect(result.content[0].text).toContain('skipped');
+      expect(result.content[0].text).toContain('uncommitted changes');
+    });
   });
 
   describe('status', () => {
     it('reports session information', async () => {
-      const statusOutput = 'User: DataCurator\nStone: gs64stone\nSession ID: 1\nTransaction: active\nUncommitted changes: no\n';
+      const statusOutput = 'User: DataCurator\nStone: gs64stone\nSession ID: 1\nTransaction: active\nUncommitted changes: no\nView: refreshed\n';
       vi.mocked(session.executeFetchString).mockReturnValue(statusOutput);
       const tool = server.getTool('status')!;
       const result = await tool.handler({});
@@ -624,6 +701,24 @@ describe('tools', () => {
       expect(code).toContain('needsCommit');
       expect(result.content[0].text).toContain('DataCurator');
       expect(result.content[0].text).toContain('gs64stone');
+    });
+
+    // The snippet must auto-refresh-if-clean inline so the rest of the report
+    // reflects committed state, and so a single status call also primes the
+    // session for follow-up read tools. Skipping when needsCommit is true is
+    // load-bearing: discarding uncommitted work silently would be far worse
+    // than reporting slightly stale state.
+    it('auto-refreshes the view inline (only when no uncommitted changes)', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('status')!;
+      await tool.handler({});
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain('System needsCommit');
+      expect(code).toContain('System abortTransaction');
+      expect(code).toContain('View: ');
+      expect(code).toContain('stale');
+      expect(code).toContain('refreshed');
     });
 
     // Regression: nextPutAll: sends do: to its argument. If any value passed

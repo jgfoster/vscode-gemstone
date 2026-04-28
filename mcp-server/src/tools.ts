@@ -52,6 +52,36 @@ function formatMethodResults(results: MethodSearchResult[], fallback: string): s
     .join('\n');
 }
 
+// Build the empty-result message for a find_* tool. When the caller used the
+// default env (0) and got nothing back, hint that the project's code may live
+// in env 1 — env 0 is the system environment, env 1 is where most user code
+// (notably GemStone-Python) actually lives, and the difference is invisible
+// from the agent side without this nudge.
+function noResultsMessage(label: string, environmentId: number): string {
+  if (environmentId === 0) {
+    return `No ${label} found in environmentId 0 (the default — system environment). ` +
+      `If the project's code lives in a user environment (e.g. GemStone-Python uses ` +
+      `environmentId 1), retry with environmentId: 1.`;
+  }
+  return `No ${label} found in environmentId ${environmentId}.`;
+}
+
+// Refresh the session's view of committed state if (and only if) it's safe to
+// do so. GemStone's GCI pins read-only operations to the session's transaction
+// view: a commit landed by another process (e.g. install.sh) is invisible
+// until this session aborts or commits. Auto-refresh closes the silent-stale
+// gap; we skip it when the session has uncommitted work so we never discard.
+function refreshIfClean(session: McpSession): void {
+  try {
+    session.executeFetchString(
+      "System needsCommit ifFalse: [System abortTransaction]. 'ok'",
+    );
+  } catch {
+    // Best-effort. If the refresh fails (e.g. session disconnected), the
+    // primary tool call below will report the real error.
+  }
+}
+
 export function registerTools(server: McpServer, session: McpSession): void {
 
   // Bind this session into the QueryExecutor shape shared queries expect.
@@ -240,13 +270,20 @@ export function registerTools(server: McpServer, session: McpSession): void {
   server.tool(
     'execute_code',
     'Execute GemStone Smalltalk code and return the result as a string (via printString). ' +
+    'Accepts both single expressions ("3 + 4") and multi-statement bodies with temp ' +
+    'declarations ("| x | x := 42. x + 1") — the body is evaluated as a block, so any ' +
+    'sequence of statements is fine. The value of the last statement is returned. ' +
     'Changes are NOT committed automatically.',
-    { code: z.string().describe('Smalltalk expression to execute') },
+    { code: z.string().describe('Smalltalk expression or statement sequence to execute') },
     async ({ code }) => {
       try {
-        // Wrap so the result is always a String — GciTsExecuteFetchBytes
-        // requires a byte object, but the user's code may return any object.
-        const wrapped = `(${code}) printString`;
+        // Wrap as `[<code>] value printString` so multi-statement bodies and
+        // top-level temp declarations parse — `(<code>) printString` only
+        // accepts a single expression and rejected `| x | ...` with
+        // "expected start of a statement". Block evaluation also coerces the
+        // result through printString, satisfying GciTsExecuteFetchBytes's
+        // need for a byte-object return.
+        const wrapped = `[${code}] value printString`;
         const result = session.executeFetchString(wrapped);
         return { content: [{ type: 'text' as const, text: result }] };
       } catch (err) {
@@ -285,15 +322,19 @@ export function registerTools(server: McpServer, session: McpSession): void {
 
   server.tool(
     'find_implementors',
-    'Find all classes that implement a given selector. Returns up to 500 results.',
+    'Find all classes that implement a given selector. Returns up to 500 results. ' +
+    'Searches one environment at a time — env 0 (default) is the system environment; ' +
+    'projects like GemStone-Python keep most user code in env 1. If env 0 returns ' +
+    'nothing, retry with environmentId: 1 before concluding the selector is unimplemented.',
     {
       selector: z.string().describe('Method selector to search for'),
-      environmentId: z.number().optional().describe('Environment ID (default 0)'),
+      environmentId: z.number().optional().describe('Environment ID (default 0; try 1 for user code)'),
     },
     async ({ selector, environmentId }) => {
       try {
-        const results = implementorsOf(exec, selector, environmentId ?? 0);
-        return { content: [{ type: 'text' as const, text: formatMethodResults(results, 'No implementors found.') }] };
+        const envId = environmentId ?? 0;
+        const results = implementorsOf(exec, selector, envId);
+        return { content: [{ type: 'text' as const, text: formatMethodResults(results, noResultsMessage('implementors', envId)) }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -307,15 +348,17 @@ export function registerTools(server: McpServer, session: McpSession): void {
     'find_references_to',
     'Find all methods that reference a named global (class, pool, or shared variable). ' +
     'Sister to find_senders, which matches a selector; this matches a global by name. ' +
-    'Returns up to 500 results.',
+    'Returns up to 500 results. Env 0 (default) is the system environment; if results ' +
+    'are empty, retry with environmentId: 1 — user-environment globals are invisible from env 0.',
     {
       objectName: z.string().describe('Name of the global to find references to, e.g. "AllUsers"'),
-      environmentId: z.number().optional().describe('Environment ID (default 0)'),
+      environmentId: z.number().optional().describe('Environment ID (default 0; try 1 for user code)'),
     },
     async ({ objectName, environmentId }) => {
       try {
-        const results = referencesToObject(exec, objectName, environmentId ?? 0);
-        return { content: [{ type: 'text' as const, text: formatMethodResults(results, 'No references found.') }] };
+        const envId = environmentId ?? 0;
+        const results = referencesToObject(exec, objectName, envId);
+        return { content: [{ type: 'text' as const, text: formatMethodResults(results, noResultsMessage('references', envId)) }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -327,15 +370,18 @@ export function registerTools(server: McpServer, session: McpSession): void {
 
   server.tool(
     'find_senders',
-    'Find all methods that send a given selector. Returns up to 500 results.',
+    'Find all methods that send a given selector. Returns up to 500 results. ' +
+    'Env 0 (default) is the system environment; if results are empty, retry with ' +
+    'environmentId: 1 — user-environment senders are invisible from env 0.',
     {
       selector: z.string().describe('Method selector to search for'),
-      environmentId: z.number().optional().describe('Environment ID (default 0)'),
+      environmentId: z.number().optional().describe('Environment ID (default 0; try 1 for user code)'),
     },
     async ({ selector, environmentId }) => {
       try {
-        const results = sendersOf(exec, selector, environmentId ?? 0);
-        return { content: [{ type: 'text' as const, text: formatMethodResults(results, 'No senders found.') }] };
+        const envId = environmentId ?? 0;
+        const results = sendersOf(exec, selector, envId);
+        return { content: [{ type: 'text' as const, text: formatMethodResults(results, noResultsMessage('senders', envId)) }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -512,6 +558,29 @@ export function registerTools(server: McpServer, session: McpSession): void {
   );
 
   server.tool(
+    'refresh',
+    'Refresh this session\'s view of committed state by aborting if (and only if) ' +
+    'there are no uncommitted changes. GemStone\'s GCI pins the session\'s read view ' +
+    'until it aborts or commits, so a commit landed by another process (e.g. install.sh) ' +
+    'is invisible until refresh runs. If the session has uncommitted work, this is a ' +
+    'no-op and reports back so the caller can decide whether to abort or commit first.',
+    {},
+    async () => {
+      try {
+        const result = session.executeFetchString(
+          "System needsCommit ifTrue: ['skipped: uncommitted changes present'] ifFalse: [System abortTransaction. 'refreshed']",
+        );
+        return { content: [{ type: 'text' as const, text: result }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
     'remove_dictionary',
     'DESTRUCTIVE: remove a dictionary from the current user\'s symbolList. ' +
     'NOT committed automatically.',
@@ -531,12 +600,15 @@ export function registerTools(server: McpServer, session: McpSession): void {
 
   server.tool(
     'run_test_class',
-    'Run all SUnit test methods in a TestCase subclass and return per-method pass/fail/error results.',
+    'Run all SUnit test methods in a TestCase subclass and return per-method pass/fail/error results. ' +
+    'Auto-refreshes the session view first (when no uncommitted changes are pending) so results ' +
+    'reflect the latest committed code, not a stale transaction view.',
     {
       className: z.string().describe('TestCase subclass name'),
     },
     async ({ className }) => {
       try {
+        refreshIfClean(session);
         const results = runTestClass(exec, className);
         const text = formatTestResults(results);
         return { content: [{ type: 'text' as const, text }] };
@@ -551,13 +623,16 @@ export function registerTools(server: McpServer, session: McpSession): void {
 
   server.tool(
     'run_test_method',
-    'Run a single SUnit test method and return pass/fail/error with details.',
+    'Run a single SUnit test method and return pass/fail/error with details. ' +
+    'Auto-refreshes the session view first (when no uncommitted changes are pending) so the ' +
+    'result reflects the latest committed code.',
     {
       className: z.string().describe('TestCase subclass name'),
       selector: z.string().describe('Test method selector, e.g. "testAdd"'),
     },
     async ({ className, selector }) => {
       try {
+        refreshIfClean(session);
         const r = runTestMethod(exec, className, selector);
         const text = formatTestResult(r);
         return { content: [{ type: 'text' as const, text }] };
@@ -616,7 +691,11 @@ export function registerTools(server: McpServer, session: McpSession): void {
 
   server.tool(
     'status',
-    'Report information about the current GemStone session: user, stone, transaction state, and whether there are uncommitted changes.',
+    'Report information about the current GemStone session: user, stone, transaction state, ' +
+    'whether there are uncommitted changes, and whether the session view was just refreshed. ' +
+    'Auto-refreshes the view (via abort) when no uncommitted changes are pending, so subsequent ' +
+    'reads reflect the latest committed state — not a stale transaction view from before another ' +
+    'process committed.',
     {},
     async () => {
       try {
@@ -624,13 +703,23 @@ export function registerTools(server: McpServer, session: McpSession): void {
         // otherwise nextPutAll: sends do: to it and GemStone complains (e.g.
         // SmallInteger DNU do:). Coerce with asString / printString to keep
         // it robust across GemStone versions.
-        const code = `| ws |
+        //
+        // Auto-refresh: if no uncommitted work is pending we abort first so
+        // the rest of the report (and any follow-up read tool calls in this
+        // session) sees committed state landed by other processes. If
+        // uncommitted work is pending we skip — discarding it silently would
+        // be far more harmful than reporting slightly stale state.
+        const code = `| ws viewState |
+viewState := System needsCommit
+  ifTrue: ['stale (uncommitted changes — call abort or commit to refresh)']
+  ifFalse: [System abortTransaction. 'refreshed'].
 ws := WriteStream on: String new.
 ws nextPutAll: 'User: '; nextPutAll: System myUserProfile userId asString; lf.
 ws nextPutAll: 'Stone: '; nextPutAll: System stoneName asString; lf.
 ws nextPutAll: 'Session ID: '; nextPutAll: System session printString; lf.
 ws nextPutAll: 'Transaction: '; nextPutAll: (System inTransaction ifTrue: ['active'] ifFalse: ['none']); lf.
 ws nextPutAll: 'Uncommitted changes: '; nextPutAll: (System needsCommit ifTrue: ['yes'] ifFalse: ['no']); lf.
+ws nextPutAll: 'View: '; nextPutAll: viewState; lf.
 ws contents`;
         const result = session.executeFetchString(code);
         return { content: [{ type: 'text' as const, text: result }] };
