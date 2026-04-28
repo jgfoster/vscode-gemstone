@@ -138,6 +138,18 @@ describe('sunitQueries', () => {
       const session = createMockSession('');
       expect(sunit.runTestClass(session, 'MyTestCase')).toEqual([]);
     });
+
+    // Bug guard: probe of GemStone's SUnit revealed that `result failures`
+    // and `result errors` contain TestCase instances (only `testSelector`
+    // ivar) — they don't respond to `#testCase`. The query must not send it
+    // (would silently DNU on real failures).
+    it('does not send #testCase to failure/error wrappers', () => {
+      const session = createMockSession('');
+      sunit.runTestClass(session, 'MyTestCase');
+      const code = (session.gci.GciTsExecuteFetchBytes as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(code).not.toMatch(/testCase\s+class\s+name/);
+      expect(code).not.toMatch(/testCase\s+selector/);
+    });
   });
 
   describe('error handling', () => {

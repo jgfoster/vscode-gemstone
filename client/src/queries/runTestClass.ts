@@ -6,6 +6,11 @@ export function runTestClass(
   execute: QueryExecutor, className: string,
 ): TestRunResult[] {
   const esc = escapeString(className);
+  // `result passed`, `result failures`, `result errors` all contain the
+  // TestCase instances themselves (only `testSelector` ivar) — verified via
+  // probe. Don't send `each testCase`: the wrappers don't respond to it,
+  // and on a real failure that branch would DNU. The TestCase instance
+  // already carries `class name` and `selector`, same as the passed branch.
   const code = `| suite result ws |
 suite := ${esc} suite.
 result := suite run.
@@ -15,13 +20,13 @@ result passed do: [:each |
     nextPutAll: each selector; tab;
     nextPutAll: 'passed'; tab; lf].
 result failures do: [:each |
-  ws nextPutAll: each testCase class name; tab;
-    nextPutAll: each testCase selector; tab;
+  ws nextPutAll: each class name; tab;
+    nextPutAll: each selector; tab;
     nextPutAll: 'failed'; tab;
     nextPutAll: (each printString copyFrom: 1 to: (each printString size min: 4096)); lf].
 result errors do: [:each |
-  ws nextPutAll: each testCase class name; tab;
-    nextPutAll: each testCase selector; tab;
+  ws nextPutAll: each class name; tab;
+    nextPutAll: each selector; tab;
     nextPutAll: 'error'; tab;
     nextPutAll: (each printString copyFrom: 1 to: (each printString size min: 4096)); lf].
 ws contents`;

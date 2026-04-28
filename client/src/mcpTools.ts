@@ -586,7 +586,9 @@ function formatTestResult(r: TestRunResult): string {
 
 // Render TestFailureDetails as line-oriented text. Agents read this directly,
 // so the format is "<key>: <value>\n" — easy to scan, easy to grep, no
-// structure beyond the keys the Smalltalk side already provides.
+// structure beyond the keys the Smalltalk side already provides. stackReport
+// is emitted last (and bare, since it's already multi-line) under a header
+// so the agent sees the structured fields first and can scroll to the trace.
 function formatTestFailureDetails(d: TestFailureDetails): string {
   if (d.status === 'passed') return 'PASSED';
   const lines: string[] = [];
@@ -597,6 +599,10 @@ function formatTestFailureDetails(d: TestFailureDetails): string {
   if (d.description !== undefined) lines.push(`description: ${d.description}`);
   if (d.mnuReceiver !== undefined) lines.push(`mnuReceiver: ${d.mnuReceiver}`);
   if (d.mnuSelector !== undefined) lines.push(`mnuSelector: ${d.mnuSelector}`);
+  if (d.stackReport) {
+    lines.push('stackReport:');
+    lines.push(d.stackReport);
+  }
   return lines.join('\n');
 }
 

@@ -22,10 +22,15 @@ exercised the `gemstone` MCP server retroactively after a CLI workflow. Items gr
 - `describe_test_failure` — re-runs a single test with its own `AbstractException` handler
   (bypasses `TestCase>>run`, which would swallow the exception) and returns structured details:
   `exceptionClass`, GemStone `errorNumber`, clean `messageText`, `description`, plus
-  `mnuReceiver` and `mnuSelector` for `MessageNotUnderstood`. No stack trace in v1 — GemStone's
-  exception classes don't expose `gemStackReport` or a populated `stack`/`stackReport` once the
-  exception is caught past its dynamic context. The agent gets enough to diagnose most failures
-  without re-reading the raw printString.
+  `mnuReceiver` and `mnuSelector` for `MessageNotUnderstood`, and a multi-line `stackReport`
+  with frames in `Class >> selector @ip line N [GsNMethod oop]` format. Stack capture is
+  enabled by toggling `GemExceptionSignalCapturesStack` on around the run and restoring it
+  via `ensure:` so the gem isn't left in a different state.
+- Bug fix: `runTestClass.ts` and `runFailingTests.ts` were sending `each testCase class name`
+  to objects that don't respond to `#testCase` (the items in `result failures` / `result errors`
+  are TestCase instances themselves with only `testSelector` ivar). On a real failure the
+  queries would silently DNU; tests mock the output so it wasn't caught. Now uses the direct
+  `each class name` / `each selector`, matching the `passed` branch.
 
 ### Still open
 
@@ -35,21 +40,6 @@ exercised the `gemstone` MCP server retroactively after a CLI workflow. Items gr
 - **`compile_method_from_file` + `save_to_file`.** Point at a `.gs` file + selector and recompile
   just that method, then write live changes back to disk. *Blocked by the proxy model — the MCP
   server doesn't have file-system access; the host extension would have to mediate.*
-- **Stack trace in `describe_test_failure`.** AbstractException's `gsStack` ivar holds GemStone's
-  internal stack representation, but `gemStackReport` / `stack` / `stackReport` accessors are
-  unavailable or return nil on caught exceptions. A path may exist via `instVarAt:` on `gsStack`
-  + custom formatting, or via running the test inside a `GsProcess` whose stack we can introspect.
-  Probe needed.
-
-## Bugs
-
-- **`runTestClass.ts` and `runFailingTests.ts` send `each testCase class name` to TestCase
-  instances that don't respond to `#testCase`.** Probe (see `describe_test_failure` work) showed
-  that in this GemStone's SUnit, `result failures` and `result errors` contain the failed
-  TestCase instance directly (only `testSelector` ivar) — `respondsTo: #testCase` returns false.
-  On a real failure, the existing queries would DNU. The unit tests mock the output, which is
-  why this hasn't been caught. Fix: use `each class name` and `each selector` (same as the
-  `passed` branch already does).
 
 ## Ideas
 - **Code Snippets** — Templates for common patterns: do:, collect:, ifTrue:ifFalse:, class definition boilerplate.

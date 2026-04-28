@@ -160,6 +160,20 @@ describe('runFailingTests', () => {
     expect(runFailingTests(vi.fn<QueryExecutor>(() => ''))).toEqual([]);
   });
 
+  // Bug guard: probe of GemStone's SUnit revealed that `result failures` and
+  // `result errors` contain the TestCase instances themselves (only
+  // `testSelector` ivar) — they don't respond to `#testCase`. Sending it
+  // would silently DNU on real failures. The query must use direct
+  // accessors (`each class name` / `each selector`), same as the passed
+  // branch already does.
+  it('does not send #testCase to failure/error wrappers', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    runFailingTests(exec);
+    const code = exec.mock.calls[0][1];
+    expect(code).not.toMatch(/testCase\s+class\s+name/);
+    expect(code).not.toMatch(/testCase\s+selector/);
+  });
+
   // Per-message printString cap: 1024 chars in the batched runner so a worst
   // case of ~250 failing tests still fits under the 256KB MAX_RESULT. The
   // single-method runner uses 4096 because there's only one entry; bumping
@@ -254,5 +268,59 @@ describe('describeTestFailure', () => {
     const code = exec.mock.calls[0][1];
     expect(code).toContain("Foo''Bar");
     expect(code).toContain("test''X");
+  });
+
+  // Stack capture path: the gem-level config GemExceptionSignalCapturesStack
+  // controls whether AbstractException's gsStack is populated at signal time.
+  // Without toggling it on, stackReport returns nil even on a live exception.
+  it('toggles GemExceptionSignalCapturesStack around the run and restores after', () => {
+    const exec = vi.fn<QueryExecutor>(() => 'status: passed\n');
+    describeTestFailure(exec, 'ArrayTest', 'testGood');
+    const code = exec.mock.calls[0][1];
+
+    // Saved before, set true during, restored in ensure: after.
+    expect(code).toContain('System gemConfigurationAt: #GemExceptionSignalCapturesStack');
+    expect(code).toContain("gemConfigurationAt: #GemExceptionSignalCapturesStack put: true");
+    expect(code).toContain("gemConfigurationAt: #GemExceptionSignalCapturesStack put: oldStackCfg");
+    expect(code).toContain('ensure:');
+  });
+
+  // The sentinel keeps multi-line stack content separate from the
+  // line-prefixed key/value section. Without it, frame newlines would split
+  // into bogus key/value pairs and the parser would lose the stack.
+  it('parses stackReport that follows the sentinel as one verbatim block', () => {
+    const raw = 'status: failed\n' +
+      'exceptionClass: TestFailure\n' +
+      'errorNumber: 2751\n' +
+      'messageText: Assertion failed\n' +
+      'description: TestFailure: Assertion failed\n' +
+      '--- stackReport ---\n' +
+      'TestFailure (AbstractException) >> signal: @3 line 7  [GsNMethod 3523841]\n' +
+      'TestFailure class (AbstractException class) >> signal: @3 line 4  [GsNMethod 3803137]\n' +
+      'JasperProbeTest >> testFails @3 line 1  [GsNMethod 1236251649]\n';
+    const result = describeTestFailure(vi.fn<QueryExecutor>(() => raw), 'X', 'y');
+    expect(result.status).toBe('failed');
+    expect(result.exceptionClass).toBe('TestFailure');
+    expect(result.stackReport).toContain('TestFailure (AbstractException) >> signal:');
+    expect(result.stackReport).toContain('JasperProbeTest >> testFails');
+    // Frame separator newlines must survive intact.
+    expect((result.stackReport || '').split('\n').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('omits stackReport when the sentinel is absent (e.g. config rejected)', () => {
+    const raw = 'status: failed\nexceptionClass: TestFailure\nmessageText: Assertion failed\n';
+    const result = describeTestFailure(vi.fn<QueryExecutor>(() => raw), 'X', 'y');
+    expect(result.stackReport).toBeUndefined();
+  });
+
+  // Stack cap: 16384 chars in the Smalltalk side keeps the largest
+  // realistic trace under MAX_RESULT (256KB) while leaving plenty of
+  // room for the scalar fields. Lock it in so a future bump doesn't
+  // accidentally produce truncated output that's hard to diagnose.
+  it('caps stackReport at 16384 chars', () => {
+    const exec = vi.fn<QueryExecutor>(() => 'status: passed\n');
+    describeTestFailure(exec, 'X', 'y');
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain('size min: 16384');
   });
 });

@@ -531,6 +531,26 @@ describe('registerMcpTools', () => {
       expect(result.content[0].text).toBe('PASSED');
     });
 
+    it('describe_test_failure formats stackReport under a header preserving newlines', async () => {
+      vi.mocked(sunit.describeTestFailure).mockReturnValue({
+        status: 'failed',
+        exceptionClass: 'TestFailure',
+        errorNumber: 2751,
+        messageText: 'Assertion failed',
+        description: 'TestFailure: Assertion failed',
+        stackReport:
+          'TestFailure (AbstractException) >> signal: @3 line 7  [GsNMethod 3523841]\n' +
+          'JasperProbeTest >> testFails @3 line 1  [GsNMethod 1236251649]',
+      });
+      const result = await server.getTool('describe_test_failure')!
+        .handler({ className: 'ArrayTest', selector: 'testBad' });
+      const text = result.content[0].text;
+
+      expect(text).toContain('stackReport:');
+      expect(text).toContain('TestFailure (AbstractException) >> signal:');
+      expect(text).toContain('JasperProbeTest >> testFails');
+    });
+
     it('refresh runs needsCommit/abortTransaction and returns the result', async () => {
       vi.mocked(queries.executeFetchString).mockReturnValue('refreshed');
       const result = await server.getTool('refresh')!.handler({});

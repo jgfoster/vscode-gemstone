@@ -24,6 +24,10 @@ export function runFailingTests(
     ? buildExplicitClassList(classNames)
     : DISCOVER_ALL_TEST_CLASSES;
 
+  // `result failures` and `result errors` contain the TestCase instances
+  // themselves (only `testSelector` ivar) — verified via probe. Don't send
+  // `t testCase`: the wrappers don't respond to it, and a real failure
+  // would DNU. Use `t class name` / `t selector` directly.
   const code = `| ws classes |
 classes := ${classesExpr}.
 ws := WriteStream on: Unicode7 new.
@@ -31,13 +35,13 @@ classes do: [:cls |
   | result |
   result := cls suite run.
   result failures do: [:t |
-    ws nextPutAll: t testCase class name; tab;
-      nextPutAll: t testCase selector; tab;
+    ws nextPutAll: t class name; tab;
+      nextPutAll: t selector; tab;
       nextPutAll: 'failed'; tab;
       nextPutAll: (t printString copyFrom: 1 to: (t printString size min: ${MAX_MSG})); lf].
   result errors do: [:e |
-    ws nextPutAll: e testCase class name; tab;
-      nextPutAll: e testCase selector; tab;
+    ws nextPutAll: e class name; tab;
+      nextPutAll: e selector; tab;
       nextPutAll: 'error'; tab;
       nextPutAll: (e printString copyFrom: 1 to: (e printString size min: ${MAX_MSG})); lf]].
 ws contents`;

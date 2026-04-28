@@ -736,6 +736,46 @@ describe('tools', () => {
       expect(result.content[0].text).toBe('PASSED');
     });
 
+    // Stack trace flows end to end: Smalltalk emits the sentinel + frames,
+    // the parser splits on the sentinel, the formatter emits a "stackReport:"
+    // header followed by the verbatim multi-line content. Frame newlines
+    // must survive the round-trip.
+    it('formats stackReport as a verbatim multi-line block under a header', async () => {
+      vi.mocked(session.executeFetchString)
+        .mockReturnValueOnce('ok')
+        .mockReturnValueOnce(
+          'status: failed\n' +
+          'exceptionClass: TestFailure\n' +
+          'errorNumber: 2751\n' +
+          'messageText: Assertion failed\n' +
+          'description: TestFailure: Assertion failed\n' +
+          '--- stackReport ---\n' +
+          'TestFailure (AbstractException) >> signal: @3 line 7  [GsNMethod 3523841]\n' +
+          'JasperProbeTest >> testFails @3 line 1  [GsNMethod 1236251649]\n',
+        );
+      const tool = server.getTool('describe_test_failure')!;
+      const result = await tool.handler({ className: 'ArrayTest', selector: 'testBad' });
+      const text = result.content[0].text;
+
+      expect(text).toContain('stackReport:');
+      expect(text).toContain('TestFailure (AbstractException) >> signal:');
+      expect(text).toContain('JasperProbeTest >> testFails');
+      // Two frames separated by a newline must remain so.
+      expect(text.match(/\n/g)?.length ?? 0).toBeGreaterThanOrEqual(6);
+    });
+
+    it('issues the gem-config toggle that enables stack capture', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('status: passed\n');
+      const tool = server.getTool('describe_test_failure')!;
+      await tool.handler({ className: 'ArrayTest', selector: 'testAny' });
+
+      const queryCall = vi.mocked(session.executeFetchString).mock.calls.at(-1)![0];
+      expect(queryCall).toContain('GemExceptionSignalCapturesStack');
+      expect(queryCall).toContain('put: true');
+      expect(queryCall).toContain('put: oldStackCfg');
+      expect(queryCall).toContain('ensure:');
+    });
+
     // Stale-transaction guard — same as the other test runners. A view
     // pinned to old committed state would let an agent debug a failure
     // that's already been fixed in the running stone.
