@@ -185,17 +185,20 @@ describe('tools', () => {
       expect(result.content[0].text).toContain('Array');
     });
 
-    // When the search hits the default env (0) and finds nothing, the message
-    // should nudge the agent toward env 1 — projects like GemStone-Python keep
-    // most user code there, and the original "No implementors found." message
-    // was easy to misread as "the selector really doesn't exist anywhere."
-    it('returns env-1 hint when env 0 search is empty', async () => {
+    // Round-2 change: with no environmentId, env 0 is searched first and
+    // env 1 is tried as a fallback when env 0 is empty. The mock returns
+    // empty for both, so the result is the combined "in environmentId 0
+    // or 1" message and we observe both environmentIds in the executed
+    // queries.
+    it('auto-falls-back to env 1 when env 0 returns empty', async () => {
       vi.mocked(session.executeFetchString).mockReturnValue('');
       const tool = server.getTool('find_implementors')!;
       const result = await tool.handler({ selector: 'nonexistent' });
 
-      expect(result.content[0].text).toContain('environmentId 0');
-      expect(result.content[0].text).toContain('environmentId: 1');
+      const calls = vi.mocked(session.executeFetchString).mock.calls.map(c => c[0]);
+      expect(calls.some(c => c.includes('environmentId: 0'))).toBe(true);
+      expect(calls.some(c => c.includes('environmentId: 1'))).toBe(true);
+      expect(result.content[0].text).toBe('No implementors found in environmentId 0 or 1.');
     });
 
     it('returns plain empty message when an explicit non-zero env is empty', async () => {
@@ -204,6 +207,8 @@ describe('tools', () => {
       const result = await tool.handler({ selector: 'nonexistent', environmentId: 1 });
 
       expect(result.content[0].text).toBe('No implementors found in environmentId 1.');
+      // Explicit env scopes to that env only — no fallback path.
+      expect(vi.mocked(session.executeFetchString).mock.calls).toHaveLength(1);
     });
   });
 
@@ -219,15 +224,17 @@ describe('tools', () => {
     });
 
     // Symmetric with find_implementors / find_references_to — uses the same
-    // noResultsMessage helper, so a refactor that breaks one would silently
-    // break this without a guard.
-    it('returns env-1 hint when env 0 search is empty', async () => {
+    // searchWithEnvFallback helper, so a refactor that breaks one would
+    // silently break this without a guard.
+    it('auto-falls-back to env 1 when env 0 returns empty', async () => {
       vi.mocked(session.executeFetchString).mockReturnValue('');
       const tool = server.getTool('find_senders')!;
       const result = await tool.handler({ selector: 'nonexistent' });
 
-      expect(result.content[0].text).toContain('environmentId 0');
-      expect(result.content[0].text).toContain('environmentId: 1');
+      const calls = vi.mocked(session.executeFetchString).mock.calls.map(c => c[0]);
+      expect(calls.some(c => c.includes('environmentId: 0'))).toBe(true);
+      expect(calls.some(c => c.includes('environmentId: 1'))).toBe(true);
+      expect(result.content[0].text).toBe('No senders found in environmentId 0 or 1.');
     });
   });
 
@@ -398,13 +405,15 @@ describe('tools', () => {
       expect(result.content[0].text).toContain('Foo\tinstance\tuse\tclient');
     });
 
-    it('returns env-1 hint when env 0 search is empty', async () => {
+    it('auto-falls-back to env 1 when env 0 returns empty', async () => {
       vi.mocked(session.executeFetchString).mockReturnValue('');
       const tool = server.getTool('find_references_to')!;
       const result = await tool.handler({ objectName: 'Unused' });
 
-      expect(result.content[0].text).toContain('environmentId 0');
-      expect(result.content[0].text).toContain('environmentId: 1');
+      const calls = vi.mocked(session.executeFetchString).mock.calls.map(c => c[0]);
+      expect(calls.some(c => c.includes('environmentId: 0'))).toBe(true);
+      expect(calls.some(c => c.includes('environmentId: 1'))).toBe(true);
+      expect(result.content[0].text).toBe('No references found in environmentId 0 or 1.');
     });
   });
 

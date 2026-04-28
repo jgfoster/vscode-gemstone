@@ -4,6 +4,22 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-04-28
+
+### Added
+
+- **`list_failing_tests` `classNamePattern` parameter** — glob-filter discovered TestCase subclasses (`*` = any chars, `#` = one char) before running. E.g. `classNamePattern: "Bytes*TestCase"` runs every `Bytes*TestCase` in one round-trip. Composes with the existing `classNames` array (explicit names still win).
+- **`list_failing_tests` message column now carries actual exception details** — `MessageNotUnderstood: nil does not understand #foo` instead of the SUnit debug recipe `ClassTestCase debug: #testFoo`. Each failing/erroring test is re-run with its own `AbstractException` handler to capture the live exception's `messageText`. Iteration stays in Smalltalk so it's still one GCI round-trip.
+
+### Changed
+
+- **`find_implementors` / `find_senders` / `find_references_to` auto-fall-back to env 1** when no `environmentId` is given and env 0 returns empty. Projects whose user code lives in env 1 (notably GemStone-Python) no longer get a misleading "no implementors found" when the method exists. Pass `environmentId` explicitly to limit to one environment.
+
+### Fixed
+
+- **UTF-16LE leak in `eval_python` / `compile_python` error returns.** Grail-side compile/runtime errors came back as `"E r r o r :   M e s s a g e N o t U n d e r s t o o d ..."` — `messageText` returns `Unicode16` for system errors, `, ` concatenation widened the result to Unicode16, and GCI's `Utf8`-class fetch forwarded the UTF-16LE bytes raw. The error string is now built through a `WriteStream on: Utf8 new`, which forces transcoding on write.
+- **`list_failing_tests` with no arguments raised `CompileError 1001`.** The `DISCOVER_ALL_TEST_CLASSES` Smalltalk fragment had its own `| sl seen list |` temps, which can't appear inside `classes := <expr>`. The fragment is now wrapped as `[| sl seen list | ...] value` so it's a valid expression in any position.
+
 ## [1.4.1] - 2026-04-27
 
 ### Added

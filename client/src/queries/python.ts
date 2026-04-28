@@ -38,6 +38,15 @@ function buildPythonQuery(grailExpression: string, pythonSource: string): string
   const esc = escapeString(pythonSource);
   // The hint is itself a Smalltalk string literal — the same single-quote
   // escaping rule applies, but it has none today, so we inline it directly.
+  //
+  // Why the error path uses `WriteStream on: Utf8 new` instead of `,`
+  // concatenation: GemStone's Exception class returns `messageText` as
+  // `Unicode16` for many system errors (notably MessageNotUnderstood). A
+  // bare `'Error: ' , <U16>` widens the result to Unicode16, and GCI's
+  // `Utf8`-class fetch forwards those UTF-16LE bytes raw — the agent saw
+  // "E r r o r :   M ..." (every char followed by a NUL). Pinning the
+  // underlying buffer to `Utf8` forces transcoding on write, so GCI sees
+  // an already-Utf8 result and can hand it back without further work.
   return `| dispatcher src |
 dispatcher := System myUserProfile symbolList objectNamed: #'ModuleAst'.
 src := '${esc}'.
@@ -46,5 +55,11 @@ dispatcher isNil
   ifFalse: [
     [${grailExpression}]
       on: AbstractException do: [:e |
-        'Error: ' , e class name , ' — ' , e messageText asString]]`;
+        | ws |
+        ws := WriteStream on: Utf8 new.
+        ws nextPutAll: 'Error: '.
+        ws nextPutAll: e class name asString.
+        ws nextPutAll: ' — '.
+        ws nextPutAll: e messageText asString.
+        ws contents]]`;
 }

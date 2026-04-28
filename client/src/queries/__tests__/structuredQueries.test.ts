@@ -175,18 +175,73 @@ describe('runFailingTests', () => {
     expect(code).not.toMatch(/testCase\s+selector/);
   });
 
-  // Per-message printString cap: 1024 chars in the batched runner so a worst
-  // case of ~250 failing tests still fits under the 256KB MAX_RESULT. The
-  // single-method runner uses 4096 because there's only one entry; bumping
-  // the batched cap to match would silently truncate batched output under
-  // load. Lock the constant in.
-  it('caps each printString at 1024 chars to stay under MAX_RESULT', () => {
+  // Per-message cap: 1024 chars in the batched runner so a worst case of
+  // ~250 failing tests still fits under the 256KB MAX_RESULT. The cap now
+  // applies to the captured `<exceptionClass>: <messageText>` string from
+  // the per-failure re-run (round-2 messageText capture) rather than the
+  // old SUnit-debug-recipe printString. Lock the constant in.
+  it('caps each captured message at 1024 chars to stay under MAX_RESULT', () => {
     const exec = vi.fn<QueryExecutor>(() => '');
     runFailingTests(exec);
     const code = exec.mock.calls[0][1];
-    // Two occurrences expected: one for failures, one for errors.
-    const matches = code.match(/printString size min: 1024/g) || [];
-    expect(matches.length).toBe(2);
+    expect(code).toContain('s size min: 1024');
+  });
+
+  // Round-2 fix: the no-args path (DISCOVER_ALL) had `| sl seen list |` temp
+  // declarations substituted into `classes := <expr>`, which is a Smalltalk
+  // syntax error. The block wrap closes around the temps so the expression
+  // is a valid value-producing form.
+  it('wraps DISCOVER_ALL in a block so its temps do not collide with the outer assignment', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    runFailingTests(exec);
+    const code = exec.mock.calls[0][1];
+    expect(code).toMatch(/classes := \[\| sl seen list \|/);
+    expect(code).toContain('] value');
+  });
+
+  // Round-2 enhancement: the message column should carry exception class
+  // + actual messageText (captured by re-running each failing test with
+  // its own AbstractException handler), not the SUnit debug recipe.
+  it('captures exception class and messageText per failing test via re-run', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    runFailingTests(exec);
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain('on: AbstractException');
+    expect(code).toContain('t setUp');
+    expect(code).toContain('t perform: t selector');
+    expect(code).toContain('t tearDown');
+    expect(code).toContain('captured class name asString');
+    expect(code).toContain('captured messageText asString');
+  });
+
+  // Stream is Utf8 so Unicode16 messageText values transcode on write
+  // rather than bleeding through as UTF-16LE bytes (mirrors the
+  // eval_python error-path fix from the same round of feedback).
+  it('writes output through a Utf8 stream so Unicode16 messageText transcodes correctly', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    runFailingTests(exec);
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain('WriteStream on: Utf8 new');
+  });
+
+  // classNamePattern path: expand globs server-side via GemStone's
+  // `String match:` so a single round-trip handles the discover+filter+run.
+  it('uses pattern-filter path when classNamePattern is given', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    runFailingTests(exec, undefined, 'Bytes*TestCase');
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain('isSubclassOf: TestCase');
+    expect(code).toContain("pattern := 'Bytes*TestCase'");
+    expect(code).toContain('pattern match: v name');
+  });
+
+  it('explicit classNames wins over classNamePattern (precedence)', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    runFailingTests(exec, ['ArrayTest'], 'Bytes*TestCase');
+    const code = exec.mock.calls[0][1];
+    // classNames path runs (no pattern matching in the snippet).
+    expect(code).toContain("objectNamed: #'ArrayTest'");
+    expect(code).not.toContain('pattern match:');
   });
 });
 
@@ -384,7 +439,25 @@ describe('python (Grail) queries', () => {
     evalPython(exec, 'x = 1');
     const code = exec.mock.calls[0][1];
     expect(code).toContain('on: AbstractException');
-    expect(code).toContain("'Error: ' , e class name");
+    // Error string is built through a Utf8-backed WriteStream so Unicode16
+    // messageText transcodes on write rather than bleeding UTF-16LE bytes
+    // through GCI's Utf8 fetch (the round-2 "E r r o r ..." leak).
+    expect(code).toContain("WriteStream on: Utf8 new");
+    expect(code).toContain("'Error: '");
+    expect(code).toContain('e class name asString');
+    expect(code).toContain('e messageText asString');
+  });
+
+  // Round-2 regression guard: the eval_python error path was previously built
+  // via `, ` concatenation, which widened the result to Unicode16 when
+  // messageText was Unicode16 — GCI's Utf8 fetch then forwarded UTF-16LE
+  // bytes raw and the agent saw `"E r r o r :   M ..."`. The fix is the
+  // explicit `WriteStream on: Utf8 new` above; this test pins it.
+  it('does not build the error string via , concatenation (UTF-16 leak guard)', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    evalPython(exec, 'x = 1');
+    const code = exec.mock.calls[0][1];
+    expect(code).not.toMatch(/'Error: ' , e class name/);
   });
 
   it('returns the executor result verbatim — no parsing on the JS side', () => {

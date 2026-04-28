@@ -209,15 +209,29 @@ describe('registerMcpTools', () => {
       expect(result.content[0].text).toContain('Globals\tArray\tinstance\tsize\taccessing');
     });
 
-    // Empty results in env 0 (the default) hint at env 1 — projects like
-    // GemStone-Python keep most user code in env 1, and the original
-    // "No implementors found." text was easy to misread as "doesn't exist."
-    it('find_implementors hints at env 1 when env 0 search is empty', async () => {
+    // Default behavior (no environmentId) auto-falls-back to env 1 when env 0
+    // is empty. The Python-heavy projects that drove this change have most
+    // user code in env 1; the env-0-only default left agents staring at
+    // "No implementors found" when the method existed all along.
+    it('find_implementors auto-falls-back to env 1 when env 0 returns empty', async () => {
       vi.mocked(queries.implementorsOf).mockReturnValue([]);
       const result = await server.getTool('find_implementors')!.handler({ selector: 'xyz' });
 
-      expect(result.content[0].text).toContain('environmentId 0');
-      expect(result.content[0].text).toContain('environmentId: 1');
+      // Both envs were tried — env 0 first, then env 1 as fallback.
+      expect(queries.implementorsOf).toHaveBeenCalledWith(session, 'xyz', 0);
+      expect(queries.implementorsOf).toHaveBeenCalledWith(session, 'xyz', 1);
+      expect(result.content[0].text).toBe('No implementors found in environmentId 0 or 1.');
+    });
+
+    it('find_implementors short-circuits when env 0 has results (no env-1 call)', async () => {
+      vi.mocked(queries.implementorsOf).mockReturnValueOnce([
+        { dictName: 'Globals', className: 'Array', isMeta: false, selector: 'size', category: 'accessing' },
+      ]);
+      await server.getTool('find_implementors')!.handler({ selector: 'size' });
+
+      // Only env 0 was searched — env 1 isn't a fallback when env 0 has results.
+      expect(queries.implementorsOf).toHaveBeenCalledTimes(1);
+      expect(queries.implementorsOf).toHaveBeenCalledWith(session, 'size', 0);
     });
 
     it('find_implementors gives a plain empty message when an explicit non-zero env is empty', async () => {
@@ -225,6 +239,9 @@ describe('registerMcpTools', () => {
       const result = await server.getTool('find_implementors')!
         .handler({ selector: 'xyz', environmentId: 1 });
 
+      // Explicit env scopes to that env only — no fallback path.
+      expect(queries.implementorsOf).toHaveBeenCalledTimes(1);
+      expect(queries.implementorsOf).toHaveBeenCalledWith(session, 'xyz', 1);
       expect(result.content[0].text).toBe('No implementors found in environmentId 1.');
     });
 
@@ -280,23 +297,25 @@ describe('registerMcpTools', () => {
       expect(result.content[0].text).toContain('Globals\tFoo\tinstance\tuse\tclient');
     });
 
-    it('find_references_to hints at env 1 when env 0 search is empty', async () => {
+    it('find_references_to auto-falls-back to env 1 when env 0 returns empty', async () => {
       vi.mocked(queries.referencesToObject).mockReturnValue([]);
       const result = await server.getTool('find_references_to')!.handler({ objectName: 'Missing' });
 
-      expect(result.content[0].text).toContain('environmentId 0');
-      expect(result.content[0].text).toContain('environmentId: 1');
+      expect(queries.referencesToObject).toHaveBeenCalledWith(session, 'Missing', 0);
+      expect(queries.referencesToObject).toHaveBeenCalledWith(session, 'Missing', 1);
+      expect(result.content[0].text).toBe('No references found in environmentId 0 or 1.');
     });
 
-    // Symmetric with find_implementors / find_references_to — same helper, same
-    // expected hint. Without this assertion a refactor could silently regress
-    // senders-only.
-    it('find_senders hints at env 1 when env 0 search is empty', async () => {
+    // Symmetric with find_implementors / find_references_to — same helper,
+    // same fallback semantics. Without this assertion a refactor could
+    // regress only the senders branch.
+    it('find_senders auto-falls-back to env 1 when env 0 returns empty', async () => {
       vi.mocked(queries.sendersOf).mockReturnValue([]);
       const result = await server.getTool('find_senders')!.handler({ selector: 'unused' });
 
-      expect(result.content[0].text).toContain('environmentId 0');
-      expect(result.content[0].text).toContain('environmentId: 1');
+      expect(queries.sendersOf).toHaveBeenCalledWith(session, 'unused', 0);
+      expect(queries.sendersOf).toHaveBeenCalledWith(session, 'unused', 1);
+      expect(result.content[0].text).toBe('No senders found in environmentId 0 or 1.');
     });
 
     it('list_all_classes emits dictIndex\\tdictName\\tclassName rows', async () => {
@@ -467,7 +486,19 @@ describe('registerMcpTools', () => {
       await server.getTool('list_failing_tests')!
         .handler({ classNames: ['ArrayTest', 'StringTest'] });
 
-      expect(sunit.runFailingTests).toHaveBeenCalledWith(session, ['ArrayTest', 'StringTest']);
+      // Third arg is `classNamePattern`, undefined when not passed.
+      expect(sunit.runFailingTests).toHaveBeenCalledWith(session, ['ArrayTest', 'StringTest'], undefined);
+    });
+
+    // Round-2 enhancement: glob-pattern filter (e.g. "Bytes*TestCase") is
+    // forwarded to the shared query, which expands it server-side via
+    // GemStone's `String match:` so we still hit the suite in one round-trip.
+    it('list_failing_tests forwards classNamePattern to the underlying query', async () => {
+      vi.mocked(sunit.runFailingTests).mockReturnValue([]);
+      await server.getTool('list_failing_tests')!
+        .handler({ classNamePattern: 'Bytes*TestCase' });
+
+      expect(sunit.runFailingTests).toHaveBeenCalledWith(session, undefined, 'Bytes*TestCase');
     });
 
     it('list_failing_tests auto-refreshes the session view before the suite runs', async () => {
