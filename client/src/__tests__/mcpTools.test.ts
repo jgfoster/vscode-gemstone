@@ -34,14 +34,22 @@ vi.mock('../browserQueries', () => ({
 vi.mock('../sunitQueries', () => ({
   runTestMethod: vi.fn(() => ({ className: '', selector: '', status: 'passed', message: '', durationMs: 0 })),
   runTestClass: vi.fn(() => []),
+  runFailingTests: vi.fn(() => []),
+  discoverTestClasses: vi.fn(() => [] as Array<{ dictName: string; className: string }>),
+  describeTestFailure: vi.fn(() => ({ status: 'passed' })),
   SunitQueryError: class SunitQueryError extends Error {
     gciErrorNumber: number;
     constructor(msg: string, num = 0) { super(msg); this.gciErrorNumber = num; }
   },
 }));
+vi.mock('../pythonQueries', () => ({
+  evalPython: vi.fn(() => ''),
+  compilePython: vi.fn(() => ''),
+}));
 
 import * as queries from '../browserQueries';
 import * as sunit from '../sunitQueries';
+import * as python from '../pythonQueries';
 import { registerMcpTools } from '../mcpTools';
 import { ActiveSession } from '../sessionManager';
 
@@ -95,7 +103,7 @@ describe('registerMcpTools', () => {
     vi.clearAllMocks();
   });
 
-  it('registers the expected 27 tools in alphabetical order', () => {
+  it('registers the expected tools in alphabetical order', () => {
     const names = server.getToolNames();
     expect(names).toEqual([
       'abort',
@@ -103,9 +111,12 @@ describe('registerMcpTools', () => {
       'commit',
       'compile_class_definition',
       'compile_method',
+      'compile_python',
       'delete_class',
       'delete_method',
       'describe_class',
+      'describe_test_failure',
+      'eval_python',
       'execute_code',
       'export_class_source',
       'find_implementors',
@@ -118,7 +129,10 @@ describe('registerMcpTools', () => {
       'list_classes',
       'list_dictionaries',
       'list_dictionary_entries',
+      'list_failing_tests',
       'list_methods',
+      'list_test_classes',
+      'refresh',
       'remove_dictionary',
       'run_test_class',
       'run_test_method',
@@ -165,6 +179,18 @@ describe('registerMcpTools', () => {
       expect(codeArg).toContain('printString');
     });
 
+    // Regression: the original wrapper was `(<code>) printString`, which only
+    // accepts a single expression. Multi-statement bodies with temp
+    // declarations (`| x | x := 42. x + 1`) errored with "expected start of a
+    // statement". Block-wrap accepts both shapes.
+    it('execute_code block-wraps the input so multi-statement bodies parse', async () => {
+      vi.mocked(queries.executeFetchString).mockReturnValue('43');
+      await server.getTool('execute_code')!.handler({ code: '| x | x := 42. x + 1' });
+
+      const codeArg = vi.mocked(queries.executeFetchString).mock.calls[0][2];
+      expect(codeArg).toBe('[| x | x := 42. x + 1] value printString');
+    });
+
     it('get_class_definition delegates to queries.getClassDefinition', async () => {
       vi.mocked(queries.getClassDefinition).mockReturnValue('Array definition');
       const result = await server.getTool('get_class_definition')!.handler({ className: 'Array' });
@@ -183,11 +209,23 @@ describe('registerMcpTools', () => {
       expect(result.content[0].text).toContain('Globals\tArray\tinstance\tsize\taccessing');
     });
 
-    it('find_implementors returns "No implementors found." when empty', async () => {
+    // Empty results in env 0 (the default) hint at env 1 — projects like
+    // GemStone-Python keep most user code in env 1, and the original
+    // "No implementors found." text was easy to misread as "doesn't exist."
+    it('find_implementors hints at env 1 when env 0 search is empty', async () => {
       vi.mocked(queries.implementorsOf).mockReturnValue([]);
       const result = await server.getTool('find_implementors')!.handler({ selector: 'xyz' });
 
-      expect(result.content[0].text).toBe('No implementors found.');
+      expect(result.content[0].text).toContain('environmentId 0');
+      expect(result.content[0].text).toContain('environmentId: 1');
+    });
+
+    it('find_implementors gives a plain empty message when an explicit non-zero env is empty', async () => {
+      vi.mocked(queries.implementorsOf).mockReturnValue([]);
+      const result = await server.getTool('find_implementors')!
+        .handler({ selector: 'xyz', environmentId: 1 });
+
+      expect(result.content[0].text).toBe('No implementors found in environmentId 1.');
     });
 
     it('list_classes delegates to getClassNames with the dictionary name', async () => {
@@ -242,11 +280,23 @@ describe('registerMcpTools', () => {
       expect(result.content[0].text).toContain('Globals\tFoo\tinstance\tuse\tclient');
     });
 
-    it('find_references_to returns "No references found." when empty', async () => {
+    it('find_references_to hints at env 1 when env 0 search is empty', async () => {
       vi.mocked(queries.referencesToObject).mockReturnValue([]);
       const result = await server.getTool('find_references_to')!.handler({ objectName: 'Missing' });
 
-      expect(result.content[0].text).toBe('No references found.');
+      expect(result.content[0].text).toContain('environmentId 0');
+      expect(result.content[0].text).toContain('environmentId: 1');
+    });
+
+    // Symmetric with find_implementors / find_references_to — same helper, same
+    // expected hint. Without this assertion a refactor could silently regress
+    // senders-only.
+    it('find_senders hints at env 1 when env 0 search is empty', async () => {
+      vi.mocked(queries.sendersOf).mockReturnValue([]);
+      const result = await server.getTool('find_senders')!.handler({ selector: 'unused' });
+
+      expect(result.content[0].text).toContain('environmentId 0');
+      expect(result.content[0].text).toContain('environmentId: 1');
     });
 
     it('list_all_classes emits dictIndex\\tdictName\\tclassName rows', async () => {
@@ -359,6 +409,19 @@ describe('registerMcpTools', () => {
       expect(result.content[0].text).toBe('PASSED (3ms)');
     });
 
+    it('run_test_method auto-refreshes the session view before running', async () => {
+      vi.mocked(sunit.runTestMethod).mockReturnValue({
+        className: 'ArrayTest', selector: 'testSize', status: 'passed', message: '', durationMs: 1,
+      });
+      await server.getTool('run_test_method')!.handler({
+        className: 'ArrayTest', selector: 'testSize',
+      });
+
+      const refreshCall = vi.mocked(queries.executeFetchString).mock.calls[0][2];
+      expect(refreshCall).toContain('System needsCommit ifFalse:');
+      expect(refreshCall).toContain('System abortTransaction');
+    });
+
     it('run_test_class delegates to sunit.runTestClass and formats results', async () => {
       vi.mocked(sunit.runTestClass).mockReturnValue([
         { className: 'ArrayTest', selector: 'testSize', status: 'passed', message: '', durationMs: 0 },
@@ -372,6 +435,166 @@ describe('registerMcpTools', () => {
       expect(result.content[0].text).toContain('expected 1 got 2');
     });
 
+    it('run_test_class auto-refreshes the session view before running', async () => {
+      vi.mocked(sunit.runTestClass).mockReturnValue([]);
+      await server.getTool('run_test_class')!.handler({ className: 'ArrayTest' });
+
+      const refreshCall = vi.mocked(queries.executeFetchString).mock.calls[0][2];
+      expect(refreshCall).toContain('System needsCommit ifFalse:');
+      expect(refreshCall).toContain('System abortTransaction');
+    });
+
+    it('list_failing_tests returns "All tests passed." when nothing failed', async () => {
+      vi.mocked(sunit.runFailingTests).mockReturnValue([]);
+      const result = await server.getTool('list_failing_tests')!.handler({});
+
+      expect(result.content[0].text).toBe('All tests passed.');
+    });
+
+    it('list_failing_tests formats failures and errors with status\\tclass\\tselector\\tmessage', async () => {
+      vi.mocked(sunit.runFailingTests).mockReturnValue([
+        { className: 'MyTest', selector: 'testBad', status: 'failed', message: 'expected 1 got 2', durationMs: 0 },
+        { className: 'Other', selector: 'testBoom', status: 'error', message: 'division by zero', durationMs: 0 },
+      ]);
+      const result = await server.getTool('list_failing_tests')!.handler({});
+
+      expect(result.content[0].text).toContain('FAILED\tMyTest\ttestBad\texpected 1 got 2');
+      expect(result.content[0].text).toContain('ERROR\tOther\ttestBoom\tdivision by zero');
+    });
+
+    it('list_failing_tests forwards classNames to the underlying query', async () => {
+      vi.mocked(sunit.runFailingTests).mockReturnValue([]);
+      await server.getTool('list_failing_tests')!
+        .handler({ classNames: ['ArrayTest', 'StringTest'] });
+
+      expect(sunit.runFailingTests).toHaveBeenCalledWith(session, ['ArrayTest', 'StringTest']);
+    });
+
+    it('list_failing_tests auto-refreshes the session view before the suite runs', async () => {
+      vi.mocked(sunit.runFailingTests).mockReturnValue([]);
+      await server.getTool('list_failing_tests')!.handler({});
+
+      const refreshCall = vi.mocked(queries.executeFetchString).mock.calls[0][2];
+      expect(refreshCall).toContain('System needsCommit ifFalse:');
+      expect(refreshCall).toContain('System abortTransaction');
+    });
+
+    it('list_test_classes returns dictName\\tclassName rows', async () => {
+      vi.mocked(sunit.discoverTestClasses).mockReturnValue([
+        { dictName: 'UserGlobals', className: 'ArrayTest' },
+        { dictName: 'UserGlobals', className: 'StringTest' },
+      ]);
+      const result = await server.getTool('list_test_classes')!.handler({});
+
+      expect(result.content[0].text).toBe('UserGlobals\tArrayTest\nUserGlobals\tStringTest');
+    });
+
+    it('list_test_classes returns a friendly message when no TestCase subclasses are found', async () => {
+      vi.mocked(sunit.discoverTestClasses).mockReturnValue([]);
+      const result = await server.getTool('list_test_classes')!.handler({});
+
+      expect(result.content[0].text).toBe('No TestCase subclasses found.');
+    });
+
+    it('eval_python delegates to python.evalPython with the source string', async () => {
+      vi.mocked(python.evalPython).mockReturnValue('3');
+      const result = await server.getTool('eval_python')!.handler({ source: '1 + 2' });
+
+      expect(python.evalPython).toHaveBeenCalledWith(session, '1 + 2');
+      expect(result.content[0].text).toBe('3');
+    });
+
+    // Tool registers unconditionally; the "Grail not loaded" message comes
+    // back from the Smalltalk side as ordinary result text.
+    it('eval_python passes the "Grail not detected" hint through verbatim', async () => {
+      vi.mocked(python.evalPython).mockReturnValue(
+        'Grail (GemStone-Python) not detected: class ModuleAst not found in symbolList. ...');
+      const result = await server.getTool('eval_python')!.handler({ source: 'x = 1' });
+
+      expect(result.content[0].text).toContain('Grail (GemStone-Python) not detected');
+      expect(result.isError).toBeUndefined();
+    });
+
+    it('compile_python delegates to python.compilePython with the source string', async () => {
+      vi.mocked(python.compilePython).mockReturnValue('x := 1');
+      const result = await server.getTool('compile_python')!.handler({ source: 'x = 1' });
+
+      expect(python.compilePython).toHaveBeenCalledWith(session, 'x = 1');
+      expect(result.content[0].text).toBe('x := 1');
+    });
+
+    it('describe_test_failure formats TestFailure output with exceptionClass + messageText', async () => {
+      vi.mocked(sunit.describeTestFailure).mockReturnValue({
+        status: 'failed',
+        exceptionClass: 'TestFailure',
+        errorNumber: 2751,
+        messageText: 'Assertion failed',
+        description: 'TestFailure: Assertion failed',
+      });
+      const result = await server.getTool('describe_test_failure')!
+        .handler({ className: 'ArrayTest', selector: 'testBad' });
+
+      expect(sunit.describeTestFailure).toHaveBeenCalledWith(session, 'ArrayTest', 'testBad');
+      expect(result.content[0].text).toContain('exceptionClass: TestFailure');
+      expect(result.content[0].text).toContain('messageText: Assertion failed');
+      expect(result.content[0].text).toContain('errorNumber: 2751');
+    });
+
+    it('describe_test_failure surfaces mnuReceiver and mnuSelector for MessageNotUnderstood', async () => {
+      vi.mocked(sunit.describeTestFailure).mockReturnValue({
+        status: 'error',
+        exceptionClass: 'MessageNotUnderstood',
+        errorNumber: 2010,
+        messageText: 'a Object class does not understand #foo',
+        description: 'a Object class does not understand #foo',
+        mnuReceiver: 'Object',
+        mnuSelector: 'foo',
+      });
+      const result = await server.getTool('describe_test_failure')!
+        .handler({ className: 'ArrayTest', selector: 'testErrors' });
+
+      expect(result.content[0].text).toContain('mnuReceiver: Object');
+      expect(result.content[0].text).toContain('mnuSelector: foo');
+    });
+
+    it('describe_test_failure returns "PASSED" when the re-run actually passed', async () => {
+      vi.mocked(sunit.describeTestFailure).mockReturnValue({ status: 'passed' });
+      const result = await server.getTool('describe_test_failure')!
+        .handler({ className: 'ArrayTest', selector: 'testGood' });
+
+      expect(result.content[0].text).toBe('PASSED');
+    });
+
+    it('describe_test_failure formats stackReport under a header preserving newlines', async () => {
+      vi.mocked(sunit.describeTestFailure).mockReturnValue({
+        status: 'failed',
+        exceptionClass: 'TestFailure',
+        errorNumber: 2751,
+        messageText: 'Assertion failed',
+        description: 'TestFailure: Assertion failed',
+        stackReport:
+          'TestFailure (AbstractException) >> signal: @3 line 7  [GsNMethod 3523841]\n' +
+          'JasperProbeTest >> testFails @3 line 1  [GsNMethod 1236251649]',
+      });
+      const result = await server.getTool('describe_test_failure')!
+        .handler({ className: 'ArrayTest', selector: 'testBad' });
+      const text = result.content[0].text;
+
+      expect(text).toContain('stackReport:');
+      expect(text).toContain('TestFailure (AbstractException) >> signal:');
+      expect(text).toContain('JasperProbeTest >> testFails');
+    });
+
+    it('refresh runs needsCommit/abortTransaction and returns the result', async () => {
+      vi.mocked(queries.executeFetchString).mockReturnValue('refreshed');
+      const result = await server.getTool('refresh')!.handler({});
+
+      const code = vi.mocked(queries.executeFetchString).mock.calls[0][2];
+      expect(code).toContain('System needsCommit');
+      expect(code).toContain('System abortTransaction');
+      expect(result.content[0].text).toBe('refreshed');
+    });
+
     it('status pulls session info via executeFetchString', async () => {
       vi.mocked(queries.executeFetchString).mockReturnValue('User: DataCurator\n...');
       const result = await server.getTool('status')!.handler({});
@@ -382,6 +605,23 @@ describe('registerMcpTools', () => {
       expect(code).toContain('inTransaction');
       expect(code).toContain('needsCommit');
       expect(result.content[0].text).toContain('DataCurator');
+    });
+
+    // Stale-transaction guard: the snippet must auto-refresh-if-clean so the
+    // rest of the report (and any follow-up read tools in this session) sees
+    // committed state. Skipping when needsCommit is true is load-bearing —
+    // discarding uncommitted work silently would be far worse than reporting
+    // slightly stale state.
+    it('status auto-refreshes the view inline (only when no uncommitted changes)', async () => {
+      vi.mocked(queries.executeFetchString).mockReturnValue('');
+      await server.getTool('status')!.handler({});
+
+      const code = vi.mocked(queries.executeFetchString).mock.calls[0][2];
+      expect(code).toContain('System needsCommit');
+      expect(code).toContain('System abortTransaction');
+      expect(code).toContain('View: ');
+      expect(code).toContain('stale');
+      expect(code).toContain('refreshed');
     });
 
     // Regression: nextPutAll: sends do: to its argument. If any value passed

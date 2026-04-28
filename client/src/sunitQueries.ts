@@ -6,6 +6,8 @@ import { discoverTestClasses as sharedDiscoverTestClasses } from './queries/disc
 import { discoverTestMethods as sharedDiscoverTestMethods } from './queries/discoverTestMethods';
 import { runTestMethod as sharedRunTestMethod } from './queries/runTestMethod';
 import { runTestClass as sharedRunTestClass } from './queries/runTestClass';
+import { runFailingTests as sharedRunFailingTests } from './queries/runFailingTests';
+import { describeTestFailure as sharedDescribeTestFailure } from './queries/describeTestFailure';
 
 // Re-export types from the shared layer.
 export type { TestClassInfo } from './queries/discoverTestClasses';
@@ -34,4 +36,12 @@ export function runTestMethod(session: ActiveSession, className: string, selecto
 
 export function runTestClass(session: ActiveSession, className: string) {
   return sharedRunTestClass(bind(session), className);
+}
+
+export function runFailingTests(session: ActiveSession, classNames?: string[]) {
+  return sharedRunFailingTests(bind(session), classNames);
+}
+
+export function describeTestFailure(session: ActiveSession, className: string, selector: string) {
+  return sharedDescribeTestFailure(bind(session), className, selector);
 }

@@ -45,9 +45,12 @@ describe('tools', () => {
       'commit',
       'compile_class_definition',
       'compile_method',
+      'compile_python',
       'delete_class',
       'delete_method',
       'describe_class',
+      'describe_test_failure',
+      'eval_python',
       'execute_code',
       'export_class_source',
       'find_implementors',
@@ -60,7 +63,10 @@ describe('tools', () => {
       'list_classes',
       'list_dictionaries',
       'list_dictionary_entries',
+      'list_failing_tests',
       'list_methods',
+      'list_test_classes',
+      'refresh',
       'remove_dictionary',
       'run_test_class',
       'run_test_method',
@@ -82,6 +88,21 @@ describe('tools', () => {
       expect(code).toContain('printString');
       expect(result.content[0].text).toBe('7');
       expect(result.isError).toBeUndefined();
+    });
+
+    // Regression: the original wrapper was `(<code>) printString`, which only
+    // accepts a single expression. A multi-statement body with temp
+    // declarations like `| x | x := 42. x + 1` would error with
+    // "expected start of a statement". Wrapping as a block (`[<code>] value`)
+    // accepts both single expressions and statement sequences.
+    it('block-wraps the code so multi-statement and temp-var bodies parse', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('43');
+      const tool = server.getTool('execute_code')!;
+      const result = await tool.handler({ code: '| x | x := 42. x + 1' });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toBe('[| x | x := 42. x + 1] value printString');
+      expect(result.content[0].text).toBe('43');
     });
 
     it('returns error on GCI failure', async () => {
@@ -164,12 +185,25 @@ describe('tools', () => {
       expect(result.content[0].text).toContain('Array');
     });
 
-    it('returns fallback message when no implementors found', async () => {
+    // When the search hits the default env (0) and finds nothing, the message
+    // should nudge the agent toward env 1 — projects like GemStone-Python keep
+    // most user code there, and the original "No implementors found." message
+    // was easy to misread as "the selector really doesn't exist anywhere."
+    it('returns env-1 hint when env 0 search is empty', async () => {
       vi.mocked(session.executeFetchString).mockReturnValue('');
       const tool = server.getTool('find_implementors')!;
       const result = await tool.handler({ selector: 'nonexistent' });
 
-      expect(result.content[0].text).toBe('No implementors found.');
+      expect(result.content[0].text).toContain('environmentId 0');
+      expect(result.content[0].text).toContain('environmentId: 1');
+    });
+
+    it('returns plain empty message when an explicit non-zero env is empty', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('find_implementors')!;
+      const result = await tool.handler({ selector: 'nonexistent', environmentId: 1 });
+
+      expect(result.content[0].text).toBe('No implementors found in environmentId 1.');
     });
   });
 
@@ -182,6 +216,18 @@ describe('tools', () => {
       const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
       expect(code).toContain("sendersOf: #'printString'");
       expect(result.content[0].text).toContain('String');
+    });
+
+    // Symmetric with find_implementors / find_references_to — uses the same
+    // noResultsMessage helper, so a refactor that breaks one would silently
+    // break this without a guard.
+    it('returns env-1 hint when env 0 search is empty', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('find_senders')!;
+      const result = await tool.handler({ selector: 'nonexistent' });
+
+      expect(result.content[0].text).toContain('environmentId 0');
+      expect(result.content[0].text).toContain('environmentId: 1');
     });
   });
 
@@ -352,12 +398,13 @@ describe('tools', () => {
       expect(result.content[0].text).toContain('Foo\tinstance\tuse\tclient');
     });
 
-    it('returns fallback when no references found', async () => {
+    it('returns env-1 hint when env 0 search is empty', async () => {
       vi.mocked(session.executeFetchString).mockReturnValue('');
       const tool = server.getTool('find_references_to')!;
       const result = await tool.handler({ objectName: 'Unused' });
 
-      expect(result.content[0].text).toBe('No references found.');
+      expect(result.content[0].text).toContain('environmentId 0');
+      expect(result.content[0].text).toContain('environmentId: 1');
     });
   });
 
@@ -568,7 +615,8 @@ describe('tools', () => {
       const tool = server.getTool('run_test_method')!;
       const result = await tool.handler({ className: 'ArrayTest', selector: 'testSize' });
 
-      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      // The actual run_test_method query should follow the auto-refresh call.
+      const code = vi.mocked(session.executeFetchString).mock.calls.at(-1)![0];
       expect(code).toContain('ArrayTest');
       expect(code).toContain("selector: #'testSize'");
       expect(result.content[0].text).toContain('PASSED');
@@ -583,6 +631,20 @@ describe('tools', () => {
       expect(result.content[0].text).toContain('FAILED');
       expect(result.content[0].text).toContain('expected 3 got 4');
     });
+
+    // Stale-transaction guard: the GCI pins read views to the session's
+    // transaction snapshot, so a commit landed by another process (e.g.
+    // install.sh) is invisible until this session aborts. Auto-refresh-if-clean
+    // closes the gap silently when there's no uncommitted work to lose.
+    it('issues an auto-refresh-if-clean before running the test', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('passed\t\t1');
+      const tool = server.getTool('run_test_method')!;
+      await tool.handler({ className: 'ArrayTest', selector: 'testSize' });
+
+      const refreshCall = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(refreshCall).toContain('System needsCommit ifFalse:');
+      expect(refreshCall).toContain('System abortTransaction');
+    });
   });
 
   describe('run_test_class', () => {
@@ -592,7 +654,7 @@ describe('tools', () => {
       const tool = server.getTool('run_test_class')!;
       const result = await tool.handler({ className: 'ArrayTest' });
 
-      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      const code = vi.mocked(session.executeFetchString).mock.calls.at(-1)![0];
       expect(code).toContain('ArrayTest');
       expect(code).toContain('suite');
       expect(result.content[0].text).toContain('testSize');
@@ -608,11 +670,283 @@ describe('tools', () => {
       expect(result.content[0].text).toContain('FAILED');
       expect(result.content[0].text).toContain('expected 1 got 2');
     });
+
+    it('issues an auto-refresh-if-clean before running the suite', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('run_test_class')!;
+      await tool.handler({ className: 'ArrayTest' });
+
+      const refreshCall = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(refreshCall).toContain('System needsCommit ifFalse:');
+      expect(refreshCall).toContain('System abortTransaction');
+    });
+  });
+
+  describe('eval_python', () => {
+    it('runs the Grail eval pipeline via objectNamed: ModuleAst', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('3');
+      const result = await server.getTool('eval_python')!.handler({ source: '1 + 2' });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain("objectNamed: #'ModuleAst'");
+      expect(code).toContain('evaluateSource: src');
+      expect(result.content[0].text).toBe('3');
+    });
+
+    // When Grail isn't loaded the snippet's nil-branch produces the hint as
+    // its result. The tool should pass it through verbatim — no special
+    // error handling at the JS layer, just the agent-readable text.
+    it('passes the "Grail not detected" hint through as the result text', async () => {
+      const hint = 'Grail (GemStone-Python) not detected: class ModuleAst not found in symbolList. ' +
+        'Install Grail or activate it in this session before using the python tools.';
+      vi.mocked(session.executeFetchString).mockReturnValue(hint);
+      const result = await server.getTool('eval_python')!.handler({ source: 'x = 1' });
+
+      expect(result.content[0].text).toContain('Grail (GemStone-Python) not detected');
+      expect(result.isError).toBeUndefined();
+    });
+  });
+
+  describe('compile_python', () => {
+    it('runs the Grail transpile pipeline (parseSource + smalltalkSource)', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue("x := 1");
+      const result = await server.getTool('compile_python')!.handler({ source: 'x = 1' });
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain('parseSource: src');
+      expect(code).toContain('smalltalkSource');
+      expect(result.content[0].text).toBe('x := 1');
+    });
+  });
+
+  describe('describe_test_failure', () => {
+    // For TestFailure (assertion failure) — should produce structured output
+    // that names the exception class and the assertion's clean messageText
+    // (which is "Assertion failed", separate from the printString blob the
+    // old runTestMethod tool returned).
+    it('formats TestFailure output with exceptionClass + messageText', async () => {
+      vi.mocked(session.executeFetchString)
+        .mockReturnValueOnce('ok') // refreshIfClean
+        .mockReturnValueOnce(
+          'status: failed\n' +
+          'exceptionClass: TestFailure\n' +
+          'errorNumber: 2751\n' +
+          'messageText: Assertion failed\n' +
+          'description: TestFailure: Assertion failed\n',
+        );
+      const tool = server.getTool('describe_test_failure')!;
+      const result = await tool.handler({ className: 'ArrayTest', selector: 'testBad' });
+
+      expect(result.content[0].text).toContain('status: failed');
+      expect(result.content[0].text).toContain('exceptionClass: TestFailure');
+      expect(result.content[0].text).toContain('errorNumber: 2751');
+      expect(result.content[0].text).toContain('messageText: Assertion failed');
+    });
+
+    // For MessageNotUnderstood — must surface mnuReceiver and mnuSelector,
+    // the highest-signal fields for diagnosing "missing method" errors.
+    it('includes mnuReceiver and mnuSelector on MessageNotUnderstood', async () => {
+      vi.mocked(session.executeFetchString)
+        .mockReturnValueOnce('ok')
+        .mockReturnValueOnce(
+          'status: error\n' +
+          'exceptionClass: MessageNotUnderstood\n' +
+          'errorNumber: 2010\n' +
+          'messageText: a Object class does not understand #foo\n' +
+          'description: a Object class does not understand #foo\n' +
+          'mnuReceiver: Object\n' +
+          'mnuSelector: foo\n',
+        );
+      const tool = server.getTool('describe_test_failure')!;
+      const result = await tool.handler({ className: 'ArrayTest', selector: 'testErrors' });
+
+      expect(result.content[0].text).toContain('exceptionClass: MessageNotUnderstood');
+      expect(result.content[0].text).toContain('mnuReceiver: Object');
+      expect(result.content[0].text).toContain('mnuSelector: foo');
+    });
+
+    it('returns "PASSED" when the test re-run actually passed', async () => {
+      vi.mocked(session.executeFetchString)
+        .mockReturnValueOnce('ok')
+        .mockReturnValueOnce('status: passed\n');
+      const tool = server.getTool('describe_test_failure')!;
+      const result = await tool.handler({ className: 'ArrayTest', selector: 'testGood' });
+
+      expect(result.content[0].text).toBe('PASSED');
+    });
+
+    // Stack trace flows end to end: Smalltalk emits the sentinel + frames,
+    // the parser splits on the sentinel, the formatter emits a "stackReport:"
+    // header followed by the verbatim multi-line content. Frame newlines
+    // must survive the round-trip.
+    it('formats stackReport as a verbatim multi-line block under a header', async () => {
+      vi.mocked(session.executeFetchString)
+        .mockReturnValueOnce('ok')
+        .mockReturnValueOnce(
+          'status: failed\n' +
+          'exceptionClass: TestFailure\n' +
+          'errorNumber: 2751\n' +
+          'messageText: Assertion failed\n' +
+          'description: TestFailure: Assertion failed\n' +
+          '--- stackReport ---\n' +
+          'TestFailure (AbstractException) >> signal: @3 line 7  [GsNMethod 3523841]\n' +
+          'JasperProbeTest >> testFails @3 line 1  [GsNMethod 1236251649]\n',
+        );
+      const tool = server.getTool('describe_test_failure')!;
+      const result = await tool.handler({ className: 'ArrayTest', selector: 'testBad' });
+      const text = result.content[0].text;
+
+      expect(text).toContain('stackReport:');
+      expect(text).toContain('TestFailure (AbstractException) >> signal:');
+      expect(text).toContain('JasperProbeTest >> testFails');
+      // Two frames separated by a newline must remain so.
+      expect(text.match(/\n/g)?.length ?? 0).toBeGreaterThanOrEqual(6);
+    });
+
+    it('issues the gem-config toggle that enables stack capture', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('status: passed\n');
+      const tool = server.getTool('describe_test_failure')!;
+      await tool.handler({ className: 'ArrayTest', selector: 'testAny' });
+
+      const queryCall = vi.mocked(session.executeFetchString).mock.calls.at(-1)![0];
+      expect(queryCall).toContain('GemExceptionSignalCapturesStack');
+      expect(queryCall).toContain('put: true');
+      expect(queryCall).toContain('put: oldStackCfg');
+      expect(queryCall).toContain('ensure:');
+    });
+
+    // Stale-transaction guard — same as the other test runners. A view
+    // pinned to old committed state would let an agent debug a failure
+    // that's already been fixed in the running stone.
+    it('issues an auto-refresh-if-clean before re-running the test', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('status: passed\n');
+      const tool = server.getTool('describe_test_failure')!;
+      await tool.handler({ className: 'ArrayTest', selector: 'testAny' });
+
+      const refreshCall = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(refreshCall).toContain('System needsCommit ifFalse:');
+      expect(refreshCall).toContain('System abortTransaction');
+    });
+
+    // The Smalltalk side has to use AbstractException (not Exception) —
+    // GemStone's exception hierarchy makes Exception a subclass, and
+    // MessageNotUnderstood escapes past Exception in some contexts. Lock
+    // this in so a future "simplification" doesn't regress to Exception
+    // and silently swallow MNUs.
+    it('catches AbstractException, not Exception (so MNUs do not escape)', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('status: passed\n');
+      const tool = server.getTool('describe_test_failure')!;
+      await tool.handler({ className: 'ArrayTest', selector: 'testAny' });
+
+      const queryCall = vi.mocked(session.executeFetchString).mock.calls.at(-1)![0];
+      expect(queryCall).toContain('on: AbstractException');
+      expect(queryCall).not.toMatch(/on: Exception\b/);
+    });
+
+    // SUnit's framework swallows the exception — we have to bypass it.
+    // The query must run setUp/perform/tearDown manually rather than
+    // calling tc>>run.
+    it('bypasses TestCase>>run by invoking setUp / perform / tearDown directly', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('status: passed\n');
+      const tool = server.getTool('describe_test_failure')!;
+      await tool.handler({ className: 'ArrayTest', selector: 'testAny' });
+
+      const queryCall = vi.mocked(session.executeFetchString).mock.calls.at(-1)![0];
+      expect(queryCall).toContain('tc setUp');
+      expect(queryCall).toContain('tc perform:');
+      expect(queryCall).toContain('tc tearDown');
+    });
+  });
+
+  describe('list_failing_tests', () => {
+    // The agent equivalent of `./run_tests.sh | grep failures`. Single
+    // round-trip: iteration runs in Smalltalk so an N-class invocation is
+    // one GCI call, not N. Auto-refresh-if-clean ensures results reflect
+    // committed state.
+    it('returns "All tests passed." when nothing failed', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('list_failing_tests')!;
+      const result = await tool.handler({});
+
+      expect(result.content[0].text).toBe('All tests passed.');
+    });
+
+    it('formats failures as STATUS\\tclass\\tselector\\tmessage', async () => {
+      vi.mocked(session.executeFetchString)
+        .mockReturnValueOnce('ok') // refreshIfClean response
+        .mockReturnValueOnce('MyTest\ttestBad\tfailed\texpected 1 got 2\nOther\ttestBoom\terror\tdivision by zero\n');
+      const tool = server.getTool('list_failing_tests')!;
+      const result = await tool.handler({});
+
+      expect(result.content[0].text).toContain('FAILED\tMyTest\ttestBad\texpected 1 got 2');
+      expect(result.content[0].text).toContain('ERROR\tOther\ttestBoom\tdivision by zero');
+    });
+
+    it('passes explicit classNames to the underlying query', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('list_failing_tests')!;
+      await tool.handler({ classNames: ['ArrayTest', 'StringTest'] });
+
+      // The query call (non-refresh one) must reference each requested name.
+      const queryCall = vi.mocked(session.executeFetchString).mock.calls.at(-1)![0];
+      expect(queryCall).toContain("objectNamed: #'ArrayTest'");
+      expect(queryCall).toContain("objectNamed: #'StringTest'");
+    });
+
+    it('issues an auto-refresh-if-clean before the suite runs', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('list_failing_tests')!;
+      await tool.handler({});
+
+      const refreshCall = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(refreshCall).toContain('System needsCommit ifFalse:');
+      expect(refreshCall).toContain('System abortTransaction');
+    });
+  });
+
+  describe('list_test_classes', () => {
+    it('returns dictName\\tclassName rows', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('UserGlobals\tArrayTest\nUserGlobals\tStringTest\n');
+      const tool = server.getTool('list_test_classes')!;
+      const result = await tool.handler({});
+
+      expect(result.content[0].text).toBe('UserGlobals\tArrayTest\nUserGlobals\tStringTest');
+    });
+
+    it('returns a friendly message when no TestCase subclasses are found', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('list_test_classes')!;
+      const result = await tool.handler({});
+
+      expect(result.content[0].text).toBe('No TestCase subclasses found.');
+    });
+  });
+
+  describe('refresh', () => {
+    it('refreshes the session view when no uncommitted changes are pending', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('refreshed');
+      const tool = server.getTool('refresh')!;
+      const result = await tool.handler({});
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain('System needsCommit');
+      expect(code).toContain('System abortTransaction');
+      expect(result.content[0].text).toBe('refreshed');
+    });
+
+    it('skips when there are uncommitted changes, reporting back', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('skipped: uncommitted changes present');
+      const tool = server.getTool('refresh')!;
+      const result = await tool.handler({});
+
+      expect(result.content[0].text).toContain('skipped');
+      expect(result.content[0].text).toContain('uncommitted changes');
+    });
   });
 
   describe('status', () => {
     it('reports session information', async () => {
-      const statusOutput = 'User: DataCurator\nStone: gs64stone\nSession ID: 1\nTransaction: active\nUncommitted changes: no\n';
+      const statusOutput = 'User: DataCurator\nStone: gs64stone\nSession ID: 1\nTransaction: active\nUncommitted changes: no\nView: refreshed\n';
       vi.mocked(session.executeFetchString).mockReturnValue(statusOutput);
       const tool = server.getTool('status')!;
       const result = await tool.handler({});
@@ -624,6 +958,24 @@ describe('tools', () => {
       expect(code).toContain('needsCommit');
       expect(result.content[0].text).toContain('DataCurator');
       expect(result.content[0].text).toContain('gs64stone');
+    });
+
+    // The snippet must auto-refresh-if-clean inline so the rest of the report
+    // reflects committed state, and so a single status call also primes the
+    // session for follow-up read tools. Skipping when needsCommit is true is
+    // load-bearing: discarding uncommitted work silently would be far worse
+    // than reporting slightly stale state.
+    it('auto-refreshes the view inline (only when no uncommitted changes)', async () => {
+      vi.mocked(session.executeFetchString).mockReturnValue('');
+      const tool = server.getTool('status')!;
+      await tool.handler({});
+
+      const code = vi.mocked(session.executeFetchString).mock.calls[0][0];
+      expect(code).toContain('System needsCommit');
+      expect(code).toContain('System abortTransaction');
+      expect(code).toContain('View: ');
+      expect(code).toContain('stale');
+      expect(code).toContain('refreshed');
     });
 
     // Regression: nextPutAll: sends do: to its argument. If any value passed
