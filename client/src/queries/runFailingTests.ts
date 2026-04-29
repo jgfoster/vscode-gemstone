@@ -85,7 +85,7 @@ classes do: [:cls |
       nextPutAll: e selector; tab;
       nextPutAll: 'error'; tab;
       nextPutAll: (captureMessage value: e); lf]].
-ws contents asUtf8`;
+ws contents encodeAsUTF8`;
   const data = execute('runFailingTests', code);
   return splitLines(data).map(line => {
     const parts = line.split('\t');

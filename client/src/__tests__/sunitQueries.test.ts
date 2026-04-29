@@ -122,7 +122,7 @@ describe('sunitQueries', () => {
     // manually with our own AbstractException handler, so the message column
     // carries the live exception's class + messageText (not the SUnit
     // post-run debug recipe). Build through a String-class WriteStream and
-    // call asUtf8 at the boundary; that's the canonical GemStone pattern
+    // call encodeAsUTF8 at the boundary; that's the canonical GemStone pattern
     // for "internal storage → transfer protocol."
     it('captures live exception class + messageText (no testCase run framework)', () => {
       const session = createMockSession('');
@@ -135,7 +135,7 @@ describe('sunitQueries', () => {
       expect(code).toContain('captured class name');
       expect(code).toContain('captured messageText');
       expect(code).toContain('WriteStream on: Unicode7 new');
-      expect(code).toContain('asUtf8');
+      expect(code).toContain('encodeAsUTF8');
       // Negative guards: every prior misfire must stay out.
       expect(code).not.toMatch(/result := testCase run\b/);
       expect(code).not.toContain('WriteStream on: Utf8 new');
@@ -191,7 +191,7 @@ describe('sunitQueries', () => {
       expect(code).toContain('captured class name');
       expect(code).toContain('captured messageText');
       expect(code).toContain('WriteStream on: Unicode7 new');
-      expect(code).toContain('asUtf8');
+      expect(code).toContain('encodeAsUTF8');
       // Negative guards: the old printString-of-the-test fallback must
       // not survive (round-3 feedback called it out as the SUnit debug
       // recipe leaking), nor should either of the prior misfires.

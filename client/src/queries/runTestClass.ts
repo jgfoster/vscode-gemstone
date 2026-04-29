@@ -52,7 +52,7 @@ result errors do: [:each |
     nextPutAll: 'error'; tab.
   captureMessage value: each.
   ws lf].
-ws contents asUtf8`;
+ws contents encodeAsUTF8`;
   const data = execute(`runTestClass(${className})`, code);
   return splitLines(data).map(line => {
     const parts = line.split('\t');

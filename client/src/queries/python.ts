@@ -51,18 +51,18 @@ function buildPythonQuery(grailExpression: string, pythonSource: string): string
   //   `copyFrom:to:` aren't defined.
   //
   // The pattern: build the full output internally with whichever Unicode
-  // class fits, then call `asUtf8` once at the boundary to produce the
+  // class fits, then call `encodeAsUTF8` once at the boundary to produce the
   // bytes GCI sends back. This avoids both prior bugs:
   //
   //   - Round 2 (`'Error: ' , e messageText asString` returning a Unicode16
   //     that GCI's Utf8 fetch passed through as raw UTF-16LE bytes) is fixed
-  //     because `asUtf8` is now an explicit transcoding step.
+  //     because `encodeAsUTF8` is now an explicit transcoding step.
   //   - Round 3 (`WriteStream on: Utf8 new` failing on buffer growth because
   //     Utf8 rejects `at:put:`) is fixed because the WriteStream is over an
   //     internal class that *is* extensible.
   //
   // The hint is a literal ASCII string, but we still pipe it through
-  // `asUtf8` at the unified return below so every result has the same
+  // `encodeAsUTF8` at the unified return below so every result has the same
   // transfer-protocol class.
   return `| dispatcher src result |
 dispatcher := System myUserProfile symbolList objectNamed: #'ModuleAst'.
@@ -79,5 +79,5 @@ result := dispatcher isNil
         ws nextPutAll: ' — '.
         ws nextPutAll: e messageText asString.
         ws contents]].
-result asUtf8`;
+result encodeAsUTF8`;
 }

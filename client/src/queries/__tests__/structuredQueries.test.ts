@@ -216,16 +216,16 @@ describe('runFailingTests', () => {
 
   // Round-3 (revised): build through a String-class WriteStream (which
   // widens transparently from Unicode7 to Unicode16 / Unicode32 as needed
-  // for non-ASCII codepoints), then call `asUtf8` at the boundary to
+  // for non-ASCII codepoints), then call `encodeAsUTF8` at the boundary to
   // produce the transfer-protocol bytes GCI hands back. Pins the boundary
   // call so neither earlier failure mode (Unicode16 leak via `, ` widen,
   // or Utf8 buffer-growth `at:put:`) can recur.
-  it('builds the output as an internal String, asUtf8 at the boundary', () => {
+  it('builds the output as an internal String, encodeAsUTF8 at the boundary', () => {
     const exec = vi.fn<QueryExecutor>(() => '');
     runFailingTests(exec);
     const code = exec.mock.calls[0][1];
     expect(code).toContain('WriteStream on: Unicode7 new');
-    expect(code).toMatch(/ws contents asUtf8/);
+    expect(code).toMatch(/ws contents encodeAsUTF8/);
     // Negative guards: the round-2 Utf8 buffer and the round-3 lossy ASCII
     // gating must both stay out — they were misreads of GemStone's
     // storage/transfer encoding split.
@@ -449,13 +449,13 @@ describe('python (Grail) queries', () => {
     const code = exec.mock.calls[0][1];
     expect(code).toContain('on: AbstractException');
     // Build internally with the natural String class (which widens
-    // transparently for non-ASCII content), then `asUtf8` at the boundary
+    // transparently for non-ASCII content), then `encodeAsUTF8` at the boundary
     // for the transfer protocol GCI expects. See the regression guards
     // below for why each prior attempt (Utf8 buffer, ASCII gating, `,`
     // concatenation) was wrong.
     expect(code).toContain('WriteStream on: Unicode7 new');
     expect(code).toContain("'Error: '");
-    expect(code).toContain('result asUtf8');
+    expect(code).toContain('result encodeAsUTF8');
   });
 
   // Round-2 regression guard: the eval_python error path was previously built
@@ -484,7 +484,7 @@ describe('python (Grail) queries', () => {
   // Round-3-revised regression guard: the per-character codepoint-128 gate
   // (`ch asInteger < 128 ifTrue: [ch] ifFalse: [$?]`) was a lossy fix that
   // treated an internal storage detail as if it were a transfer-encoding
-  // problem. The right answer is `asUtf8` at the boundary; this test pins
+  // problem. The right answer is `encodeAsUTF8` at the boundary; this test pins
   // the absence of the regressed approach.
   it('does not use per-char ASCII gating with `?` substitution', () => {
     const exec = vi.fn<QueryExecutor>(() => '');

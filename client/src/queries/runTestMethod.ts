@@ -47,7 +47,7 @@ captured isNil
     ws nextPutAll: captured messageText asString.
     ws tab].
 ws nextPutAll: (endMs - startMs) printString.
-ws contents asUtf8`;
+ws contents encodeAsUTF8`;
   const data = execute(`runTestMethod(${className}>>#${selector})`, code);
   const parts = data.split('\t');
   return {
