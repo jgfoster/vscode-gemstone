@@ -38,13 +38,46 @@ function buildPythonQuery(grailExpression: string, pythonSource: string): string
   const esc = escapeString(pythonSource);
   // The hint is itself a Smalltalk string literal — the same single-quote
   // escaping rule applies, but it has none today, so we inline it directly.
-  return `| dispatcher src |
+  //
+  // The encoding model GemStone wants us to use:
+  //
+  //   Unicode7 / Unicode16 / Unicode32 are *internal storage* formats with
+  //   one codepoint per logical character (1 / 2 / 4 bytes per char).
+  //   Unicode7 transparently widens to Unicode16 / Unicode32 when a wider
+  //   codepoint is written.
+  //
+  //   Utf8 is the *transfer protocol* — variable-byte, compact for ASCII,
+  //   but its bytes don't index by character, so `at:put:` and
+  //   `copyFrom:to:` aren't defined.
+  //
+  // The pattern: build the full output internally with whichever Unicode
+  // class fits, then call `encodeAsUTF8` once at the boundary to produce the
+  // bytes GCI sends back. This avoids both prior bugs:
+  //
+  //   - Round 2 (`'Error: ' , e messageText asString` returning a Unicode16
+  //     that GCI's Utf8 fetch passed through as raw UTF-16LE bytes) is fixed
+  //     because `encodeAsUTF8` is now an explicit transcoding step.
+  //   - Round 3 (`WriteStream on: Utf8 new` failing on buffer growth because
+  //     Utf8 rejects `at:put:`) is fixed because the WriteStream is over an
+  //     internal class that *is* extensible.
+  //
+  // The hint is a literal ASCII string, but we still pipe it through
+  // `encodeAsUTF8` at the unified return below so every result has the same
+  // transfer-protocol class.
+  return `| dispatcher src result |
 dispatcher := System myUserProfile symbolList objectNamed: #'ModuleAst'.
 src := '${esc}'.
-dispatcher isNil
+result := dispatcher isNil
   ifTrue: ['${GRAIL_HINT}']
   ifFalse: [
     [${grailExpression}]
       on: AbstractException do: [:e |
-        'Error: ' , e class name , ' — ' , e messageText asString]]`;
+        | ws |
+        ws := WriteStream on: Unicode7 new.
+        ws nextPutAll: 'Error: '.
+        ws nextPutAll: e class name asString.
+        ws nextPutAll: ' — '.
+        ws nextPutAll: e messageText asString.
+        ws contents]].
+result encodeAsUTF8`;
 }

@@ -11,10 +11,31 @@ export function runTestClass(
   // probe. Don't send `each testCase`: the wrappers don't respond to it,
   // and on a real failure that branch would DNU. The TestCase instance
   // already carries `class name` and `selector`, same as the passed branch.
-  const code = `| suite result ws |
+  //
+  // Round-3 (round-2 ask #3 applied to this tool): for failures and errors
+  // we re-run the test with our own AbstractException handler to capture
+  // the live exception's class + messageText, instead of emitting the
+  // post-run TestCase printString (which is just the SUnit debug recipe).
+  // Doubles cost only for failing/erroring tests; passed tests don't re-run.
+  //
+  // Output is built through a String-class WriteStream (widens for
+  // non-ASCII codepoints) and converted to Utf8 once at the boundary.
+  // See python.ts for the encoding-model rationale.
+  const code = `| suite result ws captureMessage |
 suite := ${esc} suite.
 result := suite run.
 ws := WriteStream on: Unicode7 new.
+captureMessage := [:t |
+  | captured |
+  captured := nil.
+  [t setUp.
+   t perform: t selector.
+   t tearDown] on: AbstractException do: [:e | captured := e].
+  captured isNil
+    ifFalse: [
+      ws nextPutAll: captured class name asString.
+      ws nextPutAll: ': '.
+      ws nextPutAll: captured messageText asString]].
 result passed do: [:each |
   ws nextPutAll: each class name; tab;
     nextPutAll: each selector; tab;
@@ -22,14 +43,16 @@ result passed do: [:each |
 result failures do: [:each |
   ws nextPutAll: each class name; tab;
     nextPutAll: each selector; tab;
-    nextPutAll: 'failed'; tab;
-    nextPutAll: (each printString copyFrom: 1 to: (each printString size min: 4096)); lf].
+    nextPutAll: 'failed'; tab.
+  captureMessage value: each.
+  ws lf].
 result errors do: [:each |
   ws nextPutAll: each class name; tab;
     nextPutAll: each selector; tab;
-    nextPutAll: 'error'; tab;
-    nextPutAll: (each printString copyFrom: 1 to: (each printString size min: 4096)); lf].
-ws contents`;
+    nextPutAll: 'error'; tab.
+  captureMessage value: each.
+  ws lf].
+ws contents encodeAsUTF8`;
   const data = execute(`runTestClass(${className})`, code);
   return splitLines(data).map(line => {
     const parts = line.split('\t');

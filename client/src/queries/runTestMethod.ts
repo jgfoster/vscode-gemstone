@@ -14,28 +14,40 @@ export function runTestMethod(
 ): TestRunResult {
   const esc = escapeString(className);
   const sel = escapeString(selector);
-  const code = `| testCase result ws startMs endMs |
-startMs := Time millisecondClockValue.
+  // Round-3 (and round-2 ask #3 applied to this tool): capture the live
+  // exception's class + messageText instead of the SUnit framework's
+  // post-run TestCase printString (which is just the debug recipe). We
+  // bypass `testCase run` and replicate setUp / perform / tearDown with our
+  // own AbstractException handler — same pattern as describe_test_failure.
+  // The TestFailure-vs-other-Exception kind discriminates failed/error.
+  //
+  // Output is built through a String-class WriteStream (which widens
+  // transparently for non-ASCII codepoints) and converted to Utf8 once at
+  // the boundary. See python.ts for the encoding-model rationale.
+  const code = `| testCase captured tdEx ws status startMs endMs |
 testCase := ${esc} selector: #'${sel}'.
-result := testCase run.
+startMs := Time millisecondClockValue.
+captured := nil.
+[testCase setUp] on: AbstractException do: [:e | captured := e].
+captured isNil ifTrue: [
+  [testCase perform: #'${sel}'] on: AbstractException do: [:e | captured := e].
+  tdEx := nil.
+  [testCase tearDown] on: AbstractException do: [:e | tdEx := e].
+  (captured isNil and: [tdEx notNil]) ifTrue: [captured := tdEx]].
 endMs := Time millisecondClockValue.
+
 ws := WriteStream on: Unicode7 new.
-(result hasPassed)
+captured isNil
   ifTrue: [ws nextPutAll: 'passed'; tab; tab]
   ifFalse: [
-    result failures size > 0
-      ifTrue: [
-        | failure |
-        failure := result failures asArray first.
-        ws nextPutAll: 'failed'; tab;
-          nextPutAll: (failure printString copyFrom: 1 to: (failure printString size min: 4096)); tab]
-      ifFalse: [
-        | err |
-        err := result errors asArray first.
-        ws nextPutAll: 'error'; tab;
-          nextPutAll: (err printString copyFrom: 1 to: (err printString size min: 4096)); tab]].
+    status := (captured isKindOf: TestFailure) ifTrue: ['failed'] ifFalse: ['error'].
+    ws nextPutAll: status; tab.
+    ws nextPutAll: captured class name asString.
+    ws nextPutAll: ': '.
+    ws nextPutAll: captured messageText asString.
+    ws tab].
 ws nextPutAll: (endMs - startMs) printString.
-ws contents`;
+ws contents encodeAsUTF8`;
   const data = execute(`runTestMethod(${className}>>#${selector})`, code);
   const parts = data.split('\t');
   return {

@@ -79,18 +79,30 @@ function formatMethodResults(results: MethodSearchResult[], fallback: string): s
     .join('\n');
 }
 
-// Build the empty-result message for a find_* tool. When the caller used the
-// default env (0) and got nothing back, hint that the project's code may live
-// in env 1 — env 0 is the system environment, env 1 is where most user code
-// (notably GemStone-Python) actually lives, and the difference is invisible
-// from the agent side without this nudge.
-function noResultsMessage(label: string, environmentId: number): string {
-  if (environmentId === 0) {
-    return `No ${label} found in environmentId 0 (the default — system environment). ` +
-      `If the project's code lives in a user environment (e.g. GemStone-Python uses ` +
-      `environmentId 1), retry with environmentId: 1.`;
+// Build the empty-result message for a find_* tool. With env explicitly set,
+// say so plainly; with env defaulted (we search env 0 then auto-fall-back to
+// env 1), say nothing was found in either.
+function noResultsMessage(label: string, environmentId: number | undefined): string {
+  if (environmentId === undefined) {
+    return `No ${label} found in environmentId 0 or 1.`;
   }
   return `No ${label} found in environmentId ${environmentId}.`;
+}
+
+// Run a find_* search with auto env-1 fallback. If the caller passed an
+// explicit environmentId we honor it (single env search). Otherwise we try
+// env 0 first and fall back to env 1 when env 0 is empty — the round-2
+// feedback workflow: Python-heavy projects keep most user code in env 1 and
+// the env-0 default left agents staring at "No implementors found" when
+// the method existed all along.
+function searchWithEnvFallback<T>(
+  environmentId: number | undefined,
+  search: (envId: number) => T[],
+): T[] {
+  if (environmentId !== undefined) return search(environmentId);
+  const env0 = search(0);
+  if (env0.length > 0) return env0;
+  return search(1);
 }
 
 // Refresh the session's view of committed state if (and only if) it's safe to
@@ -428,18 +440,18 @@ export function registerTools(rawServer: McpServer, session: McpSession): void {
   server.tool(
     'find_implementors',
     'Find all classes that implement a given selector. Returns up to 500 results. ' +
-    'Searches one environment at a time — env 0 (default) is the system environment; ' +
-    'projects like GemStone-Python keep most user code in env 1. If env 0 returns ' +
-    'nothing, retry with environmentId: 1 before concluding the selector is unimplemented.',
+    'With no environmentId, searches env 0 first and automatically falls back to env 1 ' +
+    'if env 0 is empty — projects like GemStone-Python keep most user code in env 1, and ' +
+    'the previous env-0-only default would silently report "no implementors" for methods ' +
+    'that exist in env 1. Pass environmentId explicitly to limit to one environment.',
     {
       selector: z.string().describe('Method selector to search for'),
-      environmentId: z.number().optional().describe('Environment ID (default 0; try 1 for user code)'),
+      environmentId: z.number().optional().describe('Environment ID. Omit for env 0 with auto-fallback to env 1.'),
     },
     async ({ selector, environmentId }) => {
       try {
-        const envId = environmentId ?? 0;
-        const results = implementorsOf(exec, selector, envId);
-        return { content: [{ type: 'text' as const, text: formatMethodResults(results, noResultsMessage('implementors', envId)) }] };
+        const results = searchWithEnvFallback(environmentId, (envId) => implementorsOf(exec, selector, envId));
+        return { content: [{ type: 'text' as const, text: formatMethodResults(results, noResultsMessage('implementors', environmentId)) }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -453,17 +465,16 @@ export function registerTools(rawServer: McpServer, session: McpSession): void {
     'find_references_to',
     'Find all methods that reference a named global (class, pool, or shared variable). ' +
     'Sister to find_senders, which matches a selector; this matches a global by name. ' +
-    'Returns up to 500 results. Env 0 (default) is the system environment; if results ' +
-    'are empty, retry with environmentId: 1 — user-environment globals are invisible from env 0.',
+    'Returns up to 500 results. With no environmentId, searches env 0 first and auto-falls ' +
+    'back to env 1 if env 0 is empty. Pass environmentId explicitly to limit to one environment.',
     {
       objectName: z.string().describe('Name of the global to find references to, e.g. "AllUsers"'),
-      environmentId: z.number().optional().describe('Environment ID (default 0; try 1 for user code)'),
+      environmentId: z.number().optional().describe('Environment ID. Omit for env 0 with auto-fallback to env 1.'),
     },
     async ({ objectName, environmentId }) => {
       try {
-        const envId = environmentId ?? 0;
-        const results = referencesToObject(exec, objectName, envId);
-        return { content: [{ type: 'text' as const, text: formatMethodResults(results, noResultsMessage('references', envId)) }] };
+        const results = searchWithEnvFallback(environmentId, (envId) => referencesToObject(exec, objectName, envId));
+        return { content: [{ type: 'text' as const, text: formatMethodResults(results, noResultsMessage('references', environmentId)) }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -476,17 +487,16 @@ export function registerTools(rawServer: McpServer, session: McpSession): void {
   server.tool(
     'find_senders',
     'Find all methods that send a given selector. Returns up to 500 results. ' +
-    'Env 0 (default) is the system environment; if results are empty, retry with ' +
-    'environmentId: 1 — user-environment senders are invisible from env 0.',
+    'With no environmentId, searches env 0 first and auto-falls back to env 1 if env 0 is ' +
+    'empty. Pass environmentId explicitly to limit to one environment.',
     {
       selector: z.string().describe('Method selector to search for'),
-      environmentId: z.number().optional().describe('Environment ID (default 0; try 1 for user code)'),
+      environmentId: z.number().optional().describe('Environment ID. Omit for env 0 with auto-fallback to env 1.'),
     },
     async ({ selector, environmentId }) => {
       try {
-        const envId = environmentId ?? 0;
-        const results = sendersOf(exec, selector, envId);
-        return { content: [{ type: 'text' as const, text: formatMethodResults(results, noResultsMessage('senders', envId)) }] };
+        const results = searchWithEnvFallback(environmentId, (envId) => sendersOf(exec, selector, envId));
+        return { content: [{ type: 'text' as const, text: formatMethodResults(results, noResultsMessage('senders', environmentId)) }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
@@ -642,21 +652,30 @@ export function registerTools(rawServer: McpServer, session: McpSession): void {
   server.tool(
     'list_failing_tests',
     'Run SUnit tests and return only the failed/errored results — the agent ' +
-    'equivalent of "run the suite and grep for failures." With no classNames, ' +
-    'discovers and runs every TestCase subclass in the symbolList. With ' +
-    'classNames, runs only those classes (names that don\'t resolve are ' +
-    'skipped silently). Auto-refreshes the session view first when no ' +
-    'uncommitted changes are pending. Returns "All tests passed." if every ' +
-    'test passed; otherwise tab-separated lines: status, className, selector, message.',
+    'equivalent of "run the suite and grep for failures." Class selection: ' +
+    'explicit `classNames` wins; otherwise `classNamePattern` (glob: `*` matches ' +
+    'any chars, `#` matches one) filters discovered TestCase subclasses; ' +
+    'otherwise every TestCase subclass in the symbolList is run. The message ' +
+    'column carries the actual exception class + messageText (e.g. ' +
+    '`MessageNotUnderstood: nil does not understand #foo`), captured by ' +
+    're-running each failing test with its own AbstractException handler. ' +
+    'Auto-refreshes the session view first when no uncommitted changes are pending. ' +
+    'Returns "All tests passed." if every test passed; otherwise tab-separated ' +
+    'lines: status, className, selector, message.',
     {
       classNames: z.array(z.string()).optional().describe(
-        'TestCase subclass names to run. Omit to run every TestCase in the symbolList.',
+        'TestCase subclass names to run. Omit to run every TestCase in the symbolList, ' +
+        'or pair with classNamePattern for glob filtering.',
+      ),
+      classNamePattern: z.string().optional().describe(
+        'GemStone glob pattern (`*` = any chars, `#` = one char) to filter discovered ' +
+        'TestCase subclasses, e.g. "Bytes*TestCase". Ignored when classNames is set.',
       ),
     },
-    async ({ classNames }) => {
+    async ({ classNames, classNamePattern }) => {
       try {
         refreshIfClean(session);
-        const results = runFailingTests(exec, classNames);
+        const results = runFailingTests(exec, classNames, classNamePattern);
         if (results.length === 0) {
           return { content: [{ type: 'text' as const, text: 'All tests passed.' }] };
         }

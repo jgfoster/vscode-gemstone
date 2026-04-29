@@ -71,10 +71,20 @@ export function applyErrorMapToShape<T extends z.ZodRawShape>(shape: T): T {
 // Why wrap rather than monkey-patch: we want the change to be local to
 // registerTools/registerMcpTools — tests that exercise the raw McpServer
 // shouldn't see an instrumented prototype.
-export function withMcpErrorMap(server: { tool: (...args: unknown[]) => unknown }): { tool: (...args: unknown[]) => unknown } {
+//
+// Why `any[]` rather than `unknown[]`: McpServer's `tool` method has multiple
+// overloads with specific parameter types (e.g. `name: string`, `cb: ...`).
+// `unknown[]` is contravariantly *narrower* than those overloads (a function
+// expecting `unknown` cannot be called with `string` safely from TS's
+// perspective), so a strict signature here would reject the real McpServer.
+// `any[]` opts out of that check, matching the runtime reality that we
+// inspect the args dynamically and forward them through.
+export function withMcpErrorMap(
+  server: { tool: (...args: any[]) => any },
+): { tool: (...args: any[]) => any } {
   const original = server.tool.bind(server);
   return {
-    tool(...args: unknown[]) {
+    tool(...args: any[]) {
       // server.tool overloads:
       //   (name, cb)
       //   (name, description, cb)
@@ -108,8 +118,8 @@ function isToolInputShape(value: unknown): value is z.ZodRawShape {
   });
 }
 
-function formatPath(path: PropertyKey[]): string {
-  if (path.length === 0) return '<root>';
+function formatPath(path: PropertyKey[] | undefined): string {
+  if (!path || path.length === 0) return '<root>';
   return path.map(p => String(p)).join('.');
 }
 

@@ -22,7 +22,11 @@ sl do: [:dict |
     (v isBehavior and: [(classDict includesKey: v) not])
       ifTrue: [classDict at: v put: dict name]]].
 stream := WriteStream on: Unicode7 new.
-supers reverseDo: [:each |
+"allSuperclassesOf: returns root-first ([Object, Collection, ...]),
+ which is the order we want to render — Object at indent 0, the
+ immediate parent right above the selected class. The earlier
+ reverseDo: flipped it leaf-first and put Object at the deepest indent."
+supers do: [:each |
   stream nextPutAll: (classDict at: each ifAbsent: ['']); tab;
     nextPutAll: each name; tab; nextPutAll: 'superclass'; lf].
 stream nextPutAll: (classDict at: class ifAbsent: ['']); tab;

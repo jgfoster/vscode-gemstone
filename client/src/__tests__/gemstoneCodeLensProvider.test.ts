@@ -55,7 +55,11 @@ describe('GemStoneCodeLensProvider', () => {
   });
 
   describe('provideCodeLenses', () => {
-    it('returns lenses for method regions in topaz files', () => {
+    // Each method gets two lenses on the same line: one for senders, one
+    // for implementors. The pair is the VS Code convention — see e.g.
+    // TypeScript's "N references | M implementations". Each is
+    // independently clickable and dispatches to its own command.
+    it('returns a senders+implementors lens pair per method in topaz files', () => {
       const doc = createMockDocument(`category: 'accessing'
 method: MyClass
 name
@@ -67,13 +71,13 @@ name: aString
   name := aString
 %`);
       const lenses = provider.provideCodeLenses(doc as any);
-      expect(lenses).toHaveLength(2);
+      expect(lenses).toHaveLength(4); // 2 methods × 2 lenses
     });
 
-    it('returns a lens for gemstone:// method URIs', () => {
+    it('returns a senders+implementors lens pair for gemstone:// method URIs', () => {
       const doc = createMockDocument('name\n  ^ name', 'gemstone');
       const lenses = provider.provideCodeLenses(doc as any);
-      expect(lenses).toHaveLength(1);
+      expect(lenses).toHaveLength(2); // 1 method × 2 lenses
     });
 
     it('returns no lenses for empty files', () => {
@@ -98,13 +102,17 @@ foo
   ^ 42
 %`);
       const lenses = provider.provideCodeLenses(doc as any);
-      expect(lenses).toHaveLength(1);
+      expect(lenses).toHaveLength(2);
 
-      const resolved = provider.resolveCodeLens(lenses[0]);
-      expect(resolved.command?.title).toBe('No session');
+      // Both lenses report no session — neither computes a count when
+      // there's nothing to query against.
+      for (const lens of lenses) {
+        const resolved = provider.resolveCodeLens(lens);
+        expect(resolved.command?.title).toBe('No session');
+      }
     });
 
-    it('shows sender and implementor counts', () => {
+    it('emits the senders lens first, dispatching to gemstone.sendersOfSelector', () => {
       const session = createMockSession();
       sessionManager.getSelectedSession = () => session;
 
@@ -121,13 +129,80 @@ foo
   ^ 42
 %`);
       const lenses = provider.provideCodeLenses(doc as any);
-      const resolved = provider.resolveCodeLens(lenses[0]);
+      const sendersLens = provider.resolveCodeLens(lenses[0]);
 
-      expect(resolved.command?.title).toBe('2 senders | 1 implementor');
-      expect(resolved.command?.command).toBe('gemstone.sendersOfSelector');
+      expect(sendersLens.command?.title).toBe('2 senders');
+      expect(sendersLens.command?.command).toBe('gemstone.sendersOfSelector');
+      expect(sendersLens.command?.arguments).toEqual([
+        { selector: 'foo', sessionId: session.id },
+      ]);
     });
 
-    it('handles singular counts', () => {
+    it('emits the implementors lens second, dispatching to gemstone.implementorsOfSelector', () => {
+      const session = createMockSession();
+      sessionManager.getSelectedSession = () => session;
+
+      (queries.sendersOf as ReturnType<typeof vi.fn>).mockReturnValue([
+        { dictName: 'D', className: 'C', isMeta: false, selector: 'foo', category: 'c' },
+        { dictName: 'D', className: 'D', isMeta: false, selector: 'foo', category: 'c' },
+      ]);
+      (queries.implementorsOf as ReturnType<typeof vi.fn>).mockReturnValue([
+        { dictName: 'D', className: 'MyClass', isMeta: false, selector: 'foo', category: 'c' },
+      ]);
+
+      const doc = createMockDocument(`method: MyClass
+foo
+  ^ 42
+%`);
+      const lenses = provider.provideCodeLenses(doc as any);
+      const implementorsLens = provider.resolveCodeLens(lenses[1]);
+
+      expect(implementorsLens.command?.title).toBe('1 implementor');
+      expect(implementorsLens.command?.command).toBe('gemstone.implementorsOfSelector');
+      expect(implementorsLens.command?.arguments).toEqual([
+        { selector: 'foo', sessionId: session.id },
+      ]);
+    });
+
+    // Each lens computes only its own count, so a senders lens never
+    // queries implementorsOf and vice versa. Catches a regression where
+    // the resolve path computed both for every lens (doubling the GCI work
+    // for the two-lens pair).
+    it('the senders lens does not call implementorsOf', () => {
+      const session = createMockSession();
+      sessionManager.getSelectedSession = () => session;
+      (queries.sendersOf as ReturnType<typeof vi.fn>).mockReturnValue([]);
+      (queries.implementorsOf as ReturnType<typeof vi.fn>).mockReturnValue([]);
+
+      const doc = createMockDocument(`method: MyClass
+foo
+  ^ 42
+%`);
+      const lenses = provider.provideCodeLenses(doc as any);
+      provider.resolveCodeLens(lenses[0]); // senders lens
+
+      expect(queries.sendersOf).toHaveBeenCalled();
+      expect(queries.implementorsOf).not.toHaveBeenCalled();
+    });
+
+    it('the implementors lens does not call sendersOf', () => {
+      const session = createMockSession();
+      sessionManager.getSelectedSession = () => session;
+      (queries.sendersOf as ReturnType<typeof vi.fn>).mockReturnValue([]);
+      (queries.implementorsOf as ReturnType<typeof vi.fn>).mockReturnValue([]);
+
+      const doc = createMockDocument(`method: MyClass
+foo
+  ^ 42
+%`);
+      const lenses = provider.provideCodeLenses(doc as any);
+      provider.resolveCodeLens(lenses[1]); // implementors lens
+
+      expect(queries.implementorsOf).toHaveBeenCalled();
+      expect(queries.sendersOf).not.toHaveBeenCalled();
+    });
+
+    it('handles singular counts on each lens', () => {
       const session = createMockSession();
       sessionManager.getSelectedSession = () => session;
 
@@ -136,7 +211,6 @@ foo
       ]);
       (queries.implementorsOf as ReturnType<typeof vi.fn>).mockReturnValue([
         { dictName: 'D', className: 'C', isMeta: false, selector: 'foo', category: 'c' },
-        { dictName: 'D', className: 'D', isMeta: false, selector: 'foo', category: 'c' },
       ]);
 
       const doc = createMockDocument(`method: MyClass
@@ -144,9 +218,8 @@ foo
   ^ 42
 %`);
       const lenses = provider.provideCodeLenses(doc as any);
-      const resolved = provider.resolveCodeLens(lenses[0]);
-
-      expect(resolved.command?.title).toBe('1 sender | 2 implementors');
+      expect(provider.resolveCodeLens(lenses[0]).command?.title).toBe('1 sender');
+      expect(provider.resolveCodeLens(lenses[1]).command?.title).toBe('1 implementor');
     });
   });
 });

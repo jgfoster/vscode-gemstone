@@ -2,7 +2,7 @@
   "name": "gemstone-ide",
   "displayName": "Jasper: A GemStone Smalltalk IDE",
   "description": "GemStone/S IDE for Visual Studio Code",
-  "version": "1.4.1",
+  "version": "1.4.3",
   "publisher": "gemtalksystems",
   "license": "MIT",
   "author": "James Foster",
@@ -109,7 +109,7 @@
           "gemstone.exportPath": {
             "type": "string",
             "default": "",
-            "description": "Root path for exported class files. Variables: {workspaceRoot}, {session}, {host}, {stone}, {user}, {index}, {dictName}. Defaults to {workspaceRoot}/gemstone/{session}/{index}-{dictName}"
+            "description": "Root path for exported class files. Variables: {workspaceRoot}, {session}, {host}, {stone}, {user}, {index}, {dictName}. Defaults to {workspaceRoot}/.gemstone/{session}/{index}-{dictName}"
           },
           "gemstone.userManagedDictionaries": {
             "type": "array",

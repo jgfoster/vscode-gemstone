@@ -117,6 +117,30 @@ describe('sunitQueries', () => {
       expect(result.status).toBe('error');
       expect(result.durationMs).toBe(0);
     });
+
+    // Round-3 fix: bypass `testCase run` and run setUp / perform / tearDown
+    // manually with our own AbstractException handler, so the message column
+    // carries the live exception's class + messageText (not the SUnit
+    // post-run debug recipe). Build through a String-class WriteStream and
+    // call encodeAsUTF8 at the boundary; that's the canonical GemStone pattern
+    // for "internal storage → transfer protocol."
+    it('captures live exception class + messageText (no testCase run framework)', () => {
+      const session = createMockSession('');
+      sunit.runTestMethod(session, 'MyTestCase', 'testBad');
+      const code = (session.gci.GciTsExecuteFetchBytes as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(code).toContain('on: AbstractException');
+      expect(code).toContain('testCase setUp');
+      expect(code).toContain('testCase perform:');
+      expect(code).toContain('testCase tearDown');
+      expect(code).toContain('captured class name');
+      expect(code).toContain('captured messageText');
+      expect(code).toContain('WriteStream on: Unicode7 new');
+      expect(code).toContain('encodeAsUTF8');
+      // Negative guards: every prior misfire must stay out.
+      expect(code).not.toMatch(/result := testCase run\b/);
+      expect(code).not.toContain('WriteStream on: Utf8 new');
+      expect(code).not.toContain('asInteger < 128');
+    });
   });
 
   describe('runTestClass', () => {
@@ -149,6 +173,31 @@ describe('sunitQueries', () => {
       const code = (session.gci.GciTsExecuteFetchBytes as ReturnType<typeof vi.fn>).mock.calls[0][1];
       expect(code).not.toMatch(/testCase\s+class\s+name/);
       expect(code).not.toMatch(/testCase\s+selector/);
+    });
+
+    // Round-3 fix: failures and errors trigger a per-test re-run with our
+    // own AbstractException handler so the message column carries the live
+    // exception's class + messageText, not `each printString` (the SUnit
+    // debug recipe). Passed tests don't re-run.
+    it('captures live exception class + messageText for failures and errors via re-run', () => {
+      const session = createMockSession('');
+      sunit.runTestClass(session, 'MyTestCase');
+      const code = (session.gci.GciTsExecuteFetchBytes as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(code).toContain('captureMessage');
+      expect(code).toContain('on: AbstractException');
+      expect(code).toContain('t setUp');
+      expect(code).toContain('t perform: t selector');
+      expect(code).toContain('t tearDown');
+      expect(code).toContain('captured class name');
+      expect(code).toContain('captured messageText');
+      expect(code).toContain('WriteStream on: Unicode7 new');
+      expect(code).toContain('encodeAsUTF8');
+      // Negative guards: the old printString-of-the-test fallback must
+      // not survive (round-3 feedback called it out as the SUnit debug
+      // recipe leaking), nor should either of the prior misfires.
+      expect(code).not.toMatch(/each printString copyFrom:/);
+      expect(code).not.toContain('WriteStream on: Utf8 new');
+      expect(code).not.toContain('asInteger < 128');
     });
   });
 

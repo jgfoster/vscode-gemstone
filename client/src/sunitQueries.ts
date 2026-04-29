@@ -38,8 +38,12 @@ export function runTestClass(session: ActiveSession, className: string) {
   return sharedRunTestClass(bind(session), className);
 }
 
-export function runFailingTests(session: ActiveSession, classNames?: string[]) {
-  return sharedRunFailingTests(bind(session), classNames);
+export function runFailingTests(
+  session: ActiveSession,
+  classNames?: string[],
+  classNamePattern?: string,
+) {
+  return sharedRunFailingTests(bind(session), classNames, classNamePattern);
 }
 
 export function describeTestFailure(session: ActiveSession, className: string, selector: string) {

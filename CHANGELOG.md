@@ -4,6 +4,42 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-04-29
+
+### Added
+
+- **Hidden-prefix class export directory** — exports default to `{workspaceRoot}/.gemstone/{session}/{index}-{dictName}` (was `{workspaceRoot}/gemstone/...`). The dot-prefix keeps it out of the way in file listings while remaining browseable in VS Code's Explorer, Quick Open, and Find in Files. Users with an existing `gemstone/` directory can either delete it or pin the prior layout via the `gemstone.exportPath` setting (e.g. `{workspaceRoot}/gemstone/{session}/{index}-{dictName}`).
+- **GCI smoke-test harness** under `client/src/__tests__/gci/` (run via `npm run test:gci`, gated by `GCI_LIBRARY_PATH`). Runs each shared MCP query against a live stone, plus a curated selector probe that fails fast if any GemStone selector our queries hardcode goes missing. Skipped from the default `npm test` run; on the round it landed it caught the `sunitMatch:` / `match:` confusion the unit suite missed.
+
+### Changed
+
+- **`run_test_method` / `run_test_class` message column now carries the actual exception** (`MessageNotUnderstood: nil does not understand #foo`) instead of the SUnit debug recipe (`ClassTestCase debug: #testFoo`). Bypasses `TestCase>>run` and replicates `setUp` / `perform` / `tearDown` with our own `AbstractException` handler — same pattern `describe_test_failure` uses, now applied to the iterating runners.
+- **`list_failing_tests` `classNamePattern` glob primitive** is now `CharacterCollection >> matchPattern:` (the public, base-class glob — works in any session) with a JS-side glob → Array parser. Agent-supplied globs like `Bytes*TestCase` are translated to the literal Array form `#('Bytes' $* 'TestCase')` server-side. Replaces an earlier `sunitMatch:` attempt that only existed when SUnit was loaded.
+- **System Browser senders/implementors CodeLens split into two independent links.** The `N senders | M implementors` header row was a single `CodeLens` whose entire title was clickable but dispatched only to the senders view — half the displayed information was unreachable. Now emits a senders+implementors pair per method, matching the VS Code convention (TypeScript ships `X references | Y implementations` the same way). Each lens computes only its own count and dispatches to its own command (`gemstone.sendersOfSelector` / `gemstone.implementorsOfSelector`).
+- **Single class-selection code path in the System Browser.** A hierarchy-view click and an external Implementors-of / Senders-of jump previously updated the column-list state inline without refreshing the Class Definition panel, leaving the right-hand definition stale relative to the column-list selection. Both paths now route through a shared `applyClassSelection` helper alongside the regular column click and the find-class quick-pick.
+
+### Fixed
+
+- **System Browser hierarchy view rendered superclasses in reverse.** `ClassOrganizer >> allSuperclassesOf:` returns root-first (`[Object, Collection, ...]`), but the query then sent `reverseDo:` to that collection — Object ended up at the deepest indent and the immediate parent appeared at indent 0. Replaced with `do:` so the order is root-first.
+- **`list_failing_tests` no-args produced duplicate rows.** An SUnit abstract `TestCase`'s `suite` cascades into its concrete subclasses' suites, so when the discover-all walk also enumerated those leaves directly, every test under an abstract parent ran twice (45 duplicate `(className, selector)` pairs out of 99 unique on the probe stone). The discover-all walk now filters with `v isAbstract not`; explicit `classNames` / `classNamePattern` paths still let an agent target an abstract parent on purpose for the cascaded run.
+- **`Utf8` was misidentified as an internal-storage class** in the 1.4.2 fix for the `eval_python` UTF-16 leak. `Utf8` is the *transfer protocol* — variable-byte, no character indexing, `at:put:` and `copyFrom:to:` undefined. `WriteStream on: Utf8 new` raised `rtErrShouldNotImplement` on buffer growth, breaking every error path on `eval_python` / `compile_python` and the entire output of `list_failing_tests`. The right model is to build internally in `Unicode7` (which transparently widens to `Unicode16` / `Unicode32` for non-ASCII codepoints), then call `encodeAsUTF8` once at the boundary to produce the transfer bytes — lossless, and consistent with GemStone's storage/transfer split.
+
+## [1.4.2] - 2026-04-28
+
+### Added
+
+- **`list_failing_tests` `classNamePattern` parameter** — glob-filter discovered TestCase subclasses (`*` = any chars, `#` = one char) before running. E.g. `classNamePattern: "Bytes*TestCase"` runs every `Bytes*TestCase` in one round-trip. Composes with the existing `classNames` array (explicit names still win).
+- **`list_failing_tests` message column now carries actual exception details** — `MessageNotUnderstood: nil does not understand #foo` instead of the SUnit debug recipe `ClassTestCase debug: #testFoo`. Each failing/erroring test is re-run with its own `AbstractException` handler to capture the live exception's `messageText`. Iteration stays in Smalltalk so it's still one GCI round-trip.
+
+### Changed
+
+- **`find_implementors` / `find_senders` / `find_references_to` auto-fall-back to env 1** when no `environmentId` is given and env 0 returns empty. Projects whose user code lives in env 1 (notably GemStone-Python) no longer get a misleading "no implementors found" when the method exists. Pass `environmentId` explicitly to limit to one environment.
+
+### Fixed
+
+- **UTF-16LE leak in `eval_python` / `compile_python` error returns.** Grail-side compile/runtime errors came back as `"E r r o r :   M e s s a g e N o t U n d e r s t o o d ..."` — `messageText` returns `Unicode16` for system errors, `, ` concatenation widened the result to Unicode16, and GCI's `Utf8`-class fetch forwarded the UTF-16LE bytes raw. The error string is now built through a `WriteStream on: Utf8 new`, which forces transcoding on write.
+- **`list_failing_tests` with no arguments raised `CompileError 1001`.** The `DISCOVER_ALL_TEST_CLASSES` Smalltalk fragment had its own `| sl seen list |` temps, which can't appear inside `classes := <expr>`. The fragment is now wrapped as `[| sl seen list | ...] value` so it's a valid expression in any position.
+
 ## [1.4.1] - 2026-04-27
 
 ### Added
