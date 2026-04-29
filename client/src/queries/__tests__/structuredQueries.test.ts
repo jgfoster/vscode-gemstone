@@ -84,6 +84,22 @@ describe('getClassHierarchy', () => {
     const results = getClassHierarchy(vi.fn<QueryExecutor>(() => raw), 'Array');
     expect(results.map(r => r.kind)).toEqual(['superclass', 'self', 'subclass']);
   });
+
+  // ClassOrganizer>>allSuperclassesOf: returns root-first
+  // ([Object, Collection, SequenceableCollection, CharacterCollection]),
+  // which is the order we want to render — Object at indent 0, the
+  // immediate parent right above the selected class. The earlier query
+  // sent reverseDo: to that collection, flipping it leaf-first and
+  // putting Object at the deepest indent (the screenshot in the bug
+  // report). Pin `do:` in / `reverseDo:` out so the regression can't
+  // sneak back.
+  it('iterates superclasses with do: (root-first), not reverseDo:', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    getClassHierarchy(exec, 'String');
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain('supers do: [:each |');
+    expect(code).not.toContain('supers reverseDo:');
+  });
 });
 
 describe('getMethodList', () => {

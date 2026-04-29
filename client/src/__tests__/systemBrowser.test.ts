@@ -637,6 +637,23 @@ describe('SystemBrowser', () => {
       });
     });
 
+    // Regression: a hierarchy-view click previously updated the column
+    // list inline without routing through applyClassSelection, so the
+    // Class Definition panel didn't refresh — the user reported it as
+    // "Class Definition subtab is not updated like it is if I simply
+    // click on another class." Pin that the click now refreshes the
+    // Class Definition.
+    it('refreshes the Class Definition panel when a hierarchy class is clicked', () => {
+      messageHandler({ command: 'toggleViewMode', mode: 'hierarchy' });
+      vi.mocked(ClassBrowser.showOrUpdate).mockClear();
+
+      messageHandler({ command: 'selectHierarchyClass', className: 'Collection' });
+
+      expect(ClassBrowser.showOrUpdate).toHaveBeenCalledWith(
+        session, expect.any(Array), expect.any(Number), 'Collection',
+      );
+    });
+
     it('resolves correct dictionary for hierarchy class from different dict', () => {
       messageHandler({ command: 'toggleViewMode', mode: 'hierarchy' });
       vi.mocked(mockPanel.webview.postMessage).mockClear();
@@ -1496,6 +1513,19 @@ describe('SystemBrowser', () => {
       // First browser was created first so it is the default active target
       expect(firstPanel.reveal).toHaveBeenCalled();
       expect(secondPanel.reveal).not.toHaveBeenCalled();
+    });
+
+    // Regression: navigateTo previously updated the column-list state
+    // inline (skipping handleSelectClass), so the Class Definition panel
+    // didn't refresh when an Implementors-of / Senders-of jump landed on
+    // a different class. Now routed through applyClassSelection so the
+    // Class Definition tracks the column-list selection.
+    it('refreshes the Class Definition panel when the selected class changes', () => {
+      vi.mocked(ClassBrowser.showOrUpdate).mockClear();
+      SystemBrowser.navigateTo(session.id, result);
+      expect(ClassBrowser.showOrUpdate).toHaveBeenCalledWith(
+        session, expect.any(Array), expect.any(Number), 'Array',
+      );
     });
   });
 

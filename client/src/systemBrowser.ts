@@ -583,6 +583,26 @@ export class SystemBrowser {
   }
 
   private handleSelectClass(className: string): void {
+    this.applyClassSelection(className);
+  }
+
+  /**
+   * Single source of truth for "the selected class has changed": resets
+   * method-list state, updates the panel title, refreshes the method-list
+   * columns, and refreshes the Class Definition panel (when one is open).
+   *
+   * Every entry point that lands on a class — the column click, the
+   * find-class quick-pick, the hierarchy-view click, external Implementors-of
+   * / Senders-of navigation — routes through here so the Class Definition
+   * panel never goes stale relative to the column-list selection.
+   *
+   * Does NOT open the class's source file. Paths that should *also* reveal
+   * source (hierarchy click, external method navigation) call
+   * `openClassFile` separately afterwards. The column click leaves the
+   * editor untouched on purpose — clicking a class shouldn't shove a new
+   * file in front of whatever the user was editing.
+   */
+  private applyClassSelection(className: string): void {
     this.state.selectedClass = className;
     this.state.selectedMethodCategory = null;
     this.state.selectedMethod = null;
@@ -671,13 +691,12 @@ export class SystemBrowser {
       this.panel.webview.postMessage({ command: 'selectCategoryItem', name: '** ALL CLASSES **' });
     }
 
-    // Update class state (without calling handleSelectClass, which would open the .gs file)
+    // Route through the canonical class-selection helper so the Class
+    // Definition panel updates alongside the method-list columns. The
+    // earlier inline mutation here skipped that update, leaving the
+    // Class Definition stale relative to whatever method we navigated to.
     if (this.state.selectedClass !== className) {
-      this.state.selectedClass = className;
-      this.state.selectedMethodCategory = null;
-      this.state.selectedMethod = null;
-      this.panel.title = `Browser: ${className}`;
-      this.loadMethodCategories();
+      this.applyClassSelection(className);
     }
 
     // Update instance/class side if changed
@@ -891,12 +910,10 @@ export class SystemBrowser {
     if (dictIndex < 1) return;
 
     this.state.selectedDictIndex = dictIndex;
-    this.state.selectedClass = className;
-    this.state.selectedMethodCategory = null;
-    this.state.selectedMethod = null;
-    this.panel.title = `Browser: ${className}`;
-
-    this.loadMethodCategories();
+    // Route through the canonical class-selection helper so the Class
+    // Definition panel updates too — the earlier inline mutations did
+    // not, so a hierarchy-view click left Class Definition stale.
+    this.applyClassSelection(className);
     this.openClassFile(className);
   }
 
