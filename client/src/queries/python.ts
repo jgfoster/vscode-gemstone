@@ -39,14 +39,26 @@ function buildPythonQuery(grailExpression: string, pythonSource: string): string
   // The hint is itself a Smalltalk string literal — the same single-quote
   // escaping rule applies, but it has none today, so we inline it directly.
   //
-  // Why the error path uses `WriteStream on: Utf8 new` instead of `,`
-  // concatenation: GemStone's Exception class returns `messageText` as
-  // `Unicode16` for many system errors (notably MessageNotUnderstood). A
-  // bare `'Error: ' , <U16>` widens the result to Unicode16, and GCI's
-  // `Utf8`-class fetch forwards those UTF-16LE bytes raw — the agent saw
-  // "E r r o r :   M ..." (every char followed by a NUL). Pinning the
-  // underlying buffer to `Utf8` forces transcoding on write, so GCI sees
-  // an already-Utf8 result and can hand it back without further work.
+  // Why the error path uses a Unicode7 buffer with per-char ASCII gating:
+  // there are two GS-string traps to dodge.
+  //
+  // 1. A bare `'Error: ' , e messageText asString` concatenation widens the
+  //    result to Unicode16 when messageText is Unicode16 (common for system
+  //    errors like MessageNotUnderstood), and GCI's `Utf8`-class fetch
+  //    forwards those UTF-16LE bytes raw — the round-2 agent saw
+  //    "E r r o r :   M ..." (every char followed by a NUL).
+  //
+  // 2. The fix that landed in 1.4.2 — `WriteStream on: Utf8 new` — does
+  //    force UTF-8 output, but Utf8 in this GemStone is invariant: growing
+  //    the buffer requires `at:put:`, which Utf8 rejects with
+  //    rtErrShouldNotImplement. Round-3 agent saw every error case fail
+  //    with "Receiver: anUtf8(). Selector: #'at:put:'".
+  //
+  // Right answer: a Unicode7 stream (proven extensible — used elsewhere
+  // in this file) plus codepoint-128 gating so non-ASCII characters never
+  // reach it. The result is pure ASCII; GCI transcodes ASCII → UTF-8
+  // trivially. We lose non-ASCII content from messageText (rare), but
+  // error messages don't need to be lossless to be useful.
   return `| dispatcher src |
 dispatcher := System myUserProfile symbolList objectNamed: #'ModuleAst'.
 src := '${esc}'.
@@ -55,11 +67,13 @@ dispatcher isNil
   ifFalse: [
     [${grailExpression}]
       on: AbstractException do: [:e |
-        | ws |
-        ws := WriteStream on: Utf8 new.
+        | ws coerce |
+        ws := WriteStream on: Unicode7 new.
+        coerce := [:s | s asString do: [:ch |
+          ws nextPut: (ch asInteger < 128 ifTrue: [ch] ifFalse: [$?])]].
         ws nextPutAll: 'Error: '.
-        ws nextPutAll: e class name asString.
+        coerce value: e class name.
         ws nextPutAll: ' — '.
-        ws nextPutAll: e messageText asString.
+        coerce value: e messageText.
         ws contents]]`;
 }

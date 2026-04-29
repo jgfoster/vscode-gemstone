@@ -4,6 +4,20 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+### Changed
+
+- **Default class export directory is now hidden** — exports default to `{workspaceRoot}/.gemstone/{session}/{index}-{dictName}` (was `{workspaceRoot}/gemstone/...`). The dot-prefix keeps it out of the way in file listings while remaining browseable in VS Code's Explorer, Quick Open, and Find in Files. Users with an existing `gemstone/` directory can either delete it or pin the prior layout via the `gemstone.exportPath` setting (e.g. `{workspaceRoot}/gemstone/{session}/{index}-{dictName}`).
+
+## [1.4.3] - 2026-04-29
+
+### Fixed
+
+- **`Utf8 at:put:` regression in `eval_python` / `compile_python` error path.** The 1.4.2 fix for the UTF-16 leak switched the error formatter to `WriteStream on: Utf8 new`, but `Utf8` in this GemStone is invariant — buffer growth requires `at:put:`, which `Utf8` rejects with `rtErrShouldNotImplement`. Every error case ended up with the wrapper error `"Receiver: anUtf8(). Selector: #'at:put:'"` instead of the underlying message. Same regression hit `list_failing_tests` (which had also been switched to a `Utf8` stream — `copyFrom:to:` isn't supported on `Utf8` either). Both now build through `WriteStream on: Unicode7 new` with per-character codepoint-128 gating: ASCII passes through, anything ≥ 128 becomes `?`. Pure-ASCII output reaches GCI, which transcodes ASCII → UTF-8 trivially. Closes the round-3 regression report.
+
+### Changed
+
+- **`run_test_method` / `run_test_class` message column now carries the actual exception** (`MessageNotUnderstood: nil does not understand #foo`) instead of the SUnit debug recipe (`ClassTestCase debug: #testFoo`). Bypasses `TestCase>>run` and replicates `setUp` / `perform` / `tearDown` with our own `AbstractException` handler — same pattern `describe_test_failure` uses, now applied to the iterating runners. Round-2 ask #3 (originally about `list_failing_tests`) applied here too.
+
 ## [1.4.2] - 2026-04-28
 
 ### Added

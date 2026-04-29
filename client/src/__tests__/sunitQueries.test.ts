@@ -117,6 +117,29 @@ describe('sunitQueries', () => {
       expect(result.status).toBe('error');
       expect(result.durationMs).toBe(0);
     });
+
+    // Round-3 fix: bypass `testCase run` and run setUp / perform / tearDown
+    // manually with our own AbstractException handler, so the message column
+    // carries the live exception's class + messageText (not the SUnit
+    // post-run debug recipe). The Unicode7 + ASCII-gate stream avoids the
+    // round-3 Utf8 immutability bug.
+    it('captures live exception class + messageText (no testCase run framework)', () => {
+      const session = createMockSession('');
+      sunit.runTestMethod(session, 'MyTestCase', 'testBad');
+      const code = (session.gci.GciTsExecuteFetchBytes as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(code).toContain('on: AbstractException');
+      expect(code).toContain('testCase setUp');
+      expect(code).toContain('testCase perform:');
+      expect(code).toContain('testCase tearDown');
+      expect(code).toContain('captured class name');
+      expect(code).toContain('captured messageText');
+      expect(code).toContain('WriteStream on: Unicode7 new');
+      expect(code).toContain('asInteger < 128');
+      // Negative guards: the old `testCase run` framework path and the
+      // round-2 Utf8 stream must not return.
+      expect(code).not.toMatch(/result := testCase run\b/);
+      expect(code).not.toContain('WriteStream on: Utf8 new');
+    });
   });
 
   describe('runTestClass', () => {
@@ -149,6 +172,28 @@ describe('sunitQueries', () => {
       const code = (session.gci.GciTsExecuteFetchBytes as ReturnType<typeof vi.fn>).mock.calls[0][1];
       expect(code).not.toMatch(/testCase\s+class\s+name/);
       expect(code).not.toMatch(/testCase\s+selector/);
+    });
+
+    // Round-3 fix: failures and errors trigger a per-test re-run with our
+    // own AbstractException handler so the message column carries the live
+    // exception's class + messageText, not `each printString` (the SUnit
+    // debug recipe). Passed tests don't re-run.
+    it('captures live exception class + messageText for failures and errors via re-run', () => {
+      const session = createMockSession('');
+      sunit.runTestClass(session, 'MyTestCase');
+      const code = (session.gci.GciTsExecuteFetchBytes as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(code).toContain('captureMessage');
+      expect(code).toContain('on: AbstractException');
+      expect(code).toContain('t setUp');
+      expect(code).toContain('t perform: t selector');
+      expect(code).toContain('t tearDown');
+      expect(code).toContain('captured class name');
+      expect(code).toContain('captured messageText');
+      expect(code).toContain('asInteger < 128');
+      // The old printString-of-the-test fallback must not survive — that's
+      // what the round-3 feedback explicitly called out as the SUnit debug
+      // recipe leaking into the message column.
+      expect(code).not.toMatch(/each printString copyFrom:/);
     });
   });
 

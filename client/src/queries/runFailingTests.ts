@@ -46,10 +46,12 @@ export function runFailingTests(
   // only; a project where most tests pass barely notices. Iteration stays
   // in Smalltalk so it remains one GCI round-trip.
   //
-  // The output buffer is Utf8 so messageText values that come back as
-  // Unicode16 from system exceptions get transcoded on write rather than
-  // bleeding through as UTF-16LE bytes (same fix as eval_python's error
-  // path).
+  // Round-3 fix: build the captured message via a Unicode7 stream with
+  // per-char ASCII gating, not via `, ` concatenation against a Utf8
+  // buffer. See python.ts for the full rationale — `, ` widens to
+  // Unicode16 (which GCI's Utf8 fetch forwards as raw UTF-16LE bytes) and
+  // `WriteStream on: Utf8 new` rejects the at:put: that buffer growth
+  // requires. Unicode7 + codepoint-128 gating dodges both.
   const code = `| ws classes captureMessage |
 classes := ${classesExpr}.
 captureMessage := [:t |
@@ -61,10 +63,16 @@ captureMessage := [:t |
   captured isNil
     ifTrue: ['(no exception on re-run)']
     ifFalse: [
-      | s |
-      s := captured class name asString , ': ' , captured messageText asString.
+      | inner coerce s |
+      inner := WriteStream on: Unicode7 new.
+      coerce := [:str | str asString do: [:ch |
+        inner nextPut: (ch asInteger < 128 ifTrue: [ch] ifFalse: [$?])]].
+      coerce value: captured class name.
+      inner nextPutAll: ': '.
+      coerce value: captured messageText.
+      s := inner contents.
       s copyFrom: 1 to: (s size min: ${MAX_MSG})]].
-ws := WriteStream on: Utf8 new.
+ws := WriteStream on: Unicode7 new.
 classes do: [:cls |
   | result |
   result := cls suite run.

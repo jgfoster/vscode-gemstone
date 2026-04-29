@@ -210,18 +210,27 @@ describe('runFailingTests', () => {
     expect(code).toContain('t setUp');
     expect(code).toContain('t perform: t selector');
     expect(code).toContain('t tearDown');
-    expect(code).toContain('captured class name asString');
-    expect(code).toContain('captured messageText asString');
+    expect(code).toContain('captured class name');
+    expect(code).toContain('captured messageText');
   });
 
-  // Stream is Utf8 so Unicode16 messageText values transcode on write
-  // rather than bleeding through as UTF-16LE bytes (mirrors the
-  // eval_python error-path fix from the same round of feedback).
-  it('writes output through a Utf8 stream so Unicode16 messageText transcodes correctly', () => {
+  // Round-3 fix: the round-2 build used `WriteStream on: Utf8 new` to
+  // force UTF-8 output, but Utf8 in this GemStone is invariant — buffer
+  // growth requires at:put:, which Utf8 rejects. Fall back to a Unicode7
+  // stream (proven extensible) plus per-character codepoint-128 gating so
+  // non-ASCII content from Unicode16 messageText is replaced with `?`
+  // rather than widening the buffer back to the original UTF-16 leak.
+  it('writes output through a Unicode7 stream with per-char ASCII gating', () => {
     const exec = vi.fn<QueryExecutor>(() => '');
     runFailingTests(exec);
     const code = exec.mock.calls[0][1];
-    expect(code).toContain('WriteStream on: Utf8 new');
+    expect(code).toContain('WriteStream on: Unicode7 new');
+    expect(code).not.toContain('WriteStream on: Utf8 new');
+    // Per-char gate: anything ≥ 128 becomes `?`. The exact gate text is the
+    // load-bearing assertion — round-2 lost this and reintroduced the
+    // UTF-16 widening; round-3-immutable-Utf8 bug came from over-correcting.
+    expect(code).toContain('asInteger < 128');
+    expect(code).toContain("ifTrue: [ch] ifFalse: [$?]");
   });
 
   // classNamePattern path: expand globs server-side via GemStone's
@@ -439,25 +448,37 @@ describe('python (Grail) queries', () => {
     evalPython(exec, 'x = 1');
     const code = exec.mock.calls[0][1];
     expect(code).toContain('on: AbstractException');
-    // Error string is built through a Utf8-backed WriteStream so Unicode16
-    // messageText transcodes on write rather than bleeding UTF-16LE bytes
-    // through GCI's Utf8 fetch (the round-2 "E r r o r ..." leak).
-    expect(code).toContain("WriteStream on: Utf8 new");
+    // Round-3 build: error string flows through a Unicode7 stream with
+    // per-char ASCII gating. See the regression guards below for why each
+    // alternative (Utf8 buffer, plain Unicode7, `,` concatenation) is wrong.
+    expect(code).toContain('WriteStream on: Unicode7 new');
     expect(code).toContain("'Error: '");
-    expect(code).toContain('e class name asString');
-    expect(code).toContain('e messageText asString');
+    expect(code).toContain('asInteger < 128');
+    expect(code).toContain("ifTrue: [ch] ifFalse: [$?]");
   });
 
   // Round-2 regression guard: the eval_python error path was previously built
   // via `, ` concatenation, which widened the result to Unicode16 when
   // messageText was Unicode16 — GCI's Utf8 fetch then forwarded UTF-16LE
-  // bytes raw and the agent saw `"E r r o r :   M ..."`. The fix is the
-  // explicit `WriteStream on: Utf8 new` above; this test pins it.
+  // bytes raw and the agent saw `"E r r o r :   M ..."`.
   it('does not build the error string via , concatenation (UTF-16 leak guard)', () => {
     const exec = vi.fn<QueryExecutor>(() => '');
     evalPython(exec, 'x = 1');
     const code = exec.mock.calls[0][1];
     expect(code).not.toMatch(/'Error: ' , e class name/);
+  });
+
+  // Round-3 regression guard: the round-2 fix `WriteStream on: Utf8 new`
+  // forced UTF-8 output, but Utf8 in this GemStone is invariant —
+  // growing the buffer triggers at:put: which Utf8 rejects with
+  // rtErrShouldNotImplement. Every error case failed with
+  // "Receiver: anUtf8(). Selector: #'at:put:'". The Unicode7 stream
+  // assertion above is the positive test; this is the negative one.
+  it('does not write through a Utf8 stream (Utf8 immutability guard)', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    evalPython(exec, 'x = 1');
+    const code = exec.mock.calls[0][1];
+    expect(code).not.toContain('WriteStream on: Utf8 new');
   });
 
   it('returns the executor result verbatim — no parsing on the JS side', () => {
