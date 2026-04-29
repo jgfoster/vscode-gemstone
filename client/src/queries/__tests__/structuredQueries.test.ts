@@ -214,23 +214,23 @@ describe('runFailingTests', () => {
     expect(code).toContain('captured messageText');
   });
 
-  // Round-3 fix: the round-2 build used `WriteStream on: Utf8 new` to
-  // force UTF-8 output, but Utf8 in this GemStone is invariant — buffer
-  // growth requires at:put:, which Utf8 rejects. Fall back to a Unicode7
-  // stream (proven extensible) plus per-character codepoint-128 gating so
-  // non-ASCII content from Unicode16 messageText is replaced with `?`
-  // rather than widening the buffer back to the original UTF-16 leak.
-  it('writes output through a Unicode7 stream with per-char ASCII gating', () => {
+  // Round-3 (revised): build through a String-class WriteStream (which
+  // widens transparently from Unicode7 to Unicode16 / Unicode32 as needed
+  // for non-ASCII codepoints), then call `asUtf8` at the boundary to
+  // produce the transfer-protocol bytes GCI hands back. Pins the boundary
+  // call so neither earlier failure mode (Unicode16 leak via `, ` widen,
+  // or Utf8 buffer-growth `at:put:`) can recur.
+  it('builds the output as an internal String, asUtf8 at the boundary', () => {
     const exec = vi.fn<QueryExecutor>(() => '');
     runFailingTests(exec);
     const code = exec.mock.calls[0][1];
-    expect(code).toContain('WriteStream on: Unicode7 new');
+    expect(code).toContain('WriteStream on: String new');
+    expect(code).toMatch(/ws contents asUtf8/);
+    // Negative guards: the round-2 Utf8 buffer and the round-3 lossy ASCII
+    // gating must both stay out — they were misreads of GemStone's
+    // storage/transfer encoding split.
     expect(code).not.toContain('WriteStream on: Utf8 new');
-    // Per-char gate: anything ≥ 128 becomes `?`. The exact gate text is the
-    // load-bearing assertion — round-2 lost this and reintroduced the
-    // UTF-16 widening; round-3-immutable-Utf8 bug came from over-correcting.
-    expect(code).toContain('asInteger < 128');
-    expect(code).toContain("ifTrue: [ch] ifFalse: [$?]");
+    expect(code).not.toContain('asInteger < 128');
   });
 
   // classNamePattern path: expand globs server-side via GemStone's
@@ -448,13 +448,14 @@ describe('python (Grail) queries', () => {
     evalPython(exec, 'x = 1');
     const code = exec.mock.calls[0][1];
     expect(code).toContain('on: AbstractException');
-    // Round-3 build: error string flows through a Unicode7 stream with
-    // per-char ASCII gating. See the regression guards below for why each
-    // alternative (Utf8 buffer, plain Unicode7, `,` concatenation) is wrong.
-    expect(code).toContain('WriteStream on: Unicode7 new');
+    // Build internally with the natural String class (which widens
+    // transparently for non-ASCII content), then `asUtf8` at the boundary
+    // for the transfer protocol GCI expects. See the regression guards
+    // below for why each prior attempt (Utf8 buffer, ASCII gating, `,`
+    // concatenation) was wrong.
+    expect(code).toContain('WriteStream on: String new');
     expect(code).toContain("'Error: '");
-    expect(code).toContain('asInteger < 128');
-    expect(code).toContain("ifTrue: [ch] ifFalse: [$?]");
+    expect(code).toContain('result asUtf8');
   });
 
   // Round-2 regression guard: the eval_python error path was previously built
@@ -472,13 +473,25 @@ describe('python (Grail) queries', () => {
   // forced UTF-8 output, but Utf8 in this GemStone is invariant —
   // growing the buffer triggers at:put: which Utf8 rejects with
   // rtErrShouldNotImplement. Every error case failed with
-  // "Receiver: anUtf8(). Selector: #'at:put:'". The Unicode7 stream
-  // assertion above is the positive test; this is the negative one.
+  // "Receiver: anUtf8(). Selector: #'at:put:'".
   it('does not write through a Utf8 stream (Utf8 immutability guard)', () => {
     const exec = vi.fn<QueryExecutor>(() => '');
     evalPython(exec, 'x = 1');
     const code = exec.mock.calls[0][1];
     expect(code).not.toContain('WriteStream on: Utf8 new');
+  });
+
+  // Round-3-revised regression guard: the per-character codepoint-128 gate
+  // (`ch asInteger < 128 ifTrue: [ch] ifFalse: [$?]`) was a lossy fix that
+  // treated an internal storage detail as if it were a transfer-encoding
+  // problem. The right answer is `asUtf8` at the boundary; this test pins
+  // the absence of the regressed approach.
+  it('does not use per-char ASCII gating with `?` substitution', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    evalPython(exec, 'x = 1');
+    const code = exec.mock.calls[0][1];
+    expect(code).not.toContain('asInteger < 128');
+    expect(code).not.toContain("ifFalse: [$?]");
   });
 
   it('returns the executor result verbatim — no parsing on the JS side', () => {

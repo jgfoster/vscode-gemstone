@@ -12,7 +12,7 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ### Fixed
 
-- **`Utf8 at:put:` regression in `eval_python` / `compile_python` error path.** The 1.4.2 fix for the UTF-16 leak switched the error formatter to `WriteStream on: Utf8 new`, but `Utf8` in this GemStone is invariant — buffer growth requires `at:put:`, which `Utf8` rejects with `rtErrShouldNotImplement`. Every error case ended up with the wrapper error `"Receiver: anUtf8(). Selector: #'at:put:'"` instead of the underlying message. Same regression hit `list_failing_tests` (which had also been switched to a `Utf8` stream — `copyFrom:to:` isn't supported on `Utf8` either). Both now build through `WriteStream on: Unicode7 new` with per-character codepoint-128 gating: ASCII passes through, anything ≥ 128 becomes `?`. Pure-ASCII output reaches GCI, which transcodes ASCII → UTF-8 trivially. Closes the round-3 regression report.
+- **`Utf8 at:put:` regression in `eval_python` / `compile_python` error path and `list_failing_tests`.** The 1.4.2 fix for the UTF-16 leak treated `Utf8` as if it were an internal storage class and switched the error formatter to `WriteStream on: Utf8 new`. But `Utf8` is a transfer-protocol class — variable-byte, no character indexing, `at:put:` and `copyFrom:to:` undefined — so buffer growth raised `rtErrShouldNotImplement` on every error case. The right model is to build the full output in an internal Unicode class (Unicode7 transparently widens to Unicode16/Unicode32 as needed for non-ASCII codepoints), then call `asUtf8` once at the boundary to produce the transfer-protocol bytes GCI hands back. Lossless, simpler, and matches GemStone's intent.
 
 ### Changed
 

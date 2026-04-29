@@ -21,10 +21,10 @@ export function runTestMethod(
   // own AbstractException handler — same pattern as describe_test_failure.
   // The TestFailure-vs-other-Exception kind discriminates failed/error.
   //
-  // Output is built through a Unicode7 stream with per-char ASCII gating
-  // so Unicode16 messageText values transcode safely (see python.ts and
-  // runFailingTests.ts for the encoding rationale).
-  const code = `| testCase captured tdEx ws coerce status startMs endMs |
+  // Output is built through a String-class WriteStream (which widens
+  // transparently for non-ASCII codepoints) and converted to Utf8 once at
+  // the boundary. See python.ts for the encoding-model rationale.
+  const code = `| testCase captured tdEx ws status startMs endMs |
 testCase := ${esc} selector: #'${sel}'.
 startMs := Time millisecondClockValue.
 captured := nil.
@@ -36,20 +36,18 @@ captured isNil ifTrue: [
   (captured isNil and: [tdEx notNil]) ifTrue: [captured := tdEx]].
 endMs := Time millisecondClockValue.
 
-ws := WriteStream on: Unicode7 new.
-coerce := [:s | s asString do: [:ch |
-  ws nextPut: (ch asInteger < 128 ifTrue: [ch] ifFalse: [$?])]].
+ws := WriteStream on: String new.
 captured isNil
   ifTrue: [ws nextPutAll: 'passed'; tab; tab]
   ifFalse: [
     status := (captured isKindOf: TestFailure) ifTrue: ['failed'] ifFalse: ['error'].
     ws nextPutAll: status; tab.
-    coerce value: captured class name.
+    ws nextPutAll: captured class name asString.
     ws nextPutAll: ': '.
-    coerce value: captured messageText.
+    ws nextPutAll: captured messageText asString.
     ws tab].
 ws nextPutAll: (endMs - startMs) printString.
-ws contents`;
+ws contents asUtf8`;
   const data = execute(`runTestMethod(${className}>>#${selector})`, code);
   const parts = data.split('\t');
   return {

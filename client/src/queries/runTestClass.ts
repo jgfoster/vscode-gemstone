@@ -17,14 +17,14 @@ export function runTestClass(
   // the live exception's class + messageText, instead of emitting the
   // post-run TestCase printString (which is just the SUnit debug recipe).
   // Doubles cost only for failing/erroring tests; passed tests don't re-run.
-  // Output is built through a Unicode7 stream with per-char ASCII gating
-  // so Unicode16 messageText values transcode safely.
-  const code = `| suite result ws coerce captureMessage |
+  //
+  // Output is built through a String-class WriteStream (widens for
+  // non-ASCII codepoints) and converted to Utf8 once at the boundary.
+  // See python.ts for the encoding-model rationale.
+  const code = `| suite result ws captureMessage |
 suite := ${esc} suite.
 result := suite run.
-ws := WriteStream on: Unicode7 new.
-coerce := [:str | str asString do: [:ch |
-  ws nextPut: (ch asInteger < 128 ifTrue: [ch] ifFalse: [$?])]].
+ws := WriteStream on: String new.
 captureMessage := [:t |
   | captured |
   captured := nil.
@@ -33,9 +33,9 @@ captureMessage := [:t |
    t tearDown] on: AbstractException do: [:e | captured := e].
   captured isNil
     ifFalse: [
-      coerce value: captured class name.
+      ws nextPutAll: captured class name asString.
       ws nextPutAll: ': '.
-      coerce value: captured messageText]].
+      ws nextPutAll: captured messageText asString]].
 result passed do: [:each |
   ws nextPutAll: each class name; tab;
     nextPutAll: each selector; tab;
@@ -52,7 +52,7 @@ result errors do: [:each |
     nextPutAll: 'error'; tab.
   captureMessage value: each.
   ws lf].
-ws contents`;
+ws contents asUtf8`;
   const data = execute(`runTestClass(${className})`, code);
   return splitLines(data).map(line => {
     const parts = line.split('\t');

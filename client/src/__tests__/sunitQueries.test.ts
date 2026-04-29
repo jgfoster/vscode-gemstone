@@ -121,8 +121,9 @@ describe('sunitQueries', () => {
     // Round-3 fix: bypass `testCase run` and run setUp / perform / tearDown
     // manually with our own AbstractException handler, so the message column
     // carries the live exception's class + messageText (not the SUnit
-    // post-run debug recipe). The Unicode7 + ASCII-gate stream avoids the
-    // round-3 Utf8 immutability bug.
+    // post-run debug recipe). Build through a String-class WriteStream and
+    // call asUtf8 at the boundary; that's the canonical GemStone pattern
+    // for "internal storage → transfer protocol."
     it('captures live exception class + messageText (no testCase run framework)', () => {
       const session = createMockSession('');
       sunit.runTestMethod(session, 'MyTestCase', 'testBad');
@@ -133,12 +134,12 @@ describe('sunitQueries', () => {
       expect(code).toContain('testCase tearDown');
       expect(code).toContain('captured class name');
       expect(code).toContain('captured messageText');
-      expect(code).toContain('WriteStream on: Unicode7 new');
-      expect(code).toContain('asInteger < 128');
-      // Negative guards: the old `testCase run` framework path and the
-      // round-2 Utf8 stream must not return.
+      expect(code).toContain('WriteStream on: String new');
+      expect(code).toContain('asUtf8');
+      // Negative guards: every prior misfire must stay out.
       expect(code).not.toMatch(/result := testCase run\b/);
       expect(code).not.toContain('WriteStream on: Utf8 new');
+      expect(code).not.toContain('asInteger < 128');
     });
   });
 
@@ -189,11 +190,14 @@ describe('sunitQueries', () => {
       expect(code).toContain('t tearDown');
       expect(code).toContain('captured class name');
       expect(code).toContain('captured messageText');
-      expect(code).toContain('asInteger < 128');
-      // The old printString-of-the-test fallback must not survive — that's
-      // what the round-3 feedback explicitly called out as the SUnit debug
-      // recipe leaking into the message column.
+      expect(code).toContain('WriteStream on: String new');
+      expect(code).toContain('asUtf8');
+      // Negative guards: the old printString-of-the-test fallback must
+      // not survive (round-3 feedback called it out as the SUnit debug
+      // recipe leaking), nor should either of the prior misfires.
       expect(code).not.toMatch(/each printString copyFrom:/);
+      expect(code).not.toContain('WriteStream on: Utf8 new');
+      expect(code).not.toContain('asInteger < 128');
     });
   });
 

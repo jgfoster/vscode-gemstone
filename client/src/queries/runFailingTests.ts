@@ -46,12 +46,12 @@ export function runFailingTests(
   // only; a project where most tests pass barely notices. Iteration stays
   // in Smalltalk so it remains one GCI round-trip.
   //
-  // Round-3 fix: build the captured message via a Unicode7 stream with
-  // per-char ASCII gating, not via `, ` concatenation against a Utf8
-  // buffer. See python.ts for the full rationale — `, ` widens to
-  // Unicode16 (which GCI's Utf8 fetch forwards as raw UTF-16LE bytes) and
-  // `WriteStream on: Utf8 new` rejects the at:put: that buffer growth
-  // requires. Unicode7 + codepoint-128 gating dodges both.
+  // Build the entire output through a String-class WriteStream (which
+  // widens to Unicode16 transparently if a captured messageText carries
+  // non-ASCII codepoints), cap by character count, then convert to Utf8
+  // once at the boundary. See python.ts for the full encoding rationale —
+  // both prior misfires (round-2 Unicode16 leak, round-3 Utf8 immutability)
+  // came from treating a transfer protocol as if it were storage.
   const code = `| ws classes captureMessage |
 classes := ${classesExpr}.
 captureMessage := [:t |
@@ -63,16 +63,15 @@ captureMessage := [:t |
   captured isNil
     ifTrue: ['(no exception on re-run)']
     ifFalse: [
-      | inner coerce s |
-      inner := WriteStream on: Unicode7 new.
-      coerce := [:str | str asString do: [:ch |
-        inner nextPut: (ch asInteger < 128 ifTrue: [ch] ifFalse: [$?])]].
-      coerce value: captured class name.
+      | inner s |
+      inner := WriteStream on: String new.
+      inner nextPutAll: captured class name asString.
       inner nextPutAll: ': '.
-      coerce value: captured messageText.
+      inner nextPutAll: captured messageText asString.
       s := inner contents.
+      "Cap before transcoding so the cap is character-count, not byte-count."
       s copyFrom: 1 to: (s size min: ${MAX_MSG})]].
-ws := WriteStream on: Unicode7 new.
+ws := WriteStream on: String new.
 classes do: [:cls |
   | result |
   result := cls suite run.
@@ -86,7 +85,7 @@ classes do: [:cls |
       nextPutAll: e selector; tab;
       nextPutAll: 'error'; tab;
       nextPutAll: (captureMessage value: e); lf]].
-ws contents`;
+ws contents asUtf8`;
   const data = execute('runFailingTests', code);
   return splitLines(data).map(line => {
     const parts = line.split('\t');
