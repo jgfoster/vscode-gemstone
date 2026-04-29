@@ -241,7 +241,11 @@ describe('runFailingTests', () => {
     const code = exec.mock.calls[0][1];
     expect(code).toContain('isSubclassOf: TestCase');
     expect(code).toContain("pattern := 'Bytes*TestCase'");
-    expect(code).toContain('pattern match: v name');
+    // sunitMatch: is the glob primitive (* / #). The bare `match:`
+    // selector is a case-sensitive prefix matcher in GemStone — caught
+    // by the gci/ smoke-test suite when "expect(code).toContain('match:')"
+    // passed but the live glob always returned false.
+    expect(code).toContain('pattern sunitMatch: v name');
   });
 
   it('explicit classNames wins over classNamePattern (precedence)', () => {

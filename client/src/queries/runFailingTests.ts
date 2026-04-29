@@ -133,9 +133,15 @@ function buildExplicitClassList(classNames: string[]): string {
 }
 
 // Pattern path: same symbolList walk as DISCOVER_ALL_TEST_CLASSES, but
-// gated on `pattern match: v name`. Uses GemStone's standard glob:
-// `*` matches any sequence of characters, `#` matches a single character.
-// E.g. `Bytes*TestCase` picks up BytesTestCase, BytesIntTestCase, etc.
+// gated on `pattern sunitMatch: v name`. The selector spelled simply
+// `match:` is a *prefix* matcher in GemStone (case-sensitive
+// `startsWith:`); `sunitMatch:` is the glob primitive that actually
+// honors `*` (any chars) and `#` (single char). E.g.
+// `Bytes*TestCase` picks up BytesTestCase, BytesIntTestCase, etc.
+// (This was caught by the gci/ smoke-test suite — the round-2 unit test
+// only asserted `expect(code).toContain('pattern match:')`, which the
+// shape check satisfied while the live glob check returned false for
+// every input.)
 function buildPatternFilter(pattern: string): string {
   const esc = escapeString(pattern);
   return `[| sl seen list pattern |
@@ -149,7 +155,7 @@ sl do: [:dict |
       and: [(v isSubclassOf: TestCase)
       and: [v ~~ TestCase
       and: [(seen includes: v) not
-      and: [pattern match: v name]]]])
+      and: [pattern sunitMatch: v name]]]])
         ifTrue: [seen add: v. list add: v]]].
 list] value`;
 }
