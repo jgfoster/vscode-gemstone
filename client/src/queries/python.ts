@@ -73,7 +73,7 @@ result := dispatcher isNil
     [${grailExpression}]
       on: AbstractException do: [:e |
         | ws |
-        ws := WriteStream on: String new.
+        ws := WriteStream on: Unicode7 new.
         ws nextPutAll: 'Error: '.
         ws nextPutAll: e class name asString.
         ws nextPutAll: ' — '.

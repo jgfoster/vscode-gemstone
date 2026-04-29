@@ -36,7 +36,7 @@ captured isNil ifTrue: [
   (captured isNil and: [tdEx notNil]) ifTrue: [captured := tdEx]].
 endMs := Time millisecondClockValue.
 
-ws := WriteStream on: String new.
+ws := WriteStream on: Unicode7 new.
 captured isNil
   ifTrue: [ws nextPutAll: 'passed'; tab; tab]
   ifFalse: [

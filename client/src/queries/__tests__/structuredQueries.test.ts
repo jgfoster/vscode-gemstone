@@ -224,7 +224,7 @@ describe('runFailingTests', () => {
     const exec = vi.fn<QueryExecutor>(() => '');
     runFailingTests(exec);
     const code = exec.mock.calls[0][1];
-    expect(code).toContain('WriteStream on: String new');
+    expect(code).toContain('WriteStream on: Unicode7 new');
     expect(code).toMatch(/ws contents asUtf8/);
     // Negative guards: the round-2 Utf8 buffer and the round-3 lossy ASCII
     // gating must both stay out — they were misreads of GemStone's
@@ -453,7 +453,7 @@ describe('python (Grail) queries', () => {
     // for the transfer protocol GCI expects. See the regression guards
     // below for why each prior attempt (Utf8 buffer, ASCII gating, `,`
     // concatenation) was wrong.
-    expect(code).toContain('WriteStream on: String new');
+    expect(code).toContain('WriteStream on: Unicode7 new');
     expect(code).toContain("'Error: '");
     expect(code).toContain('result asUtf8');
   });

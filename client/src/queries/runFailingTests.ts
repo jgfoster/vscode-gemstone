@@ -64,14 +64,14 @@ captureMessage := [:t |
     ifTrue: ['(no exception on re-run)']
     ifFalse: [
       | inner s |
-      inner := WriteStream on: String new.
+      inner := WriteStream on: Unicode7 new.
       inner nextPutAll: captured class name asString.
       inner nextPutAll: ': '.
       inner nextPutAll: captured messageText asString.
       s := inner contents.
       "Cap before transcoding so the cap is character-count, not byte-count."
       s copyFrom: 1 to: (s size min: ${MAX_MSG})]].
-ws := WriteStream on: String new.
+ws := WriteStream on: Unicode7 new.
 classes do: [:cls |
   | result |
   result := cls suite run.

@@ -24,7 +24,7 @@ export function runTestClass(
   const code = `| suite result ws captureMessage |
 suite := ${esc} suite.
 result := suite run.
-ws := WriteStream on: String new.
+ws := WriteStream on: Unicode7 new.
 captureMessage := [:t |
   | captured |
   captured := nil.

@@ -134,7 +134,7 @@ describe('sunitQueries', () => {
       expect(code).toContain('testCase tearDown');
       expect(code).toContain('captured class name');
       expect(code).toContain('captured messageText');
-      expect(code).toContain('WriteStream on: String new');
+      expect(code).toContain('WriteStream on: Unicode7 new');
       expect(code).toContain('asUtf8');
       // Negative guards: every prior misfire must stay out.
       expect(code).not.toMatch(/result := testCase run\b/);
@@ -190,7 +190,7 @@ describe('sunitQueries', () => {
       expect(code).toContain('t tearDown');
       expect(code).toContain('captured class name');
       expect(code).toContain('captured messageText');
-      expect(code).toContain('WriteStream on: String new');
+      expect(code).toContain('WriteStream on: Unicode7 new');
       expect(code).toContain('asUtf8');
       // Negative guards: the old printString-of-the-test fallback must
       // not survive (round-3 feedback called it out as the SUnit debug
