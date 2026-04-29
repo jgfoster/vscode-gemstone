@@ -114,6 +114,26 @@ describe('SUnit queries (live GCI)', () => {
       // throws here.
       expect(() => runFailingTests(s.exec)).not.toThrow();
     });
+
+    // Round-5: duplicate (className, selector) pairs in the no-args
+    // output. Root cause: an abstract TestCase's `suite` cascades into
+    // its concrete subclasses, so when we ALSO include those subclasses
+    // directly we run every leaf test twice. Fix: skip abstract classes
+    // in discover-all.
+    //
+    // The probe stone has 2 abstract TestCases parenting ~22 leaves
+    // each; pre-fix this test would have observed 45 duplicate pairs.
+    // Post-fix every pair must be unique.
+    it('with no arguments returns unique (className, selector) pairs', () => {
+      const results = runFailingTests(s.exec);
+      const counts = new Map<string, number>();
+      for (const r of results) {
+        const key = `${r.className}|${r.selector}`;
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      const dupes = [...counts.entries()].filter(([, n]) => n > 1);
+      expect(dupes).toEqual([]);
+    });
   });
 
   describe('describeTestFailure', () => {

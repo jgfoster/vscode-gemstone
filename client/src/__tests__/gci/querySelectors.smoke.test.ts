@@ -64,12 +64,19 @@ const claims: SelectorClaim[] = [
   // suite is class-side.
   { label: 'TestCase class understands suite', className: 'TestCase', meta: true, selector: 'suite' },
 
-  // Pattern-matching for list_failing_tests classNamePattern. The
-  // *correct* glob primitive in GemStone is `sunitMatch:` — `match:` is
-  // a case-sensitive prefix matcher (returns true iff the receiver
-  // starts with the argument), which is what previously made
-  // classNamePattern silently match nothing.
-  { label: 'String understands sunitMatch:', className: 'String', selector: 'sunitMatch:' },
+  // Pattern-matching for list_failing_tests classNamePattern. The public
+  // glob primitive on CharacterCollection is `matchPattern:`, which takes
+  // an Array of literal CharacterCollections alternating with `$*` / `$?`
+  // Characters. Bare `match:` is a case-sensitive *prefix* matcher (not a
+  // glob), and `sunitMatch:` is SUnit-specific — `matchPattern:` works in
+  // any session.
+  { label: 'String understands matchPattern:', className: 'String', selector: 'matchPattern:' },
+  // Round-5 fix: discover-all skips abstract TestCases to avoid running
+  // every leaf twice (once via the parent's cascading suite, once
+  // directly). `isAbstract` is sent to the class object, which dispatches
+  // through the metaclass chain — so the right canUnderstand: probe is
+  // on `TestCase class`, not `TestCase` (instance side).
+  { label: 'TestCase class understands isAbstract', className: 'TestCase', meta: true, selector: 'isAbstract' },
 
   // Stack capture: describeTestFailure toggles GemExceptionSignalCapturesStack
   // around the run via gemConfigurationAt:put:. If the setter is missing,

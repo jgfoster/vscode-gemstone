@@ -7,7 +7,7 @@ import { getClassEnvironments } from '../getClassEnvironments';
 import { getClassHierarchy } from '../getClassHierarchy';
 import { getMethodList } from '../getMethodList';
 import { getStepPointSelectorRanges } from '../getStepPointSelectorRanges';
-import { runFailingTests } from '../runFailingTests';
+import { runFailingTests, globToPatternArray } from '../runFailingTests';
 import { describeTestFailure } from '../describeTestFailure';
 import { evalPython, compilePython } from '../python';
 
@@ -233,19 +233,23 @@ describe('runFailingTests', () => {
     expect(code).not.toContain('asInteger < 128');
   });
 
-  // classNamePattern path: expand globs server-side via GemStone's
-  // `String match:` so a single round-trip handles the discover+filter+run.
-  it('uses pattern-filter path when classNamePattern is given', () => {
+  // classNamePattern path: glob is parsed server-side into the literal
+  // Array form CharacterCollection>>matchPattern: expects, alternating
+  // literal Strings with `$*` / `$?` Characters. matchPattern: is the
+  // public primitive on CharacterCollection — works without SUnit
+  // loaded, unlike the SUnit-only `sunitMatch:` previously used.
+  it('uses matchPattern: with a parsed Array when classNamePattern is given', () => {
     const exec = vi.fn<QueryExecutor>(() => '');
     runFailingTests(exec, undefined, 'Bytes*TestCase');
     const code = exec.mock.calls[0][1];
     expect(code).toContain('isSubclassOf: TestCase');
-    expect(code).toContain("pattern := 'Bytes*TestCase'");
-    // sunitMatch: is the glob primitive (* / #). The bare `match:`
-    // selector is a case-sensitive prefix matcher in GemStone — caught
-    // by the gci/ smoke-test suite when "expect(code).toContain('match:')"
-    // passed but the live glob always returned false.
-    expect(code).toContain('pattern sunitMatch: v name');
+    // The exact parsed form — pinning the literal Array source guards
+    // against the parser regressing (e.g. losing the suffix segment).
+    expect(code).toContain("v name matchPattern: #('Bytes' $* 'TestCase')");
+    // Negative guards: bare match: is prefix-only; sunitMatch: works but
+    // requires SUnit; both must stay out.
+    expect(code).not.toMatch(/pattern match:/);
+    expect(code).not.toContain('sunitMatch:');
   });
 
   it('explicit classNames wins over classNamePattern (precedence)', () => {
@@ -254,7 +258,45 @@ describe('runFailingTests', () => {
     const code = exec.mock.calls[0][1];
     // classNames path runs (no pattern matching in the snippet).
     expect(code).toContain("objectNamed: #'ArrayTest'");
-    expect(code).not.toContain('pattern match:');
+    expect(code).not.toContain('matchPattern:');
+  });
+
+  // Round-5 fix: an SUnit abstract TestCase's `suite` cascades into its
+  // subclasses, so including both the abstract parent AND its leaves in
+  // the discovery list runs every leaf test twice. Skipping abstracts in
+  // discover-all keeps coverage (leaves' suites pull inherited tests
+  // once) without the duplicate output.
+  it('skips abstract TestCase classes in the no-args discovery walk', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    runFailingTests(exec);
+    const code = exec.mock.calls[0][1];
+    expect(code).toContain('v isAbstract not');
+  });
+});
+
+describe('globToPatternArray', () => {
+  // The parsed Array is what makes matchPattern: work. Lock the exact
+  // shape because the agent-supplied pattern reaches the stone verbatim
+  // and a parser regression silently degrades classNamePattern matching.
+  it('alternates literal segments with $* / $? Characters', () => {
+    expect(globToPatternArray('Bytes*TestCase')).toBe("#('Bytes' $* 'TestCase')");
+    expect(globToPatternArray('*Test')).toBe("#($* 'Test')");
+    expect(globToPatternArray('Test*')).toBe("#('Test' $*)");
+    expect(globToPatternArray('A*B*C')).toBe("#('A' $* 'B' $* 'C')");
+    expect(globToPatternArray('?ar')).toBe("#($? 'ar')");
+  });
+
+  it('handles glob-free patterns (matches the literal exactly)', () => {
+    expect(globToPatternArray('Foo')).toBe("#('Foo')");
+  });
+
+  it('handles bare wildcards (matches anything / one char)', () => {
+    expect(globToPatternArray('*')).toBe('#($*)');
+    expect(globToPatternArray('?')).toBe('#($?)');
+  });
+
+  it('escapes single quotes in literal segments', () => {
+    expect(globToPatternArray("it's*")).toBe("#('it''s' $*)");
   });
 });
 

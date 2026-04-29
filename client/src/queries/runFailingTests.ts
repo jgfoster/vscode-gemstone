@@ -99,9 +99,17 @@ ws contents encodeAsUTF8`;
   });
 }
 
-// Walk the user's symbolList for every TestCase subclass (excluding TestCase
-// itself), deduped via IdentitySet so a class registered in two dicts is run
-// only once.
+// Walk the user's symbolList for every concrete TestCase subclass (excluding
+// TestCase itself and any abstract intermediate classes), deduped via
+// IdentitySet so a class registered in two dicts is run only once.
+//
+// Why we skip abstract classes: an abstract TestCase's `suite` cascades into
+// its subclasses' suites (the SUnit "abstract test class" idiom). If we
+// also include those leaf subclasses directly, every test under an abstract
+// parent runs twice — round-5 reported 45 duplicate (className, selector)
+// pairs out of 99 unique, all traceable to the two abstract parents on the
+// probe stone. Skipping `isAbstract` here lets the leaves' own suites pick
+// up inherited tests once, no duplicates.
 //
 // The fragment is wrapped as `[| ... | ...] value` because it gets substituted
 // into `classes := <expr>` — Smalltalk does not allow temp declarations in
@@ -116,7 +124,8 @@ sl do: [:dict |
     (v isBehavior
       and: [(v isSubclassOf: TestCase)
       and: [v ~~ TestCase
-      and: [(seen includes: v) not]]])
+      and: [v isAbstract not
+      and: [(seen includes: v) not]]]])
         ifTrue: [seen add: v. list add: v]]].
 list] value`;
 
@@ -133,29 +142,67 @@ function buildExplicitClassList(classNames: string[]): string {
 }
 
 // Pattern path: same symbolList walk as DISCOVER_ALL_TEST_CLASSES, but
-// gated on `pattern sunitMatch: v name`. The selector spelled simply
-// `match:` is a *prefix* matcher in GemStone (case-sensitive
-// `startsWith:`); `sunitMatch:` is the glob primitive that actually
-// honors `*` (any chars) and `#` (single char). E.g.
-// `Bytes*TestCase` picks up BytesTestCase, BytesIntTestCase, etc.
-// (This was caught by the gci/ smoke-test suite — the round-2 unit test
-// only asserted `expect(code).toContain('pattern match:')`, which the
-// shape check satisfied while the live glob check returned false for
-// every input.)
+// gated by `(v name matchPattern: <pattern-array>)`. matchPattern: is the
+// public glob primitive on CharacterCollection (the underlying sequence
+// is `findPattern:startingAt:`); it takes an Array of literal
+// CharacterCollections alternating with `$*` (any chars) or `$?` (single
+// char). E.g. the glob `Bytes*TestCase` becomes the Array `#('Bytes' $*
+// 'TestCase')`.
+//
+// Why we don't use `sunitMatch:` (which also globs): it's an SUnit
+// extension — only present when SUnit's been loaded. matchPattern: is on
+// the CharacterCollection base class, so the query works in any session.
+//
+// Why we don't use bare `match:`: it's a case-sensitive *prefix* matcher
+// in GemStone (`receiver startsWith: arg`), not a glob. Caught by the
+// gci/ smoke-test suite when "expect(code).toContain('match:')" passed
+// while every live invocation returned false.
+//
+// Abstract classes are still allowed under classNamePattern so the agent
+// can target an abstract parent on purpose ("`PythonTestCase`'s entire
+// cascaded suite, please"). The discover-all path is the one that
+// auto-skips them to avoid double-running.
 function buildPatternFilter(pattern: string): string {
-  const esc = escapeString(pattern);
-  return `[| sl seen list pattern |
+  const patternArray = globToPatternArray(pattern);
+  return `[| sl seen list |
 sl := System myUserProfile symbolList.
 seen := IdentitySet new.
 list := OrderedCollection new.
-pattern := '${esc}'.
 sl do: [:dict |
   dict valuesDo: [:v |
     (v isBehavior
       and: [(v isSubclassOf: TestCase)
       and: [v ~~ TestCase
       and: [(seen includes: v) not
-      and: [pattern sunitMatch: v name]]]])
+      and: [v name matchPattern: ${patternArray}]]]])
         ifTrue: [seen add: v. list add: v]]].
 list] value`;
+}
+
+// Translate a glob like `Bytes*TestCase` to the Smalltalk literal-Array
+// source matchPattern: expects: alternating literal CharacterCollections
+// and the `$*` / `$?` Character wildcards. Single quotes in the literal
+// segments are doubled per the standard Smalltalk-string escape.
+//
+// Examples:
+//   "Bytes*TestCase"  →  #('Bytes' $* 'TestCase')
+//   "*Test"           →  #($* 'Test')
+//   "Foo"             →  #('Foo')                  (matches exactly)
+//   "*"               →  #($*)                     (matches anything)
+export function globToPatternArray(glob: string): string {
+  const parts: string[] = [];
+  let buf = '';
+  const flush = () => {
+    if (buf.length > 0) {
+      parts.push(`'${escapeString(buf)}'`);
+      buf = '';
+    }
+  };
+  for (const ch of glob) {
+    if (ch === '*') { flush(); parts.push('$*'); }
+    else if (ch === '?') { flush(); parts.push('$?'); }
+    else { buf += ch; }
+  }
+  flush();
+  return `#(${parts.join(' ')})`;
 }

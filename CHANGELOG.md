@@ -4,8 +4,13 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+### Fixed
+
+- **`list_failing_tests` no-args produced duplicate rows.** An SUnit abstract `TestCase`'s `suite` cascades into its concrete subclasses' suites, so when the discover-all walk also enumerated those leaves directly, every test under an abstract parent ran twice (round-5 reported 45 duplicate `(className, selector)` pairs out of 99 unique). The discover-all walk now filters with `v isAbstract not`; explicit `classNames` / `classNamePattern` paths still let an agent target an abstract parent on purpose for the cascaded run.
+
 ### Changed
 
+- **`list_failing_tests` `classNamePattern` switched from `String >> sunitMatch:` to `CharacterCollection >> matchPattern:`** with a JS-side glob → Array parser. `matchPattern:` is the public glob primitive on the base class; `sunitMatch:` only exists when SUnit is loaded. Agent-supplied globs like `Bytes*TestCase` are translated to the literal Array form `#('Bytes' $* 'TestCase')` server-side; behavior is identical, but the query now works in any session.
 - **Default class export directory is now hidden** — exports default to `{workspaceRoot}/.gemstone/{session}/{index}-{dictName}` (was `{workspaceRoot}/gemstone/...`). The dot-prefix keeps it out of the way in file listings while remaining browseable in VS Code's Explorer, Quick Open, and Find in Files. Users with an existing `gemstone/` directory can either delete it or pin the prior layout via the `gemstone.exportPath` setting (e.g. `{workspaceRoot}/gemstone/{session}/{index}-{dictName}`).
 
 ## [1.4.3] - 2026-04-29
