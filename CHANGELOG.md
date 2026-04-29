@@ -4,24 +4,25 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
-### Fixed
-
-- **`list_failing_tests` no-args produced duplicate rows.** An SUnit abstract `TestCase`'s `suite` cascades into its concrete subclasses' suites, so when the discover-all walk also enumerated those leaves directly, every test under an abstract parent ran twice (round-5 reported 45 duplicate `(className, selector)` pairs out of 99 unique). The discover-all walk now filters with `v isAbstract not`; explicit `classNames` / `classNamePattern` paths still let an agent target an abstract parent on purpose for the cascaded run.
-
-### Changed
-
-- **`list_failing_tests` `classNamePattern` switched from `String >> sunitMatch:` to `CharacterCollection >> matchPattern:`** with a JS-side glob → Array parser. `matchPattern:` is the public glob primitive on the base class; `sunitMatch:` only exists when SUnit is loaded. Agent-supplied globs like `Bytes*TestCase` are translated to the literal Array form `#('Bytes' $* 'TestCase')` server-side; behavior is identical, but the query now works in any session.
-- **Default class export directory is now hidden** — exports default to `{workspaceRoot}/.gemstone/{session}/{index}-{dictName}` (was `{workspaceRoot}/gemstone/...`). The dot-prefix keeps it out of the way in file listings while remaining browseable in VS Code's Explorer, Quick Open, and Find in Files. Users with an existing `gemstone/` directory can either delete it or pin the prior layout via the `gemstone.exportPath` setting (e.g. `{workspaceRoot}/gemstone/{session}/{index}-{dictName}`).
-
 ## [1.4.3] - 2026-04-29
 
-### Fixed
+### Added
 
-- **`Utf8 at:put:` regression in `eval_python` / `compile_python` error path and `list_failing_tests`.** The 1.4.2 fix for the UTF-16 leak treated `Utf8` as if it were an internal storage class and switched the error formatter to `WriteStream on: Utf8 new`. But `Utf8` is a transfer-protocol class — variable-byte, no character indexing, `at:put:` and `copyFrom:to:` undefined — so buffer growth raised `rtErrShouldNotImplement` on every error case. The right model is to build the full output in an internal Unicode class (Unicode7 transparently widens to Unicode16/Unicode32 as needed for non-ASCII codepoints), then call `encodeAsUTF8` once at the boundary to produce the transfer-protocol bytes GCI hands back. Lossless, simpler, and matches GemStone's intent.
+- **Hidden-prefix class export directory** — exports default to `{workspaceRoot}/.gemstone/{session}/{index}-{dictName}` (was `{workspaceRoot}/gemstone/...`). The dot-prefix keeps it out of the way in file listings while remaining browseable in VS Code's Explorer, Quick Open, and Find in Files. Users with an existing `gemstone/` directory can either delete it or pin the prior layout via the `gemstone.exportPath` setting (e.g. `{workspaceRoot}/gemstone/{session}/{index}-{dictName}`).
+- **GCI smoke-test harness** under `client/src/__tests__/gci/` (run via `npm run test:gci`, gated by `GCI_LIBRARY_PATH`). Runs each shared MCP query against a live stone, plus a curated selector probe that fails fast if any GemStone selector our queries hardcode goes missing. Skipped from the default `npm test` run; on the round it landed it caught the `sunitMatch:` / `match:` confusion the unit suite missed.
 
 ### Changed
 
-- **`run_test_method` / `run_test_class` message column now carries the actual exception** (`MessageNotUnderstood: nil does not understand #foo`) instead of the SUnit debug recipe (`ClassTestCase debug: #testFoo`). Bypasses `TestCase>>run` and replicates `setUp` / `perform` / `tearDown` with our own `AbstractException` handler — same pattern `describe_test_failure` uses, now applied to the iterating runners. Round-2 ask #3 (originally about `list_failing_tests`) applied here too.
+- **`run_test_method` / `run_test_class` message column now carries the actual exception** (`MessageNotUnderstood: nil does not understand #foo`) instead of the SUnit debug recipe (`ClassTestCase debug: #testFoo`). Bypasses `TestCase>>run` and replicates `setUp` / `perform` / `tearDown` with our own `AbstractException` handler — same pattern `describe_test_failure` uses, now applied to the iterating runners.
+- **`list_failing_tests` `classNamePattern` glob primitive** is now `CharacterCollection >> matchPattern:` (the public, base-class glob — works in any session) with a JS-side glob → Array parser. Agent-supplied globs like `Bytes*TestCase` are translated to the literal Array form `#('Bytes' $* 'TestCase')` server-side. Replaces an earlier `sunitMatch:` attempt that only existed when SUnit was loaded.
+- **System Browser senders/implementors CodeLens split into two independent links.** The `N senders | M implementors` header row was a single `CodeLens` whose entire title was clickable but dispatched only to the senders view — half the displayed information was unreachable. Now emits a senders+implementors pair per method, matching the VS Code convention (TypeScript ships `X references | Y implementations` the same way). Each lens computes only its own count and dispatches to its own command (`gemstone.sendersOfSelector` / `gemstone.implementorsOfSelector`).
+- **Single class-selection code path in the System Browser.** A hierarchy-view click and an external Implementors-of / Senders-of jump previously updated the column-list state inline without refreshing the Class Definition panel, leaving the right-hand definition stale relative to the column-list selection. Both paths now route through a shared `applyClassSelection` helper alongside the regular column click and the find-class quick-pick.
+
+### Fixed
+
+- **System Browser hierarchy view rendered superclasses in reverse.** `ClassOrganizer >> allSuperclassesOf:` returns root-first (`[Object, Collection, ...]`), but the query then sent `reverseDo:` to that collection — Object ended up at the deepest indent and the immediate parent appeared at indent 0. Replaced with `do:` so the order is root-first.
+- **`list_failing_tests` no-args produced duplicate rows.** An SUnit abstract `TestCase`'s `suite` cascades into its concrete subclasses' suites, so when the discover-all walk also enumerated those leaves directly, every test under an abstract parent ran twice (45 duplicate `(className, selector)` pairs out of 99 unique on the probe stone). The discover-all walk now filters with `v isAbstract not`; explicit `classNames` / `classNamePattern` paths still let an agent target an abstract parent on purpose for the cascaded run.
+- **`Utf8` was misidentified as an internal-storage class** in the 1.4.2 fix for the `eval_python` UTF-16 leak. `Utf8` is the *transfer protocol* — variable-byte, no character indexing, `at:put:` and `copyFrom:to:` undefined. `WriteStream on: Utf8 new` raised `rtErrShouldNotImplement` on buffer growth, breaking every error path on `eval_python` / `compile_python` and the entire output of `list_failing_tests`. The right model is to build internally in `Unicode7` (which transparently widens to `Unicode16` / `Unicode32` for non-ASCII codepoints), then call `encodeAsUTF8` once at the boundary to produce the transfer bytes — lossless, and consistent with GemStone's storage/transfer split.
 
 ## [1.4.2] - 2026-04-28
 
