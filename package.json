@@ -1005,17 +1005,20 @@
     "test:client": "cd client && npx vitest run",
     "test:mcp": "cd mcp-server && npx vitest run",
     "test:gci": "cd client && npx vitest run --config vitest.gci.config.ts",
-    "package": "vsce package"
+    "package": "vsce package",
+    "publish": "npm run publish:vsce && npm run publish:ovsx",
+    "publish:vsce": "vsce publish",
+    "publish:ovsx": "ovsx publish"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.27.3",
+    "ovsx": "^0.10.5",
     "typescript": "^5.3.0"
   },
   "dependencies": {
     "@vscode/debugadapter": "^1.68.0",
-    "keytar": "^7.9.0",
     "koffi": "^2.15.1"
   }
 }

@@ -41,6 +41,7 @@ export class LoginEditorPanel {
 
   static async show(
     storage: LoginStorage,
+    secrets: vscode.SecretStorage,
     treeProvider: LoginTreeProvider,
     existingLogin?: GemStoneLogin,
     sysadminStorage?: SysadminStorage,
@@ -55,10 +56,10 @@ export class LoginEditorPanel {
       version: versions[0] ?? '',
     };
 
-    // If the login has its password in the keychain, load it so the user can
+    // If the login has its password in SecretStorage, load it so the user can
     // view or change it in the editor.
     if (existingLogin?.password_in_keychain) {
-      const pw = await getLoginPassword(existingLogin);
+      const pw = await getLoginPassword(secrets, existingLogin);
       if (pw !== undefined) {
         login = { ...login, gs_password: pw };
       }
@@ -83,13 +84,14 @@ export class LoginEditorPanel {
     );
 
     LoginEditorPanel.currentPanel = new LoginEditorPanel(
-      panel, storage, treeProvider, login, versions,
+      panel, storage, secrets, treeProvider, login, versions,
     );
   }
 
   private constructor(
     panel: vscode.WebviewPanel,
     private storage: LoginStorage,
+    private secrets: vscode.SecretStorage,
     private treeProvider: LoginTreeProvider,
     private login: GemStoneLogin,
     private versions: string[],
@@ -123,17 +125,17 @@ export class LoginEditorPanel {
     data.label = loginLabel(data);
 
     if (data.password_in_keychain) {
-      // Store the password in the OS keychain and strip it from the settings
+      // Store the password in SecretStorage and strip it from the settings
       // object before we persist.
       if (data.gs_password) {
-        await setLoginPassword(data);
+        await setLoginPassword(this.secrets, data);
       }
       data = { ...data, gs_password: '' };
     } else {
-      // If keychain was previously enabled and the user unchecked it, clean up
-      // the stored keychain entry so we don't leave stale secrets behind.
+      // If SecretStorage was previously enabled and the user unchecked it,
+      // clean up the stored entry so we don't leave stale secrets behind.
       if (this.login.password_in_keychain) {
-        await deleteLoginPassword(this.login);
+        await deleteLoginPassword(this.secrets, this.login);
       }
     }
 

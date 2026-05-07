@@ -4,6 +4,12 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+### Changed
+
+- **Login passwords now use VS Code's `SecretStorage` API** instead of `keytar`. SecretStorage delegates to the same OS keychains keytar did (macOS Keychain, Windows Credential Manager, Linux libsecret) but ships with VS Code itself, so there is no native binary to bundle and no per-platform prebuild matrix to maintain. Side benefits: cross-platform credential storage that actually works in published builds (the keytar binding wasn't shipping at all in 1.4.x VSIXs — saved login passwords would have failed silently with `Cannot find module 'keytar'`), VSIX size dropped, and the `node_modules/keytar/**` re-include is gone from `.vscodeignore`. Storage key changed from keytar's `(service, account)` pair to a single namespaced key `jasper-gemstone-login:${user}@${host}/${stone}`; users with keychain-backed logins from prior installs will be re-prompted for their password once and the new entry will be written into SecretStorage.
+- **Tightened `.vscodeignore`** so the published VSIX only contains the three esbuild bundles plus runtime assets (48 files, down from 904). Per-file `tsc` outputs in `*/out/`, `mcp-server/node_modules/**`, `.claude/`, `*.tsbuildinfo`, `TODO.md`, and koffi's vendor/source/doc trees are no longer shipped.
+- **Multi-marketplace publishing.** `npm run publish` now publishes to both the Visual Studio Marketplace (`vsce publish`) and Open VSX (`ovsx publish`), so the extension is available to users of VSCodium, Gitpod, code-server, and other non-Microsoft VS Code distributions. Individual targets are also exposed as `npm run publish:vsce` and `npm run publish:ovsx`.
+
 ## [1.4.3] - 2026-04-29
 
 ### Added

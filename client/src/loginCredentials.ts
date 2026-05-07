@@ -1,11 +1,12 @@
 /**
- * OS-keychain credential storage for Jasper login passwords.
+ * Secret storage for Jasper login passwords, backed by VS Code's
+ * SecretStorage API (which delegates to the OS keychain on each platform).
  *
- * Separate from the MCP keychain service (`jasper-gemstone-mcp`) so the two
- * flows have independent lifecycles — deleting a login's keychain entry does
- * not disturb any MCP config, and vice versa.
+ * Keys are namespaced with `KEYCHAIN_SERVICE` so they don't collide with
+ * other secrets the extension might store in the future.
  */
 
+import * as vscode from 'vscode';
 import { GemStoneLogin } from './loginTypes';
 
 export const KEYCHAIN_SERVICE = 'jasper-gemstone-login';
@@ -17,42 +18,40 @@ export function loginCredentialAccount(
   return `${login.gs_user}@${login.gem_host}/${login.stone}`;
 }
 
-/** Store the login's password in the OS keychain. */
-export async function setLoginPassword(login: GemStoneLogin): Promise<void> {
-  const keytar = await import('keytar');
-  await keytar.default.setPassword(
-    KEYCHAIN_SERVICE,
-    loginCredentialAccount(login),
-    login.gs_password,
-  );
+function loginSecretKey(
+  login: Pick<GemStoneLogin, 'gs_user' | 'gem_host' | 'stone'>,
+): string {
+  return `${KEYCHAIN_SERVICE}:${loginCredentialAccount(login)}`;
 }
 
-/** Fetch a login's password from the OS keychain. Returns undefined if missing. */
+/** Store the login's password in SecretStorage. */
+export async function setLoginPassword(
+  secrets: vscode.SecretStorage,
+  login: GemStoneLogin,
+): Promise<void> {
+  await secrets.store(loginSecretKey(login), login.gs_password);
+}
+
+/** Fetch a login's password from SecretStorage. Returns undefined if missing or unreadable. */
 export async function getLoginPassword(
+  secrets: vscode.SecretStorage,
   login: Pick<GemStoneLogin, 'gs_user' | 'gem_host' | 'stone'>,
 ): Promise<string | undefined> {
   try {
-    const keytar = await import('keytar');
-    const pw = await keytar.default.getPassword(
-      KEYCHAIN_SERVICE,
-      loginCredentialAccount(login),
-    );
-    return pw ?? undefined;
+    return await secrets.get(loginSecretKey(login));
   } catch {
     return undefined;
   }
 }
 
-/** Remove a login's password from the OS keychain. Returns true if removed. */
+/** Remove a login's password from SecretStorage. Returns true on success. */
 export async function deleteLoginPassword(
+  secrets: vscode.SecretStorage,
   login: Pick<GemStoneLogin, 'gs_user' | 'gem_host' | 'stone'>,
 ): Promise<boolean> {
   try {
-    const keytar = await import('keytar');
-    return await keytar.default.deletePassword(
-      KEYCHAIN_SERVICE,
-      loginCredentialAccount(login),
-    );
+    await secrets.delete(loginSecretKey(login));
+    return true;
   } catch {
     return false;
   }
