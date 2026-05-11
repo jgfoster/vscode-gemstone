@@ -2,7 +2,7 @@
 
 All notable changes to the **GemStone Smalltalk** extension will be documented in this file.
 
-## [Unreleased]
+## [1.4.4] - 2026-05-11
 
 ### Changed
 
