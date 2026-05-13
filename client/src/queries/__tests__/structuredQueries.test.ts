@@ -203,6 +203,30 @@ describe('runFailingTests', () => {
     expect(code).toContain('s size min: 1024');
   });
 
+  // Cap *mechanism*, not just the magic number: the limit must be applied
+  // as a string slice, not as a bare `min:` (which returns the integer
+  // size — the trim wouldn't actually happen). And the slice has to come
+  // *before* the outer `encodeAsUTF8`, so 1024 is a character-count cap,
+  // not a byte-count cap. Without that ordering, multi-byte codepoints in
+  // a captured messageText would let the per-message footprint exceed the
+  // 1024-char budget that keeps total output under MAX_RESULT.
+  it('clips each captured message via copyFrom:to: before the boundary encode', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    runFailingTests(exec);
+    const code = exec.mock.calls[0][1];
+
+    // Full slice form must be present — the cap is a substring, not just a size calc.
+    expect(code).toMatch(/s copyFrom: 1 to: \(s size min: 1024\)/);
+
+    // The clip lives inside captureMessage (per-message), and runs against the
+    // internal Unicode7-backed buffer so 1024 counts characters. The boundary
+    // encodeAsUTF8 is the last thing applied to the *outer* ws contents.
+    const clipIdx = code.indexOf('copyFrom: 1 to:');
+    const encodeIdx = code.indexOf('ws contents encodeAsUTF8');
+    expect(clipIdx).toBeGreaterThan(-1);
+    expect(encodeIdx).toBeGreaterThan(clipIdx);
+  });
+
   // Round-2 fix: the no-args path (DISCOVER_ALL) had `| sl seen list |` temp
   // declarations substituted into `classes := <expr>`, which is a Smalltalk
   // syntax error. The block wrap closes around the temps so the expression
@@ -559,5 +583,31 @@ describe('python (Grail) queries', () => {
   it('returns the executor result verbatim — no parsing on the JS side', () => {
     const result = evalPython(vi.fn<QueryExecutor>(() => '3'), '1 + 2');
     expect(result).toBe('3');
+  });
+
+  // Real-world Grail usage embeds `def`/`for`/`if` blocks inside a single
+  // eval_python call — Round-5 verified this end-to-end by hand
+  // (`def factorial(n): ...; factorial(5) → 120`). The escape rule we apply
+  // (only double single quotes) lets newlines pass through verbatim, which
+  // is what Smalltalk wants: real LFs inside a string literal are valid and
+  // round-trip as themselves. The regression class this guards against is a
+  // future "improvement" to escapeString that converts `\n` into the
+  // two-character sequence `\` + `n` (which Smalltalk would not interpret
+  // as a newline — the Python source would then be received as one line and
+  // SyntaxError every time).
+  it('embeds multi-line Python source verbatim, with real newlines inside the literal', () => {
+    const exec = vi.fn<QueryExecutor>(() => '');
+    const source = 'def f(n):\n    return n * 2\nf(5)';
+    evalPython(exec, source);
+    const code = exec.mock.calls[0][1];
+
+    // The full multi-line body appears inside the Smalltalk string literal
+    // with its actual newlines preserved.
+    expect(code).toContain(`src := '${source}'.`);
+    // Negative guard: no backslash-escape mutation of the newline characters.
+    expect(code).not.toContain('def f(n):\\n');
+    // The query as a whole carries the embedded LFs through — the literal
+    // sits across multiple lines in the generated source.
+    expect(code.split('\n').length).toBeGreaterThanOrEqual(source.split('\n').length);
   });
 });
