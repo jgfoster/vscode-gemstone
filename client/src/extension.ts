@@ -17,7 +17,6 @@ import { SessionTreeProvider, GemStoneSessionItem } from './sessionTreeProvider'
 import { CodeExecutor } from './codeExecutor';
 import { SystemBrowser } from './systemBrowser';
 import { GlobalsBrowser } from './globalsBrowser';
-import { ClassBrowser } from './classBrowser';
 import { GemStoneFileSystemProvider } from './gemstoneFileSystemProvider';
 import { openWorkspace } from './workspace';
 import { GemStoneDebugSession } from './gemstoneDebugSession';
@@ -643,7 +642,6 @@ export function activate(context: vscode.ExtensionContext) {
       exportManager.deleteSessionFiles(session);
       SystemBrowser.disposeForSession(session.id);
       GlobalsBrowser.disposeForSession(session.id);
-      ClassBrowser.disposeForSession(session.id);
       sessionManager.logout(session.id);
       sessionTreeProvider.refresh();
       inspectorProvider.removeSessionItems(session.id);
