@@ -113,7 +113,7 @@ describe('SUnit queries (live GCI)', () => {
       // round-2 "expected a primary expression" bug returns, the call
       // throws here.
       expect(() => runFailingTests(s.exec)).not.toThrow();
-    });
+    }, 120_000);
 
     // Round-5: duplicate (className, selector) pairs in the no-args
     // output. Root cause: an abstract TestCase's `suite` cascades into
@@ -133,7 +133,7 @@ describe('SUnit queries (live GCI)', () => {
       }
       const dupes = [...counts.entries()].filter(([, n]) => n > 1);
       expect(dupes).toEqual([]);
-    });
+    }, 120_000);
   });
 
   describe('describeTestFailure', () => {

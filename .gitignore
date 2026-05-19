@@ -7,3 +7,4 @@ out/
 .vscode/settings.json
 gemstone
 tsconfig.tsbuildinfo
+.gemstone
