@@ -154,11 +154,11 @@ export class SysadminStorage {
     return { version, stoneName, ldiName, baseExtent };
   }
 
-  /** Get the next available db-N number */
-  getNextDbNumber(): number {
-    const rootPath = this.getRootPath();
+  /** Get the next available db-N number within the given directory */
+  getNextDbNumber(parentDir?: string): number {
+    const dir = parentDir || this.getRootPath();
     let i = 1;
-    while (wslExistsSync(path.join(rootPath, `db-${i}`))) {
+    while (wslExistsSync(path.join(dir, `db-${i}`))) {
       i++;
     }
     return i;
