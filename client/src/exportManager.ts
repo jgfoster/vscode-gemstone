@@ -8,7 +8,7 @@ import * as queries from './browserQueries';
  * Manages exporting GemStone classes to local .gs files in Topaz file-out format.
  *
  * Default file structure:
- *   {workspaceRoot}/gemstone/{session}/{index}-{dictName}/{ClassName}.gs
+ *   {workspaceRoot}/.gemstone/{session}/{index}-{dictName}/{ClassName}.gs
  *
  * The `gemstone.exportPath` setting supports variables:
  *   {workspaceRoot}, {session}, {host}, {stone}, {user}, {index}, {dictName}
@@ -63,9 +63,9 @@ export class ExportManager {
       return resolved;
     }
 
-    // Default: {workspaceRoot}/gemstone/{session}/{index}-{dictName}
+    // Default: {workspaceRoot}/.gemstone/{session}/{index}-{dictName}
     if (!wsRoot) return undefined;
-    return path.join(wsRoot, 'gemstone', sessionId, '{index}-{dictName}');
+    return path.join(wsRoot, '.gemstone', sessionId, '{index}-{dictName}');
   }
 
   /**
@@ -222,7 +222,7 @@ export class ExportManager {
 
     this.exportedFiles.delete(session.id);
 
-    // Remove parent directory if empty (e.g., the 'gemstone' dir)
+    // Remove parent directory if empty (e.g., the '.gemstone' dir)
     const parent = path.dirname(sessionRoot);
     try {
       const remaining = fs.readdirSync(parent);

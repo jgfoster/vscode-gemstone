@@ -8,6 +8,12 @@ interface CodeLensData {
   selector: string;
   className?: string;
   isMeta: boolean;
+  // Each method contributes two lenses on the same line: one for senders,
+  // one for implementors. Keeping them as separate CodeLens objects (rather
+  // than one lens with a combined "N senders | M implementors" title that
+  // dispatches to senders only) gives the user two clickable links — one
+  // per concept — and lets each link compute only its own count.
+  kind: 'senders' | 'implementors';
 }
 
 export class GemStoneCodeLensProvider implements vscode.CodeLensProvider {
@@ -45,13 +51,8 @@ export class GemStoneCodeLensProvider implements vscode.CodeLensProvider {
         new vscode.Position(region.startLine, 0),
         new vscode.Position(region.startLine, 0),
       );
-      const lens = new vscode.CodeLens(range);
-      this.codeLensData.set(lens, {
-        selector,
-        className: region.className,
-        isMeta: region.command === 'classmethod',
-      });
-      lenses.push(lens);
+      const isMeta = region.command === 'classmethod';
+      lenses.push(...this.makeMethodLenses(range, selector, region.className, isMeta));
     }
 
     return lenses;
@@ -73,15 +74,31 @@ export class GemStoneCodeLensProvider implements vscode.CodeLensProvider {
           new vscode.Position(0, 0),
           new vscode.Position(0, 0),
         );
-        const lens = new vscode.CodeLens(range);
-        this.codeLensData.set(lens, { selector, className, isMeta });
-        lenses.push(lens);
+        lenses.push(...this.makeMethodLenses(range, selector, className, isMeta));
       }
     } catch {
       // URI parse error — skip
     }
 
     return lenses;
+  }
+
+  // Emit the senders + implementors pair on the same range, in that order.
+  // VS Code preserves insertion order on a given range, so the user always
+  // sees senders to the left of implementors.
+  private makeMethodLenses(
+    range: vscode.Range,
+    selector: string,
+    className: string | undefined,
+    isMeta: boolean,
+  ): vscode.CodeLens[] {
+    const out: vscode.CodeLens[] = [];
+    for (const kind of ['senders', 'implementors'] as const) {
+      const lens = new vscode.CodeLens(range);
+      this.codeLensData.set(lens, { selector, className, isMeta, kind });
+      out.push(lens);
+    }
+    return out;
   }
 
   resolveCodeLens(codeLens: vscode.CodeLens): vscode.CodeLens {
@@ -101,24 +118,29 @@ export class GemStoneCodeLensProvider implements vscode.CodeLensProvider {
       const maxEnv = vscode.workspace.getConfiguration('gemstone')
         .get<number>('maxEnvironment', 0);
 
-      let senderCount = 0;
-      let implementorCount = 0;
-
+      // Each lens computes only its own count. Half the GCI work per lens
+      // compared to the old combined link, so total work for the pair is
+      // unchanged from the user's perspective.
+      let count = 0;
       for (let env = 0; env <= maxEnv; env++) {
         try {
-          senderCount += queries.sendersOf(session, data.selector, env).length;
-          implementorCount += queries.implementorsOf(session, data.selector, env).length;
+          count += data.kind === 'senders'
+            ? queries.sendersOf(session, data.selector, env).length
+            : queries.implementorsOf(session, data.selector, env).length;
         } catch {
           // Session may be busy or selector not found in this env
         }
       }
 
-      const sLabel = senderCount === 1 ? '1 sender' : `${senderCount} senders`;
-      const iLabel = implementorCount === 1 ? '1 implementor' : `${implementorCount} implementors`;
+      const noun = data.kind === 'senders' ? 'sender' : 'implementor';
+      const title = count === 1 ? `1 ${noun}` : `${count} ${noun}s`;
+      const command = data.kind === 'senders'
+        ? 'gemstone.sendersOfSelector'
+        : 'gemstone.implementorsOfSelector';
 
       codeLens.command = {
-        title: `${sLabel} | ${iLabel}`,
-        command: 'gemstone.sendersOfSelector',
+        title,
+        command,
         arguments: [{ selector: data.selector, sessionId: session.id }],
       };
     } catch {

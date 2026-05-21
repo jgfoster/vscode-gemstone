@@ -43,10 +43,17 @@ vi.mock('../browserQueries', () => ({
 vi.mock('../sunitQueries', () => ({
   runTestMethod: vi.fn(() => ({ className: '', selector: '', status: 'passed', message: '', durationMs: 0 })),
   runTestClass: vi.fn(() => []),
+  runFailingTests: vi.fn(() => []),
+  discoverTestClasses: vi.fn(() => [] as Array<{ dictName: string; className: string }>),
+  describeTestFailure: vi.fn(() => ({ status: 'passed' })),
   SunitQueryError: class SunitQueryError extends Error {
     gciErrorNumber: number;
     constructor(msg: string, num = 0) { super(msg); this.gciErrorNumber = num; }
   },
+}));
+vi.mock('../pythonQueries', () => ({
+  evalPython: vi.fn(() => ''),
+  compilePython: vi.fn(() => ''),
 }));
 
 import * as net from 'net';
@@ -141,7 +148,7 @@ describe('McpSocketServer integration', () => {
     await server.dispose();
   });
 
-  it('lists the 27 registered tools over the socket', async () => {
+  it('lists the registered tools over the socket', async () => {
     const { client, socket } = await connectClient(server.socketPath);
     try {
       const { tools } = await client.listTools();
@@ -151,9 +158,12 @@ describe('McpSocketServer integration', () => {
         'commit',
         'compile_class_definition',
         'compile_method',
+        'compile_python',
         'delete_class',
         'delete_method',
         'describe_class',
+        'describe_test_failure',
+        'eval_python',
         'execute_code',
         'export_class_source',
         'find_implementors',
@@ -166,7 +176,10 @@ describe('McpSocketServer integration', () => {
         'list_classes',
         'list_dictionaries',
         'list_dictionary_entries',
+        'list_failing_tests',
         'list_methods',
+        'list_test_classes',
+        'refresh',
         'remove_dictionary',
         'run_test_class',
         'run_test_method',
@@ -260,4 +273,28 @@ describe('McpSocketServer integration', () => {
       socket.destroy();
     }
   });
+
+  // Verifies the actionable-error zod error map flows end-to-end: the SDK
+  // serializes zod issues into the JSON-RPC error response verbatim, so the
+  // installed custom map's text must reach the client untouched. Without
+  // this guard, a future SDK upgrade that started templating its own messages
+  // would silently regress the "Missing required parameter 'X'" phrasing
+  // back to the bare zod default.
+  it('routes a missing-parameter validation failure through the custom error map', async () => {
+    const { client, socket } = await connectClient(server.socketPath);
+    try {
+      const result = await client.callTool({
+        name: 'get_method_source',
+        arguments: { className: 'Array', selector: 'size' }, // isMeta omitted
+      });
+
+      const text = (result.content as Array<{ type: string; text: string }>)[0].text;
+      expect(text).toContain("Missing required parameter 'isMeta'");
+      expect(text).toContain('expected boolean');
+    } finally {
+      await client.close();
+      socket.destroy();
+    }
+  });
+
 });

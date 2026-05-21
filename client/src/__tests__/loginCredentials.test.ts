@@ -1,13 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const setPassword = vi.fn(() => Promise.resolve());
-const getPassword = vi.fn((_s: string, _a: string) => Promise.resolve(null as string | null));
-const deletePassword = vi.fn((_s: string, _a: string) => Promise.resolve(true));
-
-vi.mock('keytar', () => ({
-  default: { setPassword, getPassword, deletePassword },
-}));
-
 import {
   KEYCHAIN_SERVICE,
   loginCredentialAccount,
@@ -32,13 +24,20 @@ function makeLogin(overrides: Partial<GemStoneLogin> = {}): GemStoneLogin {
   };
 }
 
+function makeSecrets() {
+  return {
+    get: vi.fn(async (_k: string) => undefined as string | undefined),
+    store: vi.fn(async (_k: string, _v: string) => undefined),
+    delete: vi.fn(async (_k: string) => undefined),
+    onDidChange: vi.fn(),
+  };
+}
+
 describe('loginCredentials', () => {
+  let secrets: ReturnType<typeof makeSecrets>;
+
   beforeEach(() => {
-    setPassword.mockClear();
-    getPassword.mockClear();
-    deletePassword.mockClear();
-    getPassword.mockResolvedValue(null);
-    deletePassword.mockResolvedValue(true);
+    secrets = makeSecrets();
   });
 
   describe('KEYCHAIN_SERVICE', () => {
@@ -66,56 +65,53 @@ describe('loginCredentials', () => {
   });
 
   describe('setLoginPassword', () => {
-    it('stores under jasper-gemstone-login with the account identifier', async () => {
-      await setLoginPassword(makeLogin());
+    it('stores under a key namespaced by KEYCHAIN_SERVICE and the account identifier', async () => {
+      await setLoginPassword(secrets as any, makeLogin());
 
-      expect(setPassword).toHaveBeenCalledWith(
-        'jasper-gemstone-login',
-        'DataCurator@localhost/gs64stone',
+      expect(secrets.store).toHaveBeenCalledWith(
+        'jasper-gemstone-login:DataCurator@localhost/gs64stone',
         'swordfish',
       );
     });
   });
 
   describe('getLoginPassword', () => {
-    it('returns the stored password from the keychain', async () => {
-      getPassword.mockResolvedValue('stored-pw');
-      const pw = await getLoginPassword(makeLogin());
+    it('returns the stored password from SecretStorage', async () => {
+      secrets.get.mockResolvedValueOnce('stored-pw');
+      const pw = await getLoginPassword(secrets as any, makeLogin());
 
-      expect(getPassword).toHaveBeenCalledWith(
-        'jasper-gemstone-login',
-        'DataCurator@localhost/gs64stone',
+      expect(secrets.get).toHaveBeenCalledWith(
+        'jasper-gemstone-login:DataCurator@localhost/gs64stone',
       );
       expect(pw).toBe('stored-pw');
     });
 
     it('returns undefined when no password is stored', async () => {
-      getPassword.mockResolvedValue(null);
-      const pw = await getLoginPassword(makeLogin());
+      secrets.get.mockResolvedValueOnce(undefined);
+      const pw = await getLoginPassword(secrets as any, makeLogin());
       expect(pw).toBeUndefined();
     });
 
-    it('returns undefined when keytar throws', async () => {
-      getPassword.mockRejectedValueOnce(new Error('libsecret unavailable'));
-      const pw = await getLoginPassword(makeLogin());
+    it('returns undefined when SecretStorage throws', async () => {
+      secrets.get.mockRejectedValueOnce(new Error('SecretStorage unavailable'));
+      const pw = await getLoginPassword(secrets as any, makeLogin());
       expect(pw).toBeUndefined();
     });
   });
 
   describe('deleteLoginPassword', () => {
-    it('delegates to keytar.deletePassword and returns its result', async () => {
-      const ok = await deleteLoginPassword(makeLogin());
+    it('delegates to SecretStorage.delete and returns true on success', async () => {
+      const ok = await deleteLoginPassword(secrets as any, makeLogin());
 
-      expect(deletePassword).toHaveBeenCalledWith(
-        'jasper-gemstone-login',
-        'DataCurator@localhost/gs64stone',
+      expect(secrets.delete).toHaveBeenCalledWith(
+        'jasper-gemstone-login:DataCurator@localhost/gs64stone',
       );
       expect(ok).toBe(true);
     });
 
-    it('returns false when keytar throws', async () => {
-      deletePassword.mockRejectedValueOnce(new Error('no entry'));
-      const ok = await deleteLoginPassword(makeLogin());
+    it('returns false when SecretStorage throws', async () => {
+      secrets.delete.mockRejectedValueOnce(new Error('no entry'));
+      const ok = await deleteLoginPassword(secrets as any, makeLogin());
       expect(ok).toBe(false);
     });
   });

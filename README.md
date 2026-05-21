@@ -331,11 +331,33 @@ The Windows client distribution exports a subset of the full GCI interface — n
 
 ## Development
 
+### Setting up NVM and Node.js
+
+This project uses Node Version Manager (NVM) to ensure developers use a consistent Node.js version. The project includes a `.nvmrc` file that specifies the Node version to use.
+
+1. Install NVM (if not already installed): https://github.com/nvm-sh/nvm
+
+2. Run `nvm use` in the project root to activate the correct version.
+
+### Build and Development
+
 - Build: `npm run compile`
 - Watch: `npm run watch`
 - Test: `npm test`
 - Test GCI: `GCI_LIBRARY_PATH=/path/to/libgcits npm run test:gci`
 - Package: `npm run package`
+
+### Continuous Integration
+
+A GitHub Actions workflow (`branch-health.yml`) ensures branch health on all pushes and pull requests. It runs on both Ubuntu and macOS and performs:
+
+- Node.js version verification (using `.nvmrc`)
+- Dependency installation
+- TypeScript compilation for all packages (client, server, mcp-server)
+- Full test suite
+- Build artifact validation
+
+Before pushing changes, ensure `npm run compile && npm test` passes locally.
 
 ### Publishing
 

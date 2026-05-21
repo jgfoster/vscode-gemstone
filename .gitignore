@@ -9,3 +9,4 @@ out/
 gemstone
 .gemstone/
 tsconfig.tsbuildinfo
+.gemstone

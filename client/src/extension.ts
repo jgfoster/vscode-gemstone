@@ -17,7 +17,6 @@ import { SessionTreeProvider, GemStoneSessionItem } from './sessionTreeProvider'
 import { CodeExecutor } from './codeExecutor';
 import { SystemBrowser } from './systemBrowser';
 import { GlobalsBrowser } from './globalsBrowser';
-import { ClassBrowser } from './classBrowser';
 import { GemStoneFileSystemProvider } from './gemstoneFileSystemProvider';
 import { openWorkspace } from './workspace';
 import { GemStoneDebugSession } from './gemstoneDebugSession';
@@ -386,11 +385,11 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('gemstone.addLogin', () => {
-      LoginEditorPanel.show(storage, treeProvider, undefined, sysadminStorage);
+      LoginEditorPanel.show(storage, context.secrets, treeProvider, undefined, sysadminStorage);
     }),
 
     vscode.commands.registerCommand('gemstone.editLogin', (item: GemStoneLoginItem) => {
-      LoginEditorPanel.show(storage, treeProvider, item.login, sysadminStorage);
+      LoginEditorPanel.show(storage, context.secrets, treeProvider, item.login, sysadminStorage);
     }),
 
     vscode.commands.registerCommand('gemstone.deleteLogin', async (item: GemStoneLoginItem) => {
@@ -401,7 +400,7 @@ export function activate(context: vscode.ExtensionContext) {
       );
       if (confirmed === 'Delete') {
         if (item.login.password_in_keychain) {
-          await deleteLoginPassword(item.login);
+          await deleteLoginPassword(context.secrets, item.login);
         }
         await storage.deleteLogin(loginLabel(item.login));
         treeProvider.refresh();
@@ -410,7 +409,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand('gemstone.duplicateLogin', (item: GemStoneLoginItem) => {
       const copy = { ...item.login, label: '' };
-      LoginEditorPanel.show(storage, treeProvider, copy, sysadminStorage);
+      LoginEditorPanel.show(storage, context.secrets, treeProvider, copy, sysadminStorage);
     }),
 
     vscode.commands.registerCommand('gemstone.login', async (item: GemStoneLoginItem) => {
@@ -426,7 +425,7 @@ export function activate(context: vscode.ExtensionContext) {
       // If the login is configured to use the OS keychain, fetch the password
       // from there. Fall through to the prompt if the keychain entry is missing.
       if (login.password_in_keychain && !login.gs_password) {
-        const stored = await getLoginPassword(login);
+        const stored = await getLoginPassword(context.secrets, login);
         if (stored) {
           login.gs_password = stored;
         }
@@ -643,7 +642,6 @@ export function activate(context: vscode.ExtensionContext) {
       exportManager.deleteSessionFiles(session);
       SystemBrowser.disposeForSession(session.id);
       GlobalsBrowser.disposeForSession(session.id);
-      ClassBrowser.disposeForSession(session.id);
       sessionManager.logout(session.id);
       sessionTreeProvider.refresh();
       inspectorProvider.removeSessionItems(session.id);
@@ -1611,7 +1609,7 @@ export function activate(context: vscode.ExtensionContext) {
           }
         }
       }
-      LoginEditorPanel.show(storage, treeProvider, login, sysadminStorage);
+      LoginEditorPanel.show(storage, context.secrets, treeProvider, login, sysadminStorage);
     }),
 
     vscode.commands.registerCommand('gemstone.refreshProcesses', () => {

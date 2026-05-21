@@ -7,6 +7,13 @@
       "command": "npm run compile",
       "group": "build",
       "problemMatcher": ["$tsc"],
+      "osx": {
+        "options": {
+          "shell": {
+            "args": [ "-i" ]
+          }
+        }
+      },
       "windows": {
         "options": {
           "shell": {
@@ -23,6 +30,13 @@
       "isBackground": true,
       "group": "build",
       "problemMatcher": ["$tsc-watch"],
+      "osx": {
+        "options": {
+          "shell": {
+            "args": [ "-i" ]
+          }
+        }
+      },
       "windows": {
         "options": {
           "shell": {

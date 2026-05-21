@@ -4,6 +4,77 @@ All notable changes to the **GemStone Smalltalk** extension will be documented i
 
 ## [Unreleased]
 
+### Added
+
+- **Regression guards for the two thinnest spots in the MCP shared-query test suite**, prompted by external feedback from a downstream Grail (GemStone-Python) project that uses Jasper's MCP server as its primary edit-test surface:
+  - Multi-line `eval_python` input now has a round-trip test in `structuredQueries.test.ts` that confirms a `def`/multi-line Python source embeds verbatim into the Smalltalk `src := '...'.` literal with its real LFs preserved, and asserts no `\n`-escape mutation appears. Guards against a future "improvement" to `escapeString` that would convert newlines into `\` + `n` and SyntaxError every multi-line eval.
+  - `runFailingTests`'s `MAX_MSG = 1024` per-message cap now has a *mechanism* test in addition to the existing magic-number assertion: the full `s copyFrom: 1 to: (s size min: 1024)` slice form is pinned (a bare `min:` returns the integer size — no trim would happen), and the clip is positioned before the outer `ws contents encodeAsUTF8` so 1024 remains a character-count budget rather than a byte-count budget.
+
+## [1.4.4] - 2026-05-11
+
+### Changed
+
+- **Login passwords now use VS Code's `SecretStorage` API** instead of `keytar`. SecretStorage delegates to the same OS keychains keytar did (macOS Keychain, Windows Credential Manager, Linux libsecret) but ships with VS Code itself, so there is no native binary to bundle and no per-platform prebuild matrix to maintain. Side benefits: cross-platform credential storage that actually works in published builds (the keytar binding wasn't shipping at all in 1.4.x VSIXs — saved login passwords would have failed silently with `Cannot find module 'keytar'`), VSIX size dropped, and the `node_modules/keytar/**` re-include is gone from `.vscodeignore`. Storage key changed from keytar's `(service, account)` pair to a single namespaced key `jasper-gemstone-login:${user}@${host}/${stone}`; users with keychain-backed logins from prior installs will be re-prompted for their password once and the new entry will be written into SecretStorage.
+- **Tightened `.vscodeignore`** so the published VSIX only contains the three esbuild bundles plus runtime assets (48 files, down from 904). Per-file `tsc` outputs in `*/out/`, `mcp-server/node_modules/**`, `.claude/`, `*.tsbuildinfo`, `TODO.md`, and koffi's vendor/source/doc trees are no longer shipped.
+- **Multi-marketplace publishing.** `npm run publish` now publishes to both the Visual Studio Marketplace (`vsce publish`) and Open VSX (`ovsx publish`), so the extension is available to users of VSCodium, Gitpod, code-server, and other non-Microsoft VS Code distributions. Individual targets are also exposed as `npm run publish:vsce` and `npm run publish:ovsx`.
+
+## [1.4.3] - 2026-04-29
+
+### Added
+
+- **Hidden-prefix class export directory** — exports default to `{workspaceRoot}/.gemstone/{session}/{index}-{dictName}` (was `{workspaceRoot}/gemstone/...`). The dot-prefix keeps it out of the way in file listings while remaining browseable in VS Code's Explorer, Quick Open, and Find in Files. Users with an existing `gemstone/` directory can either delete it or pin the prior layout via the `gemstone.exportPath` setting (e.g. `{workspaceRoot}/gemstone/{session}/{index}-{dictName}`).
+- **GCI smoke-test harness** under `client/src/__tests__/gci/` (run via `npm run test:gci`, gated by `GCI_LIBRARY_PATH`). Runs each shared MCP query against a live stone, plus a curated selector probe that fails fast if any GemStone selector our queries hardcode goes missing. Skipped from the default `npm test` run; on the round it landed it caught the `sunitMatch:` / `match:` confusion the unit suite missed.
+
+### Changed
+
+- **`run_test_method` / `run_test_class` message column now carries the actual exception** (`MessageNotUnderstood: nil does not understand #foo`) instead of the SUnit debug recipe (`ClassTestCase debug: #testFoo`). Bypasses `TestCase>>run` and replicates `setUp` / `perform` / `tearDown` with our own `AbstractException` handler — same pattern `describe_test_failure` uses, now applied to the iterating runners.
+- **`list_failing_tests` `classNamePattern` glob primitive** is now `CharacterCollection >> matchPattern:` (the public, base-class glob — works in any session) with a JS-side glob → Array parser. Agent-supplied globs like `Bytes*TestCase` are translated to the literal Array form `#('Bytes' $* 'TestCase')` server-side. Replaces an earlier `sunitMatch:` attempt that only existed when SUnit was loaded.
+- **System Browser senders/implementors CodeLens split into two independent links.** The `N senders | M implementors` header row was a single `CodeLens` whose entire title was clickable but dispatched only to the senders view — half the displayed information was unreachable. Now emits a senders+implementors pair per method, matching the VS Code convention (TypeScript ships `X references | Y implementations` the same way). Each lens computes only its own count and dispatches to its own command (`gemstone.sendersOfSelector` / `gemstone.implementorsOfSelector`).
+- **Single class-selection code path in the System Browser.** A hierarchy-view click and an external Implementors-of / Senders-of jump previously updated the column-list state inline without refreshing the Class Definition panel, leaving the right-hand definition stale relative to the column-list selection. Both paths now route through a shared `applyClassSelection` helper alongside the regular column click and the find-class quick-pick.
+
+### Fixed
+
+- **System Browser hierarchy view rendered superclasses in reverse.** `ClassOrganizer >> allSuperclassesOf:` returns root-first (`[Object, Collection, ...]`), but the query then sent `reverseDo:` to that collection — Object ended up at the deepest indent and the immediate parent appeared at indent 0. Replaced with `do:` so the order is root-first.
+- **`list_failing_tests` no-args produced duplicate rows.** An SUnit abstract `TestCase`'s `suite` cascades into its concrete subclasses' suites, so when the discover-all walk also enumerated those leaves directly, every test under an abstract parent ran twice (45 duplicate `(className, selector)` pairs out of 99 unique on the probe stone). The discover-all walk now filters with `v isAbstract not`; explicit `classNames` / `classNamePattern` paths still let an agent target an abstract parent on purpose for the cascaded run.
+- **`Utf8` was misidentified as an internal-storage class** in the 1.4.2 fix for the `eval_python` UTF-16 leak. `Utf8` is the *transfer protocol* — variable-byte, no character indexing, `at:put:` and `copyFrom:to:` undefined. `WriteStream on: Utf8 new` raised `rtErrShouldNotImplement` on buffer growth, breaking every error path on `eval_python` / `compile_python` and the entire output of `list_failing_tests`. The right model is to build internally in `Unicode7` (which transparently widens to `Unicode16` / `Unicode32` for non-ASCII codepoints), then call `encodeAsUTF8` once at the boundary to produce the transfer bytes — lossless, and consistent with GemStone's storage/transfer split.
+
+## [1.4.2] - 2026-04-28
+
+### Added
+
+- **`list_failing_tests` `classNamePattern` parameter** — glob-filter discovered TestCase subclasses (`*` = any chars, `#` = one char) before running. E.g. `classNamePattern: "Bytes*TestCase"` runs every `Bytes*TestCase` in one round-trip. Composes with the existing `classNames` array (explicit names still win).
+- **`list_failing_tests` message column now carries actual exception details** — `MessageNotUnderstood: nil does not understand #foo` instead of the SUnit debug recipe `ClassTestCase debug: #testFoo`. Each failing/erroring test is re-run with its own `AbstractException` handler to capture the live exception's `messageText`. Iteration stays in Smalltalk so it's still one GCI round-trip.
+
+### Changed
+
+- **`find_implementors` / `find_senders` / `find_references_to` auto-fall-back to env 1** when no `environmentId` is given and env 0 returns empty. Projects whose user code lives in env 1 (notably GemStone-Python) no longer get a misleading "no implementors found" when the method exists. Pass `environmentId` explicitly to limit to one environment.
+
+### Fixed
+
+- **UTF-16LE leak in `eval_python` / `compile_python` error returns.** Grail-side compile/runtime errors came back as `"E r r o r :   M e s s a g e N o t U n d e r s t o o d ..."` — `messageText` returns `Unicode16` for system errors, `, ` concatenation widened the result to Unicode16, and GCI's `Utf8`-class fetch forwarded the UTF-16LE bytes raw. The error string is now built through a `WriteStream on: Utf8 new`, which forces transcoding on write.
+- **`list_failing_tests` with no arguments raised `CompileError 1001`.** The `DISCOVER_ALL_TEST_CLASSES` Smalltalk fragment had its own `| sl seen list |` temps, which can't appear inside `classes := <expr>`. The fragment is now wrapped as `[| sl seen list | ...] value` so it's a valid expression in any position.
+
+## [1.4.1] - 2026-04-27
+
+### Added
+
+- **MCP `refresh` tool** — explicitly refresh the session's view of committed state (aborts only when no uncommitted changes are pending). Closes the silent-stale gap where the GCI pinned a session's read view to its transaction snapshot, so commits landed by another process (e.g. `install.sh`) were invisible until the session aborted or committed.
+- **MCP `list_failing_tests` tool** — runs SUnit tests and returns only the failed/errored entries. Optional `classNames` filter for targeted subsets (otherwise discovers every TestCase subclass in the symbolList). Iteration runs in Smalltalk so an N-class invocation is one GCI round-trip.
+- **MCP `list_test_classes` tool** — discovery primitive for filtering before `list_failing_tests`.
+- **MCP `describe_test_failure` tool** — re-runs a single test with its own `AbstractException` handler (bypasses `TestCase>>run`, which would swallow the exception) and returns structured details: `exceptionClass`, GemStone `errorNumber`, clean `messageText`, `description`, plus `mnuReceiver` / `mnuSelector` for `MessageNotUnderstood`. Includes a multi-line `stackReport` when stack capture is supported (gem-level `GemExceptionSignalCapturesStack` is toggled around the run and restored via `ensure:`).
+- **MCP `eval_python` and `compile_python` tools** — compile/transpile/execute Python source via Grail (GemStone-Python). Register unconditionally; gracefully report "Grail not detected" via runtime `objectNamed:` lookup when Grail isn't loaded. Grail-side compile and runtime errors are reported inline as `Error: <class> — <messageText>`.
+
+### Changed
+
+- **`status`, `run_test_class`, `run_test_method`, `list_failing_tests`, `describe_test_failure` auto-refresh-if-clean** before reading. Discards the stale-pinned view when (and only when) no uncommitted work is pending. `status` reports the new view state on a `View:` line.
+- **`execute_code` accepts multi-statement bodies** — wrapped as `[<code>] value printString` so `| x | x := 42. x + 1` parses. Previously errored with "expected start of a statement" because the wrapper only accepted a single expression.
+- **`find_implementors` / `find_senders` / `find_references_to` empty-result message hints at env 1** — projects whose user code lives in `environmentId: 1` (notably GemStone-Python) were getting a bare "No implementors found" that was easy to misread as "doesn't exist."
+- **MCP tool validator errors name the offending parameter** — replaces zod's bare `"Invalid input: expected boolean, received undefined"` with `"Missing required parameter 'isMeta' (expected boolean)."` and `"Parameter 'isMeta' must be boolean, but received string."`. Implemented as a per-schema error map (a global one breaks the SDK's discriminated-union JSON-RPC parsing).
+
+### Fixed
+
+- **`runTestClass` / `runFailingTests` were sending `each testCase class name` to objects that don't respond to `#testCase`** — the items in `result failures` and `result errors` are TestCase instances themselves with only a `testSelector` ivar, not wrapper objects. On a real failure the queries would silently DNU; tests mocked the output so it wasn't caught. Now uses `each class name` / `each selector`, matching the `passed` branch.
+
 ## [1.4.0] - 2026-04-26
 
 ### Added

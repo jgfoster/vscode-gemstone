@@ -102,7 +102,17 @@ describe('ExportManager', () => {
     it('returns {exportRoot}/{session}', () => {
       const session = createMockSession();
       const root = manager.getSessionRoot(session);
-      expect(root).toBe(path.join(tmpDir, 'gemstone', '1'));
+      expect(root).toBe(path.join(tmpDir, '.gemstone', '1'));
+    });
+
+    it('uses a hidden dot-prefixed default directory', () => {
+      const session = createMockSession();
+      const root = manager.getSessionRoot(session)!;
+      // The first segment under workspace root should be '.gemstone' (hidden)
+      const relative = path.relative(tmpDir, root);
+      const firstSegment = relative.split(path.sep)[0];
+      expect(firstSegment).toBe('.gemstone');
+      expect(firstSegment.startsWith('.')).toBe(true);
     });
   });
 
@@ -393,7 +403,7 @@ describe('ExportManager', () => {
     it('getResolvedTemplate uses default when exportPath is empty', () => {
       const session = createMockSession();
       const template = manager.getResolvedTemplate(session);
-      expect(template).toBe(path.join(tmpDir, 'gemstone', '1', '{index}-{dictName}'));
+      expect(template).toBe(path.join(tmpDir, '.gemstone', '1', '{index}-{dictName}'));
     });
 
     it('getResolvedTemplate uses custom exportPath with variable substitution', () => {
@@ -561,6 +571,11 @@ describe('ExportManager', () => {
       for (const v of allVars) {
         expect(desc).toContain(v);
       }
+    });
+
+    it('gemstone.exportPath documents the hidden .gemstone default', () => {
+      const desc = properties['gemstone.exportPath'].description;
+      expect(desc).toContain('.gemstone');
     });
   });
 });

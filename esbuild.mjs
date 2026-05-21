@@ -16,7 +16,7 @@ await esbuild.build({
   outfile: 'client/out/extension.js',
   platform: 'node',
   format: 'cjs',
-  external: ['vscode', 'koffi', 'keytar'],
+  external: ['vscode', 'koffi'],
   sourcemap: true,
 });
 
@@ -26,6 +26,6 @@ await esbuild.build({
   outfile: 'mcp-server/out/index.js',
   platform: 'node',
   format: 'cjs',
-  external: ['koffi', 'keytar'],
+  external: ['koffi'],
   sourcemap: true,
 });
