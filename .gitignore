@@ -5,6 +5,8 @@ out/
 .vscode-test/
 .claude/
 .vscode/settings.json
+.vscode/extensions.json
 gemstone
+.gemstone/
 tsconfig.tsbuildinfo
 .gemstone

@@ -64,7 +64,9 @@ describe('McpSession', () => {
 
   beforeEach(() => {
     mockGci = createMockGci();
-    vi.mocked(GciLibrary).mockImplementation(() => mockGci as unknown as GciLibrary);
+    vi.mocked(GciLibrary).mockImplementation(function (this: unknown) {
+      return mockGci as unknown as GciLibrary;
+    } as unknown as new (...args: ConstructorParameters<typeof GciLibrary>) => GciLibrary);
   });
 
   describe('constructor', () => {

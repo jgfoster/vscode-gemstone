@@ -69,12 +69,101 @@ export class DatabaseManager {
     });
     if (!ldiName) return undefined;
 
+    // NFS check — only on the first database to avoid re-prompting experienced users
+    let effectiveParentDir: string | undefined;
+    let allowNfsExtents = false;
+
+    if (this.storage.getDatabases().length === 0) {
+      const rootPath = this.storage.getRootPath();
+      const checkPath = needsWsl() ? this.storage.getWslRootPath() : rootPath;
+      const fsType = this.detectFilesystem(checkPath);
+      appendSysadmin(`NFS check: path=${checkPath}, fsType=${fsType ?? '(not detected)'}`);
+      if (fsType && /^nfs/i.test(fsType)) {
+        const choice = await vscode.window.showWarningMessage(
+          `GemStone root path is on NFS — database will not start by default`,
+          {
+            modal: true,
+            detail:
+              `Your root path (${rootPath}) is on a network filesystem (${fsType}). ` +
+              `GemStone databases lock their extent files in a way that is incompatible with NFS by default — ` +
+              `a database created here will fail to start.\n\n` +
+              `• "Use a local directory" — select a folder on a local disk. Jasper will create the database ` +
+              `there and save it as your new default root path.\n\n` +
+              `• "Continue on NFS" — create the database here and automatically add ` +
+              `STN_ALLOW_NFS_EXTENTS = TRUE to system.conf, which overrides the restriction. ` +
+              `The database will start, but NFS locking may reduce reliability and performance.`,
+          },
+          'Use a local directory',
+          'Continue on NFS',
+        );
+        if (choice === undefined) return undefined;
+
+        if (choice === 'Use a local directory') {
+          const folderResult = await vscode.window.showOpenDialog({
+            canSelectFolders: true,
+            canSelectFiles: false,
+            canSelectMany: false,
+            openLabel: 'Use This Folder',
+            title: 'Select a local disk folder for this GemStone database',
+          });
+          if (!folderResult?.[0]) { appendSysadmin('NFS check: folder picker cancelled'); return undefined; }
+          effectiveParentDir = folderResult[0].fsPath;
+          appendSysadmin(`NFS check: local directory selected: ${effectiveParentDir}`);
+        } else {
+          allowNfsExtents = true;
+        }
+      }
+    }
+
     // Create directory structure
     return vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Creating GemStone database...' },
       async (progress) => {
         try {
-          return await this.createDatabaseDirect(version, baseExtent, stoneName, ldiName, progress);
+          appendSysadmin(`createDatabase: parentDir=${effectiveParentDir ?? '(rootPath)'}, allowNfsExtents=${allowNfsExtents}`);
+          const db = await this.createDatabaseDirect(
+            version, baseExtent, stoneName, ldiName, progress, effectiveParentDir, allowNfsExtents,
+          );
+
+          if (effectiveParentDir) {
+            // Update rootPath after creation so version lookup used the old path during creation
+            await vscode.workspace.getConfiguration('gemstone').update(
+              'rootPath', effectiveParentDir, vscode.ConfigurationTarget.Global,
+            );
+            vscode.window.showInformationMessage(
+              `Database created at ${effectiveParentDir}. ` +
+              `Your GemStone root path setting has been updated to this location — ` +
+              `new databases and version downloads will go here by default. ` +
+              `To change it, open Preferences › Settings and search for "GemStone: Root Path".`,
+              'Open Settings',
+            ).then(btn => {
+              if (btn === 'Open Settings') {
+                vscode.commands.executeCommand('workbench.action.openSettings', 'gemstone.rootPath');
+              }
+            });
+          }
+
+          if (allowNfsExtents) {
+            const systemConfPath = path.join(db.path, 'conf', 'system.conf');
+            vscode.window.showInformationMessage(
+              `Database created on NFS. ` +
+              `STN_ALLOW_NFS_EXTENTS = TRUE was added to system.conf so the database can start on a network filesystem. ` +
+              `You can view that file using the button below. ` +
+              `To store future databases on local disk instead, open Preferences › Settings ` +
+              `and search for "GemStone: Root Path".`,
+              'Open system.conf',
+              'Open Settings',
+            ).then(btn => {
+              if (btn === 'Open system.conf') {
+                vscode.workspace.openTextDocument(systemConfPath)
+                  .then(doc => vscode.window.showTextDocument(doc));
+              } else if (btn === 'Open Settings') {
+                vscode.commands.executeCommand('workbench.action.openSettings', 'gemstone.rootPath');
+              }
+            });
+          }
+
+          return db;
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           appendSysadmin(`createDatabase failed: ${msg}`);
@@ -92,10 +181,13 @@ export class DatabaseManager {
     stoneName: string,
     ldiName: string,
     progress?: vscode.Progress<{ message?: string }>,
+    parentDir?: string,
+    allowNfsExtents?: boolean,
   ): Promise<GemStoneDatabase> {
     this.storage.ensureRootPath();
-    const dbNum = this.storage.getNextDbNumber();
-    const dbDir = path.join(this.storage.getRootPath(), `db-${dbNum}`);
+    const actualParent = parentDir || this.storage.getRootPath();
+    const dbNum = this.storage.getNextDbNumber(actualParent);
+    const dbDir = path.join(actualParent, `db-${dbNum}`);
 
     progress?.report({ message: 'Creating directories...' });
     wslMkdirSync(dbDir);
@@ -137,7 +229,8 @@ export class DatabaseManager {
       `DBF_EXTENT_NAMES = "${confPath}/data/extent0.dbf";\n` +
       `STN_TRAN_FULL_LOGGING = TRUE;\n` +
       `STN_TRAN_LOG_DIRECTORIES = "${confPath}/data/";\n` +
-      `STN_TRAN_LOG_SIZES = 1000;\n`);
+      `STN_TRAN_LOG_SIZES = 1000;\n` +
+      (allowNfsExtents ? `STN_ALLOW_NFS_EXTENTS = TRUE;\n` : ''));
 
     progress?.report({ message: 'Copying key file...' });
     const gsPath = this.storage.getGemstonePath(version)!;
@@ -258,5 +351,16 @@ export class DatabaseManager {
         return true;
       },
     );
+  }
+
+  private detectFilesystem(linuxPath: string): string | undefined {
+    try {
+      const out = wslExecSync(
+        `findmnt -n -o FSTYPE --target "${linuxPath}" 2>/dev/null`,
+      ).trim();
+      return out || undefined;
+    } catch {
+      return undefined;
+    }
   }
 }
